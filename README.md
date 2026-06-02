@@ -1,4 +1,4 @@
-# Strategic Market Engine
+# Vector-Core
 
 [![Live Demo](https://img.shields.io/badge/Live_Demo-strategic--market--engine.vercel.app-007acc)](https://strategic-market-engine.vercel.app/)
 
