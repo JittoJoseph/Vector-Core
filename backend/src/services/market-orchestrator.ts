@@ -171,7 +171,7 @@ export class MarketOrchestrator extends EventEmitter {
   getLiveMarkets() {
     const now = Date.now();
     return Array.from(this.trackedMarkets.values())
-      .sort((a, b) => a.deadline.getTime() - b.deadline.getTime())
+      .sort((a, b) => new Date(a.deadline).getTime() - new Date(b.deadline).getTime())
       .map((m) => ({
         marketId: m.marketId,
         eventId: m.eventId,
@@ -179,7 +179,7 @@ export class MarketOrchestrator extends EventEmitter {
         eventTitle: m.eventTitle,
         question: m.question,
         slug: m.slug,
-        deadline: m.deadline.toISOString(),
+        deadline: new Date(m.deadline).toISOString(),
         deadlineDate: m.deadlineDate,
         yesTokenId: m.yesTokenId,
         noTokenId: m.noTokenId,
@@ -187,7 +187,7 @@ export class MarketOrchestrator extends EventEmitter {
         prices: { ...m.lastPrices },
         status: m.resolved
           ? "RESOLVED"
-          : m.deadline.getTime() <= now
+          : new Date(m.deadline).getTime() <= now
             ? "PAST_DEADLINE"
             : "ACTIVE",
         hasPosition: Array.from(this.openPositions.values()).some(
@@ -461,7 +461,7 @@ export class MarketOrchestrator extends EventEmitter {
       .limit(100);
 
     for (const market of rows) {
-      if (market.deadline.getTime() > maxDeadline.getTime()) continue;
+      if (new Date(market.deadline).getTime() > maxDeadline.getTime()) continue;
       if (this.openPositions.size >= config.strategy.maxSimultaneousPositions) break;
       if (this.inFlightTokens.has(market.noTokenId)) continue;
       if ([...this.openPositions.values()].some((p) => p.marketId === market.id)) continue;
@@ -604,7 +604,7 @@ export class MarketOrchestrator extends EventEmitter {
     expectedNetProfit?: number,
   ) {
     const db = getDb();
-    const days = (market.deadline.getTime() - Date.now()) / (24 * 60 * 60 * 1000);
+    const days = (new Date(market.deadline).getTime() - Date.now()) / (24 * 60 * 60 * 1000);
     await db.insert(schema.opportunities).values({
       marketId: market.id,
       eventId: market.eventId,
