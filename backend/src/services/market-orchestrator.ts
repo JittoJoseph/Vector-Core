@@ -291,9 +291,8 @@ export class MarketOrchestrator extends EventEmitter {
     const config = getConfig();
     this.cycleCount++;
     let cursor: string | null = null;
-    const events: GammaEvent[] = [];
-
     for (let page = 0; page < config.strategy.discoveryPages; page++) {
+      if (this.paused) break;
       const result = await this.client.listEventsKeyset({
         limit: 100,
         after_cursor: cursor ?? undefined,
@@ -302,37 +301,38 @@ export class MarketOrchestrator extends EventEmitter {
         order: "volume24hr",
         ascending: false,
       });
-      events.push(...result.events);
+      
+      const pageEvents = result.events;
+      if (pageEvents.length > 0) {
+        const db = getDb();
+        const eventIds = pageEvents.map((e) => String(e.id));
+        
+        // Pre-fetch the latest updated_at from DB for all discovered events in one query
+        const existing = await db
+          .select({
+            id: schema.eventFamilies.id,
+            updatedAt: sql<string>`${schema.eventFamilies.raw}->>'updatedAt'`,
+          })
+          .from(schema.eventFamilies)
+          .where(inArray(schema.eventFamilies.id, eventIds));
+          
+        const existingUpdates = new Map(existing.map((row) => [row.id, row.updatedAt]));
+        
+        // Filter out events that haven't changed since last scan
+        const changedEvents = pageEvents.filter((e) => {
+          const currentUpdatedAt = e.updatedAt ?? "";
+          const dbUpdatedAt = existingUpdates.get(String(e.id));
+          return dbUpdatedAt !== currentUpdatedAt;
+        });
+
+        for (const event of changedEvents) {
+          if (this.paused) break;
+          await this.persistClassifiedEvent(event);
+        }
+      }
+
       cursor = result.nextCursor;
       if (!cursor) break;
-    }
-
-    if (events.length > 0) {
-      const db = getDb();
-      const eventIds = events.map((e) => String(e.id));
-      
-      // Pre-fetch the latest updated_at from DB for all discovered events in one query
-      const existing = await db
-        .select({
-          id: schema.eventFamilies.id,
-          updatedAt: sql<string>`${schema.eventFamilies.raw}->>'updatedAt'`,
-        })
-        .from(schema.eventFamilies)
-        .where(inArray(schema.eventFamilies.id, eventIds));
-        
-      const existingUpdates = new Map(existing.map((row) => [row.id, row.updatedAt]));
-      
-      // Filter out events that haven't changed since last scan
-      const changedEvents = events.filter((e) => {
-        const currentUpdatedAt = e.updatedAt ?? "";
-        const dbUpdatedAt = existingUpdates.get(String(e.id));
-        return dbUpdatedAt !== currentUpdatedAt;
-      });
-
-      for (const event of changedEvents) {
-        if (this.paused) break;
-        await this.persistClassifiedEvent(event);
-      }
     }
 
     if (this.paused) return;
