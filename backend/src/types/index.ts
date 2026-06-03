@@ -14,6 +14,7 @@ export const ConfigSchema = z.object({
   }),
   portfolio: z.object({
     startingCapital: z.number().min(1).max(10_000_000),
+    allowNegativeBalance: z.boolean().default(true),
   }),
   strategy: z.object({
     scanIntervalMs: z.number().min(10_000),

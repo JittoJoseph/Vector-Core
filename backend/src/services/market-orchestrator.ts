@@ -1,5 +1,5 @@
 import { EventEmitter } from "events";
-import { and, desc, eq, gte, sql } from "drizzle-orm";
+import { and, desc, eq, gte, sql, inArray } from "drizzle-orm";
 import { createModuleLogger } from "../utils/logger.js";
 import { getConfig } from "../utils/config.js";
 import { getDb, createSimulatedTrade, loadOpenTradesWithMarkets, logAudit, resolveTrade } from "../db/client.js";
@@ -266,9 +266,43 @@ export class MarketOrchestrator extends EventEmitter {
       if (!cursor) break;
     }
 
-    for (const event of events) {
-      await this.persistClassifiedEvent(event);
+    if (events.length > 0) {
+      const db = getDb();
+      const eventIds = events.map((e) => String(e.id));
+      
+      // Pre-fetch the latest updated_at from DB for all discovered events in one query
+      const existing = await db
+        .select({
+          id: schema.eventFamilies.id,
+          updatedAt: sql<string>`${schema.eventFamilies.raw}->>'updatedAt'`,
+        })
+        .from(schema.eventFamilies)
+        .where(inArray(schema.eventFamilies.id, eventIds));
+        
+      const existingUpdates = new Map(existing.map((row) => [row.id, row.updatedAt]));
+      
+      // Filter out events that haven't changed since last scan
+      const changedEvents = events.filter((e) => {
+        const currentUpdatedAt = e.updatedAt ?? "";
+        const dbUpdatedAt = existingUpdates.get(String(e.id));
+        return dbUpdatedAt !== currentUpdatedAt;
+      });
+
+      for (const event of changedEvents) {
+        await this.persistClassifiedEvent(event);
+      }
     }
+
+    // Update real metrics from DB
+    const db = getDb();
+    const familiesCount = await db.select({ count: sql<number>`count(*)` }).from(schema.eventFamilies);
+    const marketsCount = await db
+      .select({ count: sql<number>`count(*)` })
+      .from(schema.deadlineMarkets)
+      .where(eq(schema.deadlineMarkets.classificationStatus, "candidate"));
+
+    this.candidateCount = familiesCount[0]?.count ?? 0;
+    this.discoveredCount = marketsCount[0]?.count ?? 0;
 
     await this.evaluateTradeCandidates();
     this.cleanupTrackedMarkets();
@@ -358,9 +392,6 @@ export class MarketOrchestrator extends EventEmitter {
           updatedAt: new Date(),
         },
       });
-
-    this.discoveredCount += classified.length;
-    this.candidateCount += classified.length;
 
     for (const item of classified) {
       await this.persistClassifiedMarket(item);

@@ -38,6 +38,7 @@ export function loadConfig(): Config {
     },
     portfolio: {
       startingCapital: envNum("STARTING_CAPITAL", 100),
+      allowNegativeBalance: envBool("ALLOW_NEGATIVE_BALANCE", true),
     },
     strategy: {
       scanIntervalMs: envNum("SCAN_INTERVAL_MS", 60_000),

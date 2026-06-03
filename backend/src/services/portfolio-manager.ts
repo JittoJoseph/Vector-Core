@@ -105,8 +105,8 @@ export class PortfolioManager {
     // Use whichever is larger: the equal-share slice or the minimum-shares cost
     const budget = Decimal.max(rawBudget, minBudget);
 
-    // If we can't even afford the minimum shares at worst-case price, skip
-    if (this.cashBalance.lt(minBudget)) {
+    // If we can't even afford the minimum shares at worst-case price, skip (unless negative allowed)
+    if (!config.portfolio.allowNegativeBalance && this.cashBalance.lt(minBudget)) {
       logger.warn(
         {
           cash: this.cashBalance.toString(),
@@ -119,7 +119,10 @@ export class PortfolioManager {
       return 0;
     }
 
-    // Don't spend more than available cash.
+    // Don't spend more than available cash unless negative balance is allowed.
+    if (config.portfolio.allowNegativeBalance) {
+      return budget.toDP(8).toNumber();
+    }
     const capped = Decimal.min(budget, this.cashBalance);
     return capped.toDP(8).toNumber();
   }
@@ -132,8 +135,9 @@ export class PortfolioManager {
    * computePositionBudget was called first, but defensive).
    */
   async deductCash(amount: number): Promise<boolean> {
+    const config = getConfig();
     const dec = new Decimal(amount);
-    if (dec.gt(this.cashBalance)) {
+    if (!config.portfolio.allowNegativeBalance && dec.gt(this.cashBalance)) {
       logger.error(
         { requested: dec.toString(), available: this.cashBalance.toString() },
         "Attempted to deduct more cash than available",
