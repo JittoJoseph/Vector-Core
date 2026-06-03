@@ -27,16 +27,16 @@ async function main(): Promise<void> {
     "Configuration loaded",
   );
 
-  // 2. Connect to database
-  await connectDatabase();
-
-  // 3. Start market orchestrator (event discovery + WS + execution)
-  const orchestrator = getMarketOrchestrator();
-  await orchestrator.start();
-
-  // 4. Start API server
+  // 2. Start API server immediately to satisfy Render's port detection
   const apiServer = getApiServer();
   await apiServer.start();
+
+  // 3. Connect to database
+  await connectDatabase();
+
+  // 4. Start market orchestrator (event discovery + WS + execution)
+  const orchestrator = getMarketOrchestrator();
+  await orchestrator.start();
 
   logger.info("All systems operational ✓");
 
