@@ -24,7 +24,6 @@ export interface PerformanceMetrics {
   largestWin: string;
   largestLoss: string;
   totalFees: string;
-  avgBtcDistance: string;
   openPositions: number;
   unrealizedPnl: string;
   /** Current cash balance from portfolio */
@@ -91,8 +90,6 @@ export async function calculatePortfolioPerformance(
   let lossPnlSum = new Decimal(0);
   let largestWin = new Decimal(0);
   let largestLoss = new Decimal(0);
-  let btcDistanceSum = new Decimal(0);
-  let btcDistanceCount = 0;
   let openPositions = 0;
   let unrealizedPnl = new Decimal(0);
 
@@ -129,10 +126,6 @@ export async function calculatePortfolioPerformance(
       }
     }
 
-    if (trade.btcDistanceUsd) {
-      btcDistanceSum = btcDistanceSum.plus(new Decimal(trade.btcDistanceUsd));
-      btcDistanceCount++;
-    }
   }
 
   const closedTrades = wins + losses;
@@ -152,11 +145,6 @@ export async function calculatePortfolioPerformance(
 
   const avgWin = wins > 0 ? winPnlSum.div(wins).toFixed(6) : "0";
   const avgLoss = losses > 0 ? lossPnlSum.div(losses).toFixed(6) : "0";
-  const avgBtcDistance =
-    btcDistanceCount > 0
-      ? btcDistanceSum.div(btcDistanceCount).toFixed(4)
-      : "0";
-
   return {
     period,
     totalPnl: totalPnl.toFixed(6),
@@ -171,7 +159,6 @@ export async function calculatePortfolioPerformance(
     largestWin: largestWin.toFixed(6),
     largestLoss: largestLoss.toFixed(6),
     totalFees: totalFees.toFixed(6),
-    avgBtcDistance,
     openPositions,
     unrealizedPnl: unrealizedPnl.toFixed(6),
     cashBalance: cashBalance.toFixed(2),

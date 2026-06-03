@@ -1,7 +1,6 @@
 import { createModuleLogger } from "./utils/logger.js";
 import { getConfig } from "./utils/config.js";
 import { connectDatabase } from "./db/client.js";
-import { getBtcPriceWatcher } from "./services/btc-price-watcher.js";
 import { getMarketOrchestrator } from "./services/market-orchestrator.js";
 import { getApiServer } from "./services/api-server.js";
 
@@ -9,24 +8,21 @@ const logger = createModuleLogger("main");
 
 async function main(): Promise<void> {
   logger.info("═══════════════════════════════════════════");
-  logger.info("  PenguinX BTC Analysis — v3.0");
-  logger.info("  End-of-Window Micro-Profit Strategy");
+  logger.info("  Vector Core — Explicit-Date Deadline Engine");
+  logger.info("  Polymarket NO-side Simulation");
   logger.info("═══════════════════════════════════════════");
 
   // 1. Load and validate configuration
   const config = getConfig();
   logger.info(
     {
-      window: config.strategy.marketWindow,
-      threshold: config.strategy.entryPriceThreshold,
-      maxEntryPrice: config.strategy.maxEntryPrice,
-      tradeWindowSec: config.strategy.tradeFromWindowSeconds,
+      deadlineLookaheadDays: config.strategy.deadlineLookaheadDays,
+      minNoEntryPrice: config.strategy.minNoEntryPrice,
+      maxNoEntryPrice: config.strategy.maxNoEntryPrice,
+      maxSpread: config.strategy.maxSpread,
+      minLiquidityNum: config.strategy.minLiquidityNum,
       startingCapital: config.portfolio.startingCapital,
       maxPositions: config.strategy.maxSimultaneousPositions,
-      minBtcDistance: config.strategy.minBtcDistanceUsd,
-      stopLoss: config.strategy.stopLossEnabled
-        ? config.strategy.stopLossPriceTrigger
-        : "disabled",
     },
     "Configuration loaded",
   );
@@ -34,16 +30,11 @@ async function main(): Promise<void> {
   // 2. Connect to database
   await connectDatabase();
 
-  // 3. Start BTC price watcher (RTDS WebSocket)
-  const btcWatcher = getBtcPriceWatcher();
-  btcWatcher.start();
-  logger.info("BTC price watcher started");
-
-  // 4. Start market orchestrator (scanner + WS + strategy + execution)
+  // 3. Start market orchestrator (event discovery + WS + execution)
   const orchestrator = getMarketOrchestrator();
   await orchestrator.start();
 
-  // 5. Start API server
+  // 4. Start API server
   const apiServer = getApiServer();
   await apiServer.start();
 
@@ -56,7 +47,6 @@ async function main(): Promise<void> {
     try {
       apiServer.stop();
       orchestrator.stop();
-      btcWatcher.stop();
     } catch (err) {
       logger.error({ err }, "Error during shutdown");
     }

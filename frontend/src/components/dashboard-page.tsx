@@ -1,1136 +1,345 @@
 "use client";
 
-import { useState, useCallback, useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Header } from "./header";
 import { SystemStatusIndicator } from "./system-status-indicator";
-import { TradesTable } from "./trades-table";
-import { TradeDetailPopup } from "./trade-detail-popup";
-import { MarketsPanel } from "./markets-panel";
-import { ActivityPanel } from "./activity-panel";
-import { MarketDetailModal } from "./market-detail-modal";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
-import { ExternalLink, X } from "lucide-react";
-import { pnlColor, formatPnl } from "@/lib/utils";
-import {
-  useTrades,
-  useSystemStats,
-  useActiveMarkets,
-  useWsConnection,
-  useWsEvent,
-  useLiveMarkets,
-  useCountdown,
-  usePerformanceRealtime,
-  useActivityLog,
-  useUnrealizedPnL,
-  useAnimatedNumber,
-} from "@/lib/hooks";
-import type {
-  SimulatedTrade,
-  DiscoveredMarket,
-  SystemStats,
-  LiveMarketInfo,
-  LiveMarketPrice,
-  ActivityEntry,
-} from "@/lib/types";
-import {
-  MARKET_WINDOW_LABELS,
-  getMarketWindowDurationMs,
-  type MarketWindow,
-} from "@/lib/types";
+import { getApiClient } from "@/lib/api-client";
+import { useLiveMarkets, useSystemStats, useTrades, useWsConnection } from "@/lib/hooks";
+import type { DiscoveredMarket, EventFamily, Opportunity, PortfolioState } from "@/lib/types";
+import { formatPnl, pnlColor } from "@/lib/utils";
+import { ExternalLink, RefreshCw } from "lucide-react";
+
+function n(value: string | number | null | undefined, digits = 2): string {
+  if (value == null) return "-";
+  const num = typeof value === "number" ? value : parseFloat(value);
+  if (!Number.isFinite(num)) return "-";
+  return num.toLocaleString("en-US", {
+    maximumFractionDigits: digits,
+    minimumFractionDigits: digits,
+  });
+}
+
+function daysTo(deadline: string): string {
+  const diff = new Date(deadline).getTime() - Date.now();
+  const days = diff / 86_400_000;
+  if (days < 0) return "past";
+  if (days < 1) return `${Math.max(0, Math.floor(diff / 3_600_000))}h`;
+  return `${days.toFixed(1)}d`;
+}
+
+function polyUrl(slug?: string | null): string {
+  return slug ? `https://polymarket.com/event/${slug}` : "https://polymarket.com";
+}
 
 export function DashboardPage() {
-  const [activeTab, setActiveTab] = useState("trades");
-  const [selectedTrade, setSelectedTrade] = useState<SimulatedTrade | null>(
-    null,
-  );
-  const [selectedMarket, setSelectedMarket] = useState<DiscoveredMarket | null>(
-    null,
-  );
-  const [btcPrice, setBtcPrice] = useState<{
-    price: number;
-    timestamp: number;
-  } | null>(null);
-  // Real-time momentum driven by btcPriceUpdate WS (falls back to stats on initial load)
-  const [momentum, setMomentum] = useState<{
-    direction: "UP" | "DOWN" | "NEUTRAL";
-    changeUsd: number;
-    lookbackMs: number;
-    hasData: boolean;
-  } | null>(null);
-
-  // Data hooks — trades are WS-driven; no polling
-  const {
-    trades,
-    loading: tradesLoading,
-    loadMore,
-    hasMore,
-    loadingMore,
-  } = useTrades();
+  const wsConnected = useWsConnection();
   const { stats, loading: statsLoading } = useSystemStats();
-  const {
-    markets,
-    loading: marketsLoading,
-    loadingMore: marketsLoadingMore,
-    hasMore: marketsHasMore,
-    refetch: refetchMarkets,
-    loadMore: loadMoreMarkets,
-  } = useActiveMarkets();
-  const { activities, loading: activitiesLoading } = useActivityLog();
-
-  // Real-time market state from WS
   const liveMarkets = useLiveMarkets();
-  useWsConnection();
+  const { trades, loading: tradesLoading } = useTrades();
+  const [families, setFamilies] = useState<EventFamily[]>([]);
+  const [markets, setMarkets] = useState<DiscoveredMarket[]>([]);
+  const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
+  const [portfolio, setPortfolio] = useState<PortfolioState | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
 
-  // BTC price + momentum from systemState WS broadcast
-  useWsEvent(
-    "btcPriceUpdate",
-    useCallback((msg: any) => {
-      const d = msg?.data;
-      if (d?.price && typeof d.price === "number") {
-        setBtcPrice({ price: d.price, timestamp: d.timestamp ?? Date.now() });
-      }
-      if (d?.momentum) {
-        setMomentum(d.momentum);
-      }
-    }, []),
-  );
-
-  // systemState: update markets, btcPrice fallback (btcPriceUpdate is faster but systemState seeds initial momentum)
-  useWsEvent(
-    "systemState",
-    useCallback(
-      (msg: any) => {
-        const d = msg?.data;
-        if (d?.btcPrice && typeof d.btcPrice === "object") {
-          setBtcPrice(d.btcPrice);
-        }
-        // Only seed momentum from systemState if we don't have a live value yet
-        if (d?.momentum && !momentum) {
-          setMomentum(d.momentum);
-        }
-      },
-      [momentum],
-    ),
-  );
-
-  // Primary live market: soonest-expiring ACTIVE window, or next UPCOMING if none open
-  const primaryMarket = useMemo(() => {
-    const byEnd = (a: { endDate: string }, b: { endDate: string }) =>
-      new Date(a.endDate).getTime() - new Date(b.endDate).getTime();
-    const active = liveMarkets.filter((m) => m.status === "ACTIVE").sort(byEnd);
-    if (active.length > 0) return active[0]!;
-    const upcoming = liveMarkets
-      .filter((m) => m.status === "UPCOMING")
-      .sort(byEnd);
-    return upcoming[0] ?? liveMarkets[0] ?? null;
-  }, [liveMarkets]);
-
-  // Markets pending resolution (ENDED but still has open position)
-  const positionMarkets = useMemo(
-    () => liveMarkets.filter((m) => m.status === "ENDED" && m.hasPosition),
-    [liveMarkets],
-  );
-
-  // Flat tokenId → price map for TradesTable real-time P&L
-  const livePricesMap = useMemo<Record<string, LiveMarketPrice>>(() => {
-    const map: Record<string, LiveMarketPrice> = {};
-    for (const m of liveMarkets) {
-      for (const [tokenId, price] of Object.entries(m.prices)) {
-        map[tokenId] = price;
-      }
+  const load = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      const api = getApiClient();
+      const [familyRows, marketRows, opportunityRows, portfolioState] =
+        await Promise.all([
+          api.getFamilies({ limit: 50 }),
+          api.getMarkets({ limit: 100 }),
+          api.getOpportunities({ limit: 100 }),
+          api.getPortfolio().catch(() => null),
+        ]);
+      setFamilies(familyRows);
+      setMarkets(marketRows);
+      setOpportunities(opportunityRows);
+      setPortfolio(portfolioState);
+    } finally {
+      setRefreshing(false);
     }
-    return map;
-  }, [liveMarkets]);
+  }, []);
 
-  // Fallback: if btcPriceAtWindowStart is null, use the entry price from the most recent open trade for this market
-  const btcPriceAtWindowStartFallback = useMemo(() => {
-    const marketId = primaryMarket?.marketId;
-    if (!marketId) return null;
-    const trade = trades.find(
-      (t) =>
-        t.marketId === marketId && t.status === "OPEN" && !!t.btcPriceAtEntry,
-    );
-    return trade?.btcPriceAtEntry ? parseFloat(trade.btcPriceAtEntry) : null;
-  }, [primaryMarket, trades]);
+  useEffect(() => {
+    load().catch(() => {});
+  }, [load]);
 
-  // marketId → endDate for trades table WINDOW column
-  const marketEndDates = useMemo<Record<string, string>>(() => {
-    const map: Record<string, string> = {};
-    for (const m of liveMarkets) map[m.marketId] = m.endDate;
-    for (const m of markets) if (m.id && m.endDate) map[m.id] = m.endDate;
-    return map;
-  }, [liveMarkets, markets]);
+  const candidateMarkets = useMemo(
+    () =>
+      markets
+        .filter((m) => m.classificationStatus === "candidate" || m.classificationStatus === "traded")
+        .sort((a, b) => new Date(a.deadline).getTime() - new Date(b.deadline).getTime()),
+    [markets],
+  );
 
-  // Polymarket slug + question for the selected trade (for deep-link and modal header)
-  const { slug: selectedTradeSlug, question: selectedTradeQuestion } =
-    useMemo(() => {
-      if (!selectedTrade) return { slug: null, question: null };
-      const live = liveMarkets.find(
-        (m) => m.marketId === selectedTrade.marketId,
-      );
-      const disc = markets.find((m) => m.id === selectedTrade.marketId);
-      return {
-        slug: live?.slug ?? disc?.slug ?? null,
-        question: live?.question ?? disc?.question ?? null,
-      };
-    }, [selectedTrade, liveMarkets, markets]);
+  const ladderFamilies = useMemo(
+    () => families.filter((f) => f.familyKind === "deadline_ladder"),
+    [families],
+  );
 
-  // Determine window label from config
-  const windowLabel = stats?.config?.marketWindow
-    ? (MARKET_WINDOW_LABELS[stats.config.marketWindow as MarketWindow] ??
-      stats.config.marketWindow)
-    : "BTC WINDOW";
-
-  // Current BTC price (prefer WS-updated, fallback to stats)
-  const currentBtcPrice = btcPrice ?? stats?.btcPrice ?? null;
+  const rejectedCount = markets.filter((m) => m.classificationStatus === "rejected").length;
+  const watchlistCount = markets.filter((m) => m.classificationStatus === "watchlist").length;
+  const openTrades = trades.filter((t) => t.status === "OPEN");
+  const settledTrades = trades.filter((t) => t.status === "SETTLED");
+  const totalPnl = settledTrades.reduce(
+    (sum, trade) => sum + parseFloat(trade.realizedPnl ?? "0"),
+    0,
+  );
 
   return (
     <div className="min-h-screen bg-background text-foreground flex flex-col">
       <Header />
-
       <main className="flex-1 px-4 py-4 pb-16 max-w-7xl mx-auto w-full space-y-4">
-        {/* ── Command Center Panel ────────────── */}
-        <TopDashboardSection
-          stats={stats}
-          btcPrice={currentBtcPrice}
-          primaryMarket={primaryMarket}
-          positionMarkets={positionMarkets}
-          activeMarketsCount={
-            liveMarkets.filter(
-              (m) => m.status === "ACTIVE" || m.status === "UPCOMING",
-            ).length
-          }
-          windowLabel={windowLabel}
-          refetchMarkets={refetchMarkets}
-          btcPriceAtWindowStartFallback={btcPriceAtWindowStartFallback}
-          trades={trades}
-          liveMarkets={liveMarkets}
-        />
-
-        {/* ── Two-column: Trades + Sidebar ─────────── */}
-        <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-4">
-          {/* Left: Trades panel */}
-          <div className="border border-border/30 rounded-lg bg-card/30 overflow-hidden">
-            <Tabs
-              value={activeTab}
-              onValueChange={setActiveTab}
-              className="w-full"
-            >
-              <div className="flex items-center justify-between border-b border-border/30 px-3 py-2">
-                <TabsList className="bg-transparent gap-2 h-auto p-0">
-                  <TabsTrigger
-                    value="trades"
-                    className="data-[state=active]:bg-muted/40 rounded px-3 py-1 text-xs font-mono"
-                  >
-                    TRADES ({trades.length})
-                  </TabsTrigger>
-                  <TabsTrigger
-                    value="markets"
-                    className="data-[state=active]:bg-muted/40 rounded px-3 py-1 text-xs font-mono"
-                  >
-                    MARKETS ({markets.length})
-                  </TabsTrigger>
-                  <TabsTrigger
-                    value="activity"
-                    className="data-[state=active]:bg-muted/40 rounded px-3 py-1 text-xs font-mono relative"
-                  >
-                    ACTIVITY
-                    {activities.length > 0 && (
-                      <span className="ml-1.5 bg-blue-500/20 text-blue-400 border border-blue-500/30 rounded text-[9px] font-mono px-1 py-0.5">
-                        {activities.length}
-                      </span>
-                    )}
-                  </TabsTrigger>
-                </TabsList>
+        <section className="grid grid-cols-1 lg:grid-cols-[1.5fr_1fr] gap-4">
+          <div className="border border-border/40 rounded-lg bg-card/30 p-4">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="text-[10px] font-mono tracking-[0.18em] text-muted-foreground">
+                  EXPLICIT-DATE DEADLINE ENGINE
+                </div>
+                <h1 className="mt-2 text-2xl font-semibold tracking-tight">
+                  NO-side Polymarket deadline ladders
+                </h1>
+                <p className="mt-2 text-sm text-muted-foreground max-w-3xl">
+                  Discovering markets with calendar deadlines like June 3, June
+                  15, and December 31. Broad shapes like before 2027 and end of
+                  month phrasing are excluded from trading.
+                </p>
               </div>
-
-              <TabsContent value="trades" className="mt-0">
-                <TradesTable
-                  trades={trades}
-                  loading={tradesLoading}
-                  livePrices={livePricesMap}
-                  marketEndDates={marketEndDates}
-                  onTradeClick={setSelectedTrade}
-                  onLoadMore={loadMore}
-                  hasMore={hasMore}
-                  loadingMore={loadingMore}
-                />
-              </TabsContent>
-
-              <TabsContent value="markets" className="mt-0">
-                <MarketsPanel
-                  markets={markets}
-                  trades={trades}
-                  loading={marketsLoading}
-                  loadingMore={marketsLoadingMore}
-                  hasMore={marketsHasMore}
-                  onLoadMore={loadMoreMarkets}
-                  refetch={refetchMarkets}
-                  onMarketClick={setSelectedMarket}
-                />
-              </TabsContent>
-
-              <TabsContent value="activity" className="mt-0">
-                <ActivityPanel
-                  activities={activities}
-                  loading={activitiesLoading}
-                />
-              </TabsContent>
-            </Tabs>
-          </div>
-
-          {/* Right: Sidebar */}
-          <div className="space-y-4">
-            {/* System stats */}
-            <SidebarCard title="SYSTEM">
-              {statsLoading ? (
-                <div className="text-xs text-muted-foreground animate-pulse font-mono py-4 text-center">
-                  Loading...
-                </div>
-              ) : stats ? (
-                <div className="space-y-2 text-xs font-mono">
-                  <StatRow label="Window Type" value={windowLabel} />
-                  <StatRow
-                    label="Open Positions"
-                    value={stats.orchestrator.openPositions.toString()}
-                  />
-                  <StatRow
-                    label="Active Markets"
-                    value={stats.orchestrator.activeMarkets.toString()}
-                  />
-                  <StatRow
-                    label="Trades Exec"
-                    value={stats.orchestrator.cycleCount.toString()}
-                  />
-                  <StatRow
-                    label="Discovered"
-                    value={stats.orchestrator.scanner.discoveredCount.toString()}
-                  />
-                  <StatRow
-                    label="Engine"
-                    value={
-                      stats.orchestrator.paused
-                        ? "PAUSED"
-                        : stats.orchestrator.running
-                          ? "ACTIVE"
-                          : "IDLE"
-                    }
-                    accent={
-                      stats.orchestrator.running && !stats.orchestrator.paused
-                    }
-                    warn={stats.orchestrator.paused}
-                  />
-                  <StatRow
-                    label="CLOB WS"
-                    value={
-                      stats.orchestrator.ws.connected
-                        ? "CONNECTED"
-                        : "DISCONNECTED"
-                    }
-                    accent={stats.orchestrator.ws.connected}
-                  />
-                  <StatRow
-                    label="BTC Feed"
-                    value={stats.orchestrator.btcConnected ? "LIVE" : "OFFLINE"}
-                    accent={stats.orchestrator.btcConnected}
-                  />
-                  {/* Use live WS-driven momentum (updates every BTC tick ~1s) */}
-                  {(momentum ?? stats.orchestrator.momentum) && (
-                    <StatRow
-                      label="Momentum"
-                      value={`${
-                        (momentum ?? stats.orchestrator.momentum)!.direction
-                      } ${
-                        (momentum ?? stats.orchestrator.momentum)!.changeUsd >=
-                        0
-                          ? "+"
-                          : ""
-                      }$${Math.abs(
-                        (momentum ?? stats.orchestrator.momentum)!.changeUsd,
-                      ).toFixed(0)}`}
-                      accent={
-                        (momentum ?? stats.orchestrator.momentum)!.direction ===
-                        "UP"
-                      }
-                      warn={
-                        (momentum ?? stats.orchestrator.momentum)!.direction ===
-                        "DOWN"
-                      }
-                    />
-                  )}
-                </div>
-              ) : null}
-            </SidebarCard>
-
-            <SidebarCard title="CONFIGURATION">
-              {stats?.config ? (
-                <div className="space-y-2 text-xs font-mono">
-                  <StatRow
-                    label="Entry Range"
-                    value={`${(stats.config.entryPriceThreshold * 100).toFixed(0)}–${(stats.config.maxEntryPrice * 100).toFixed(0)}¢`}
-                  />
-                  <StatRow
-                    label="Trade Window"
-                    value={`${stats.config.tradeFromWindowSeconds}s`}
-                  />
-                  <StatRow
-                    label="Starting Capital"
-                    value={`$${stats.config.startingCapital}`}
-                  />
-                  <StatRow
-                    label="Max Positions"
-                    value={stats.config.maxPositions?.toString() ?? "—"}
-                  />
-                  <StatRow
-                    label="BTC Min Dist"
-                    value={`$${stats.config.minBtcDistanceUsd}`}
-                  />
-                  <StatRow
-                    label="Momentum Filter"
-                    value={
-                      stats.config.momentumEnabled
-                        ? `$${stats?.config?.momentumMinChangeUsd}`
-                        : "DISABLED"
-                    }
-                  />
-                  <StatRow
-                    label="Oscillation Filter"
-                    value={
-                      stats?.config?.oscillationFilterEnabled
-                        ? `${stats?.config?.oscillationMaxCrossovers} times`
-                        : "DISABLED"
-                    }
-                  />
-                  <StatRow
-                    label="Stop Loss"
-                    value={
-                      stats.config.stopLossEnabled
-                        ? `${(stats.config.stopLossPriceTrigger * 100).toFixed(0)}¢ trigger`
-                        : "DISABLED"
-                    }
-                    accent={stats.config.stopLossEnabled}
-                    warn={!stats.config.stopLossEnabled}
-                  />
-                  <StatRow
-                    label="Take Profit"
-                    value={
-                      stats.config.takeProfitEnabled
-                        ? stats.config.takeProfitTriggerPrice != null
-                          ? `${(stats.config.takeProfitTriggerPrice * 100).toFixed(0)}¢ trigger`
-                          : "ENABLED"
-                        : "DISABLED"
-                    }
-                    accent={!!stats.config.takeProfitEnabled}
-                    warn={!stats.config.takeProfitEnabled}
-                  />
-                  <StatRow
-                    label="Risk Guard"
-                    value={
-                      (stats.config.consecutiveLossPauseLimit ?? 0) > 0
-                        ? `${stats.config.consecutiveLossPauseLimit} losses`
-                        : "DISABLED"
-                    }
-                    accent={(stats.config.consecutiveLossPauseLimit ?? 0) > 0}
-                    warn={(stats.config.consecutiveLossPauseLimit ?? 0) <= 0}
-                  />
-                  <StatRow
-                    label="Auto Resume"
-                    value={
-                      stats.config.riskAutoResumeEnabled
-                        ? `${Math.round((stats.config.riskAutoResumeCooldownMs ?? 0) / 60000)}m cooldown`
-                        : "MANUAL"
-                    }
-                    accent={!!stats.config.riskAutoResumeEnabled}
-                    warn={!stats.config.riskAutoResumeEnabled}
-                  />
-                </div>
-              ) : (
-                <div className="text-xs text-muted-foreground font-mono py-4 text-center">
-                  Loading...
-                </div>
-              )}
-            </SidebarCard>
-          </div>
-        </div>
-      </main>
-
-      <SystemStatusIndicator stats={stats} />
-
-      <TradeDetailPopup
-        trade={selectedTrade}
-        open={selectedTrade !== null}
-        onClose={() => setSelectedTrade(null)}
-        marketSlug={selectedTradeSlug}
-        marketQuestion={selectedTradeQuestion}
-      />
-
-      <MarketDetailModal
-        market={selectedMarket}
-        trades={trades}
-        oscillationWindowMs={stats?.config?.oscillationWindowMs ?? 60_000}
-        oscillationMaxCrossovers={stats?.config?.oscillationMaxCrossovers ?? 3}
-        open={selectedMarket !== null}
-        onClose={() => setSelectedMarket(null)}
-      />
-    </div>
-  );
-}
-
-/* ─── Sub-components ───────────────────────────────────────── */
-
-function polymarketUrl(market: LiveMarketInfo): string {
-  if (market.slug) return `https://polymarket.com/event/${market.slug}`;
-  return `https://polymarket.com/market/${market.marketId}`;
-}
-
-function polymarketMarketUrl(market: DiscoveredMarket): string {
-  if (market.slug) return `https://polymarket.com/event/${market.slug}`;
-  return `https://polymarket.com/market/${market.id}`;
-}
-
-function TopDashboardSection({
-  stats,
-  btcPrice,
-  primaryMarket,
-  positionMarkets,
-  activeMarketsCount,
-  windowLabel,
-  refetchMarkets,
-  btcPriceAtWindowStartFallback,
-  trades,
-  liveMarkets,
-}: {
-  stats: SystemStats | null;
-  btcPrice: { price: number; timestamp: number } | null;
-  primaryMarket: LiveMarketInfo | null;
-  positionMarkets: LiveMarketInfo[];
-  activeMarketsCount: number;
-  windowLabel: string;
-  refetchMarkets: () => void;
-  btcPriceAtWindowStartFallback: number | null;
-  trades: SimulatedTrade[];
-  liveMarkets: LiveMarketInfo[];
-}) {
-  const [period, setPeriod] = useState<"1D" | "1W" | "1M" | "ALL">("ALL");
-  const { performance } = usePerformanceRealtime(period);
-
-  // Get live unrealized PnL from open trades and current market prices
-  const liveUnrealizedPnL = useUnrealizedPnL(trades, liveMarkets);
-
-  const isPaused = stats?.orchestrator.paused ?? false;
-
-  const countdown = useCountdown(primaryMarket?.endDate ?? null);
-
-  useEffect(() => {
-    if (countdown?.expired) {
-      const timer = setTimeout(() => refetchMarkets(), 2000);
-      return () => clearTimeout(timer);
-    }
-  }, [countdown?.expired, refetchMarkets]);
-
-  const upPrice = primaryMarket
-    ? (primaryMarket.prices[primaryMarket.yesTokenId]?.mid ?? null)
-    : null;
-  const downPrice = primaryMarket
-    ? (primaryMarket.prices[primaryMarket.noTokenId]?.mid ?? null)
-    : null;
-
-  const fmtPct = (v: number | null) =>
-    v !== null ? `${(v * 100).toFixed(1)}¢` : "—";
-
-  const fmtCountdown = () => {
-    if (!countdown) return "—";
-    if (countdown.expired) return "00:00";
-    const { days, hours, minutes, seconds } = countdown;
-    if (days > 0) return `${days}d ${hours}h ${minutes}m`;
-    if (hours > 0)
-      return `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
-    return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
-  };
-
-  const roi = parseFloat(performance?.roi || "0");
-  const winRate = parseFloat(performance?.winRate || "0");
-  const totalDeployed = parseFloat(performance?.totalDeployed || "0");
-  const cashBalance = parseFloat(performance?.cashBalance || "0");
-  const initialCapital = parseFloat(performance?.initialCapital || "0");
-  const openPositionsValue = parseFloat(performance?.openPositionsValue || "0");
-  const portfolioValue = cashBalance + openPositionsValue;
-  // Use live-calculated unrealized PnL instead of API value
-  const unrealizedPnl = liveUnrealizedPnL;
-  const wins = performance?.wins || 0;
-  const losses = performance?.losses || 0;
-  const closedPositions = wins + losses;
-  const openPositions = performance?.openPositions || 0;
-  const bestTrade = parseFloat(performance?.largestWin || "0");
-  const worstTrade = parseFloat(performance?.largestLoss || "0");
-  const avgWin = parseFloat(performance?.avgWin || "0");
-  const avgLoss = parseFloat(performance?.avgLoss || "0");
-  const profitFactor = avgLoss !== 0 ? Math.abs(avgWin / avgLoss) : 0;
-
-  const gainFromInitial = portfolioValue - initialCapital;
-  const animatedGainFromInitial = useAnimatedNumber(gainFromInitial, 300);
-  const mainDisplayValue = animatedGainFromInitial;
-  const windowType = stats?.config?.marketWindow || "5M";
-
-  // Effective BTC price at window start: use captured value or fall back to entry price from trade
-  const effectiveBtcAtStart =
-    primaryMarket?.btcPriceAtWindowStart ??
-    btcPriceAtWindowStartFallback ??
-    null;
-
-  const marketDetails = useMemo(() => {
-    if (!primaryMarket) return null;
-    const question = primaryMarket.question;
-
-    // For absolute price markets ("above $X") extract the target from the question.
-    // For relative Up/Down markets, btcPriceAtWindowStart is the price to beat.
-    const absolutePriceMatch = question.match(
-      /(?:above|below)\s*\$([0-9,]+(?:\.\d+)?)/i,
-    );
-    const targetPriceStr = absolutePriceMatch
-      ? `$${absolutePriceMatch[1]}`
-      : effectiveBtcAtStart !== null
-        ? `$${effectiveBtcAtStart.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-        : null;
-    const targetPriceNum = absolutePriceMatch
-      ? parseFloat(absolutePriceMatch[1].replace(/,/g, ""))
-      : effectiveBtcAtStart;
-
-    const end = new Date(primaryMarket.endDate);
-    const windowDurationMs = getMarketWindowDurationMs(windowType);
-    const mins = Math.floor(windowDurationMs / 60000);
-    const start = new Date(end.getTime() - windowDurationMs);
-    const fmt = (d: Date) =>
-      d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-
-    // Direction from question: look for "above" / "higher" vs "below" / "lower"
-    const qLower = question.toLowerCase();
-    const isAbove =
-      qLower.includes("above") ||
-      qLower.includes("higher") ||
-      qLower.includes("over");
-    const isBelow =
-      qLower.includes("below") ||
-      qLower.includes("lower") ||
-      qLower.includes("under");
-
-    return {
-      targetPriceStr,
-      targetPriceNum,
-      startTime: fmt(start),
-      endTime: fmt(end),
-      windowLabel:
-        mins >= 60
-          ? mins >= 1440
-            ? "1D window"
-            : `${mins / 60}H window`
-          : `${mins}M window`,
-      direction: isAbove ? "above" : isBelow ? "below" : null,
-    };
-  }, [primaryMarket, windowType, effectiveBtcAtStart]);
-
-  // BTC price distance from target
-  const btcDistanceInfo = useMemo(() => {
-    if (!marketDetails?.targetPriceNum || !btcPrice) return null;
-    const dist = btcPrice.price - marketDetails.targetPriceNum;
-    return {
-      dist: Math.abs(dist),
-      above: dist >= 0,
-    };
-  }, [marketDetails, btcPrice]);
-
-  const fmtUsd = (n: number) =>
-    n.toLocaleString("en-US", {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    });
-
-  return (
-    <div className="border border-border/30 rounded-xl bg-background overflow-hidden">
-      {isPaused && (
-        <div className="flex items-center justify-center gap-2 px-4 py-1.5 bg-red-500/10 border-b border-red-500/20">
-          <span className="text-[11px] font-mono font-bold text-red-400 tracking-widest">
-            SYSTEM PAUSED — Use Resume to restart trading
-          </span>
-        </div>
-      )}
-
-      {/* Main two-panel layout */}
-      <div className="flex flex-col xl:flex-row divide-y xl:divide-y-0 xl:divide-x divide-border/30">
-        {/* ── LEFT: ACTIVE MARKET ── */}
-        <div className="xl:w-[420px] xl:shrink-0 p-5 flex flex-col gap-4">
-          {/* Header */}
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <div
-                className={`w-1.5 h-1.5 rounded-full ${
-                  primaryMarket?.status === "ACTIVE"
-                    ? "bg-emerald-500 animate-pulse"
-                    : primaryMarket?.status === "UPCOMING"
-                      ? "bg-amber-500/70"
-                      : "bg-muted-foreground/30"
-                }`}
-              />
-              <span className="text-[10px] font-mono tracking-[0.18em] text-muted-foreground">
-                {primaryMarket?.status === "UPCOMING"
-                  ? "UPCOMING MARKET"
-                  : "ACTIVE MARKET"}
-              </span>
-            </div>
-            {primaryMarket && (
-              <a
-                href={polymarketUrl(primaryMarket)}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-[10px] font-mono text-muted-foreground/50 hover:text-blue-400 flex items-center gap-1 transition-colors"
+              <button
+                onClick={() => load().catch(() => {})}
+                className="h-9 w-9 inline-flex items-center justify-center border border-border/50 rounded hover:bg-muted"
+                title="Refresh"
               >
-                polymarket <ExternalLink size={9} />
-              </a>
-            )}
+                <RefreshCw size={15} className={refreshing ? "animate-spin" : ""} />
+              </button>
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mt-5">
+              <Metric label="Ladders" value={ladderFamilies.length} />
+              <Metric label="Candidates" value={candidateMarkets.length} />
+              <Metric label="Watchlist" value={watchlistCount} />
+              <Metric label="Rejected" value={rejectedCount} />
+              <Metric label="Live Tokens" value={liveMarkets.length} />
+            </div>
           </div>
 
-          {primaryMarket ? (
-            <>
-              {/* Question */}
-              <p className="text-sm font-mono text-foreground/80 leading-relaxed">
-                {primaryMarket.question}
-              </p>
+          <div className="border border-border/40 rounded-lg bg-card/30 p-4">
+            <div className="text-[10px] font-mono tracking-[0.18em] text-muted-foreground">
+              SYSTEM
+            </div>
+            <div className="mt-3 grid grid-cols-2 gap-3">
+              <Metric
+                label="Engine"
+                value={stats?.orchestrator.paused ? "PAUSED" : stats?.orchestrator.running ? "RUNNING" : "IDLE"}
+                accent={!!stats?.orchestrator.running && !stats?.orchestrator.paused}
+                warn={!!stats?.orchestrator.paused}
+              />
+              <Metric label="WS" value={wsConnected ? "LIVE" : "WAITING"} accent={wsConnected} />
+              <Metric label="Open Trades" value={openTrades.length} />
+              <Metric label="P&L" value={formatPnl(totalPnl)} className={pnlColor(totalPnl)} />
+            </div>
+            <div className="mt-4 text-xs text-muted-foreground space-y-1">
+              <div>NO band: {statsLoading ? "-" : `${n(stats?.config.minNoEntryPrice, 3)}-${n(stats?.config.maxNoEntryPrice, 3)}`}</div>
+              <div>Lookahead: {stats?.config.deadlineLookaheadDays ?? "-"} days</div>
+              <div>Min liquidity: ${n(stats?.config.minLiquidityNum, 0)}</div>
+              <div>Portfolio: ${n(portfolio?.portfolioValue)}</div>
+            </div>
+          </div>
+        </section>
 
-              {/* Meta tags row */}
-              <div className="flex flex-wrap gap-1.5">
-                {marketDetails?.windowLabel && (
-                  <span className="text-[10px] font-mono text-muted-foreground border border-border/30 rounded px-2 py-0.5">
-                    {marketDetails.windowLabel}
-                  </span>
-                )}
-                {marketDetails?.startTime && (
-                  <span className="text-[10px] font-mono text-muted-foreground border border-border/30 rounded px-2 py-0.5">
-                    {marketDetails.startTime} → {marketDetails.endTime}
-                  </span>
-                )}
-                {marketDetails?.direction && (
-                  <span
-                    className={`text-[10px] font-mono border rounded px-2 py-0.5 ${marketDetails.direction === "above" ? "text-emerald-500 border-emerald-500/30" : "text-red-500 border-red-500/30"}`}
-                  >
-                    {marketDetails.direction}
-                  </span>
-                )}
-              </div>
-
-              {/* Price to beat vs current BTC */}
-              <div className="border border-border/30 rounded-lg overflow-hidden">
-                <div className="grid grid-cols-2 divide-x divide-border/30">
-                  <div className="p-3">
-                    <div className="text-[10px] font-mono text-muted-foreground mb-1 tracking-widest">
-                      {effectiveBtcAtStart !== null
-                        ? "BTC AT START"
-                        : "PRICE TO BEAT"}
-                    </div>
-                    <div className="text-base font-bold font-mono tabular-nums text-foreground">
-                      {marketDetails?.targetPriceStr ?? "—"}
-                    </div>
-                    {effectiveBtcAtStart !== null && (
-                      <div className="text-[10px] font-mono text-muted-foreground/50 mt-0.5">
-                        window open price
-                      </div>
-                    )}
-                  </div>
-                  <div className="p-3">
-                    <div className="flex items-center gap-1.5 mb-1">
-                      <div
-                        className={`w-1 h-1 rounded-full ${btcPrice ? "bg-emerald-500 animate-pulse" : "bg-muted-foreground/30"}`}
-                      />
-                      <span className="text-[10px] font-mono text-muted-foreground tracking-widest">
-                        BTC NOW
-                      </span>
-                    </div>
-                    <div className="text-base font-bold font-mono tabular-nums text-foreground">
-                      {btcPrice ? `$${fmtUsd(btcPrice.price)}` : "—"}
-                    </div>
-                  </div>
-                </div>
-                {btcDistanceInfo && (
-                  <div className="border-t border-border/30 px-3 py-1.5 flex items-center gap-2">
-                    <span className="text-[10px] font-mono text-muted-foreground">
-                      DISTANCE
-                    </span>
-                    <span
-                      className={`text-[10px] font-mono font-bold tabular-nums ${btcDistanceInfo.above ? "text-emerald-500" : "text-red-500"}`}
-                    >
-                      {btcDistanceInfo.above ? "+" : "-"}$
-                      {fmtUsd(btcDistanceInfo.dist)}
-                    </span>
-                    <span className="text-[10px] font-mono text-muted-foreground/50 ml-auto">
-                      BTC is {btcDistanceInfo.above ? "above" : "below"} target
-                    </span>
-                  </div>
-                )}
-              </div>
-
-              {/* Timer + odds */}
-              <div className="grid grid-cols-3 gap-2">
-                <div className="col-span-1 border border-border/30 rounded-lg p-3 flex flex-col items-center justify-center text-center gap-0.5">
-                  <div className="text-[10px] font-mono text-muted-foreground tracking-widest">
-                    {countdown?.expired ? "ENDED" : "CLOSES IN"}
-                  </div>
-                  <div
-                    className={`text-lg font-bold font-mono tabular-nums tracking-tight leading-none ${
-                      countdown?.expired
-                        ? "text-amber-400"
-                        : countdown &&
-                            countdown.hours === 0 &&
-                            countdown.minutes < 1
-                          ? "text-red-400 animate-pulse"
-                          : "text-foreground"
-                    }`}
-                  >
-                    {fmtCountdown()}
-                  </div>
-                  {marketDetails?.endTime && (
-                    <div className="text-[10px] font-mono text-muted-foreground/40 tabular-nums">
-                      {marketDetails.endTime}
-                    </div>
+        <section className="grid grid-cols-1 xl:grid-cols-[1fr_420px] gap-4">
+          <div className="border border-border/40 rounded-lg bg-card/30 overflow-hidden">
+            <PanelHeader title="Candidate Deadline Markets" subtitle="Explicit month/day ladders only" />
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="text-[10px] uppercase tracking-wider text-muted-foreground border-b border-border/30">
+                  <tr>
+                    <th className="text-left p-3">Market</th>
+                    <th className="text-left p-3">Deadline</th>
+                    <th className="text-right p-3">NO</th>
+                    <th className="text-right p-3">Spread</th>
+                    <th className="text-right p-3">Liquidity</th>
+                    <th className="text-left p-3">Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {candidateMarkets.slice(0, 40).map((market) => (
+                    <tr key={market.id} className="border-b border-border/20 hover:bg-muted/20">
+                      <td className="p-3 min-w-[360px]">
+                        <a
+                          href={polyUrl(market.slug ?? market.eventSlug)}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="font-medium hover:text-blue-400 inline-flex items-center gap-1"
+                        >
+                          {market.question}
+                          <ExternalLink size={12} />
+                        </a>
+                        <div className="text-xs text-muted-foreground mt-1">{market.eventTitle}</div>
+                      </td>
+                      <td className="p-3 whitespace-nowrap">
+                        <div>{market.deadlineDate}</div>
+                        <div className="text-xs text-muted-foreground">{daysTo(market.deadline)}</div>
+                      </td>
+                      <td className="p-3 text-right font-mono">{n(market.noPrice, 4)}</td>
+                      <td className="p-3 text-right font-mono">{n(market.spread, 4)}</td>
+                      <td className="p-3 text-right font-mono">${n(market.liquidityNum, 0)}</td>
+                      <td className="p-3">
+                        <StatusBadge value={market.classificationStatus} />
+                      </td>
+                    </tr>
+                  ))}
+                  {candidateMarkets.length === 0 && (
+                    <tr>
+                      <td className="p-6 text-center text-muted-foreground" colSpan={6}>
+                        No candidate ladders loaded yet.
+                      </td>
+                    </tr>
                   )}
-                </div>
-                <div className="border border-emerald-500/20 bg-emerald-500/5 rounded-lg p-3 flex flex-col items-center justify-center text-center">
-                  <div className="text-[10px] font-mono text-emerald-500/60 mb-1">
-                    UP ▲
-                  </div>
-                  <div className="text-base font-bold font-mono tabular-nums text-emerald-400">
-                    {fmtPct(upPrice)}
-                  </div>
-                </div>
-                <div className="border border-red-500/20 bg-red-500/5 rounded-lg p-3 flex flex-col items-center justify-center text-center">
-                  <div className="text-[10px] font-mono text-red-500/60 mb-1">
-                    DOWN ▼
-                  </div>
-                  <div className="text-base font-bold font-mono tabular-nums text-red-400">
-                    {fmtPct(downPrice)}
-                  </div>
-                </div>
-              </div>
-            </>
-          ) : (
-            <div className="flex-1 flex items-center justify-center text-xs font-mono text-muted-foreground/40 py-8">
-              Waiting for active market…
-            </div>
-          )}
-        </div>
-
-        {/* ── RIGHT: PORTFOLIO PERFORMANCE ── */}
-        <div className="flex-1 flex flex-col">
-          {/* Section header */}
-          <div className="flex items-center justify-between px-5 py-3 border-b border-border/20">
-            <div className="flex items-center gap-3">
-              <span className="text-[10px] font-mono tracking-[0.18em] text-muted-foreground">
-                PORTFOLIO PERFORMANCE
-              </span>
-              <span className="text-[10px] font-mono text-muted-foreground/40">
-                [{period}]
-              </span>
-            </div>
-            <div className="flex border border-border/20 rounded overflow-hidden">
-              {(["1D", "1W", "1M", "ALL"] as const).map((p) => (
-                <button
-                  key={p}
-                  onClick={() => setPeriod(p)}
-                  className={`text-[10px] font-mono px-2.5 py-1 transition-colors ${period === p ? "bg-muted text-foreground" : "text-muted-foreground hover:text-foreground"}`}
-                >
-                  {p}
-                </button>
-              ))}
+                </tbody>
+              </table>
             </div>
           </div>
 
-          {/* Flat column layout — separated by vertical dividers */}
-          <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 divide-y sm:divide-y-0 sm:divide-x divide-border/20">
-            {/* Col 1: P&L */}
-            <div className="p-5 space-y-4">
-              <div>
-                <div className="text-[10px] font-mono text-muted-foreground tracking-widest mb-1">
-                  NET P&L
-                </div>
-                <div
-                  className={`text-3xl font-bold font-mono tabular-nums tracking-tight ${pnlColor(mainDisplayValue)}`}
-                >
-                  {formatPnl(mainDisplayValue)}
-                </div>
-                <div
-                  className={`text-xs font-mono mt-1 ${pnlColor(roi, "70")}`}
-                >
-                  {roi >= 0 ? "+" : ""}
-                  {roi.toFixed(2)}% ROI
-                </div>
-              </div>
-              <div className="space-y-3 pt-1">
-                <div>
-                  <div className="text-[10px] font-mono text-muted-foreground tracking-widest mb-0.5">
-                    UNREALIZED
-                  </div>
-                  <div
-                    className={`text-sm font-bold font-mono tabular-nums ${pnlColor(unrealizedPnl)}`}
+          <div className="space-y-4">
+            <div className="border border-border/40 rounded-lg bg-card/30 overflow-hidden">
+              <PanelHeader title="Deadline Families" subtitle="Different explicit dates under one event" />
+              <div className="divide-y divide-border/20">
+                {ladderFamilies.slice(0, 12).map((family) => (
+                  <a
+                    key={family.id}
+                    href={polyUrl(family.slug)}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="block p-3 hover:bg-muted/20"
                   >
-                    {formatPnl(unrealizedPnl)}
-                  </div>
-                </div>
-                <div>
-                  <div className="text-[10px] font-mono text-muted-foreground tracking-widest mb-0.5">
-                    INITIAL CAPITAL
-                  </div>
-                  <div className="text-sm font-bold font-mono tabular-nums text-foreground">
-                    ${initialCapital.toFixed(2)}
-                  </div>
-                </div>
-                <div>
-                  <div className="text-[10px] font-mono text-muted-foreground tracking-widest mb-0.5">
-                    CURRENT VALUE
-                  </div>
-                  <div className="text-sm font-bold font-mono tabular-nums text-foreground">
-                    ${portfolioValue.toFixed(2)}
-                  </div>
-                </div>
+                    <div className="font-medium text-sm">{family.title}</div>
+                    <div className="mt-1 text-xs text-muted-foreground flex justify-between">
+                      <span>{family.explicitDateCount} dates</span>
+                      <span>${n(family.volume24h, 0)} 24h volume</span>
+                    </div>
+                  </a>
+                ))}
               </div>
             </div>
 
-            {/* Col 2: Portfolio + Win rate */}
-            <div className="p-5 space-y-4">
-              <div>
-                <div className="text-[10px] font-mono text-muted-foreground tracking-widest mb-0.5">
-                  PORTFOLIO VALUE
-                </div>
-                <div className="text-2xl font-bold font-mono tabular-nums text-foreground">
-                  ${portfolioValue.toFixed(2)}
-                </div>
-                <div className="text-[10px] font-mono text-muted-foreground/50 mt-0.5">
-                  cash ${cashBalance.toFixed(2)} + positions $
-                  {openPositionsValue.toFixed(2)}
-                </div>
-              </div>
-
-              <div className="space-y-2 pt-1">
-                <div className="text-[10px] font-mono text-muted-foreground tracking-widest">
-                  TRADE STATISTICS
-                </div>
-                <div className="flex items-end justify-between">
-                  <span className="text-[10px] font-mono text-muted-foreground">
-                    WIN RATE
-                  </span>
-                  <span className="text-base font-bold font-mono tabular-nums text-foreground">
-                    {winRate.toFixed(1)}%
-                  </span>
-                </div>
-                <div className="h-1 w-full rounded-full overflow-hidden flex bg-red-500/20">
-                  <div
-                    className="h-full bg-emerald-500 transition-all"
-                    style={{ width: `${winRate}%` }}
-                  />
-                </div>
-                <div className="flex justify-between text-[10px] font-mono">
-                  <span className="text-red-500/70">{losses} losses</span>
-                  <span className="text-emerald-500/70">{wins} wins</span>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-3 gap-3 pt-1">
-                {[
-                  ["OPEN", openPositions],
-                  ["SETTLED", closedPositions],
-                  ["TOTAL", openPositions + closedPositions],
-                ].map(([label, val]) => (
-                  <div key={label as string}>
-                    <div className="text-[10px] font-mono text-muted-foreground mb-0.5">
-                      {label}
+            <div className="border border-border/40 rounded-lg bg-card/30 overflow-hidden">
+              <PanelHeader title="Recent Decisions" subtitle="Rejected, accepted, and traded opportunities" />
+              <div className="divide-y divide-border/20 max-h-[420px] overflow-auto">
+                {opportunities.slice(0, 30).map((opp) => (
+                  <div key={opp.id} className="p-3 text-sm">
+                    <div className="flex items-center justify-between gap-2">
+                      <StatusBadge value={opp.status} />
+                      <span className="text-xs text-muted-foreground">{new Date(opp.createdAt).toLocaleTimeString()}</span>
                     </div>
-                    <div className="text-sm font-bold font-mono tabular-nums text-foreground">
-                      {val}
+                    <div className="mt-2 text-xs text-muted-foreground">{opp.reason}</div>
+                    <div className="mt-2 grid grid-cols-3 gap-2 text-xs font-mono">
+                      <span>NO {n(opp.noBestAsk, 4)}</span>
+                      <span>spr {n(opp.spread, 4)}</span>
+                      <span>pnl {n(opp.expectedNetProfit, 3)}</span>
                     </div>
                   </div>
                 ))}
               </div>
             </div>
-
-            {/* Col 3: Best / Worst */}
-            <div className="p-5 space-y-4">
-              <div className="text-[10px] font-mono text-muted-foreground tracking-widest">
-                PERFORMANCE
-              </div>
-              <div>
-                <div className="text-[10px] font-mono text-muted-foreground mb-0.5">
-                  BEST TRADE
-                </div>
-                <div className="text-lg font-bold font-mono tabular-nums text-emerald-500">
-                  +${bestTrade.toFixed(4)}
-                </div>
-                <div className="text-[10px] font-mono text-muted-foreground/50 mt-0.5">
-                  avg win: +${avgWin.toFixed(4)}
-                </div>
-              </div>
-              <div>
-                <div className="text-[10px] font-mono text-muted-foreground mb-0.5">
-                  WORST TRADE
-                </div>
-                <div className="text-lg font-bold font-mono tabular-nums text-red-500">
-                  {worstTrade < 0 ? "-" : ""}${Math.abs(worstTrade).toFixed(4)}
-                </div>
-                <div className="text-[10px] font-mono text-muted-foreground/50 mt-0.5">
-                  avg loss: -${Math.abs(avgLoss).toFixed(4)}
-                </div>
-              </div>
-              <div>
-                <div className="text-[10px] font-mono text-muted-foreground mb-0.5">
-                  PROFIT FACTOR
-                </div>
-                <div className="text-lg font-bold font-mono tabular-nums text-foreground">
-                  {profitFactor.toFixed(2)}
-                </div>
-                <div className="text-[10px] font-mono text-muted-foreground/50 mt-0.5">
-                  avg win ÷ avg loss
-                </div>
-              </div>
-            </div>
-
-            {/* Col 4: System + breakdown */}
-            <div className="p-5 space-y-4">
-              <div className="text-[10px] font-mono text-muted-foreground tracking-widest">
-                SYSTEM
-              </div>
-              <div>
-                <div className="text-[10px] font-mono text-muted-foreground mb-0.5">
-                  ENGINE
-                </div>
-                <div
-                  className={`text-sm font-bold font-mono ${isPaused ? "text-red-500" : stats?.orchestrator.running ? "text-emerald-500" : "text-red-500"}`}
-                >
-                  {isPaused
-                    ? "PAUSED"
-                    : stats?.orchestrator.running
-                      ? "RUNNING"
-                      : "STOPPED"}
-                </div>
-              </div>
-              <div>
-                <div className="text-[10px] font-mono text-muted-foreground mb-0.5">
-                  OPEN POSITIONS
-                </div>
-                <div className="text-sm font-bold font-mono tabular-nums text-foreground">
-                  {stats?.orchestrator.openPositions ?? 0}
-                </div>
-              </div>
-              <div>
-                <div className="text-[10px] font-mono text-muted-foreground mb-0.5">
-                  ACTIVE MARKETS
-                </div>
-                <div className="text-sm font-bold font-mono tabular-nums text-foreground">
-                  {activeMarketsCount}
-                </div>
-              </div>
-              <div>
-                <div className="text-[10px] font-mono text-muted-foreground mb-0.5">
-                  WINDOW
-                </div>
-                <div className="text-sm font-bold font-mono text-foreground">
-                  {windowLabel}
-                </div>
-              </div>
-            </div>
           </div>
-        </div>
-      </div>
+        </section>
 
-      {/* Awaiting resolution — compact card-style design */}
-      {positionMarkets.length > 0 && (
-        <div className="border-t border-border/20 bg-card/20">
-          <div className="px-5 py-3">
-            <div className="flex items-center justify-between gap-4">
-              <div className="flex items-center gap-2">
-                <div className="w-1.5 h-1.5 rounded-full bg-blue-500/60 animate-pulse" />
-                <span className="text-[10px] font-mono text-muted-foreground tracking-[0.15em]">
-                  AWAITING RESOLUTION
-                </span>
-                <span className="text-[10px] font-mono text-muted-foreground/60">
-                  ({positionMarkets.length})
-                </span>
-              </div>
-              <div className="flex flex-wrap gap-1.5 justify-end">
-                {positionMarkets.map((m) => {
-                  // Compact label: "Feb 23 · 3:30–3:35 AM"
-                  const end = new Date(m.endDate);
-                  const start = m.windowStart ? new Date(m.windowStart) : null;
-                  const datePart = end.toLocaleDateString("en-US", {
-                    month: "short",
-                    day: "numeric",
-                  });
-                  const timeFmt = (d: Date) =>
-                    d.toLocaleTimeString("en-US", {
-                      hour: "numeric",
-                      minute: "2-digit",
-                      hour12: true,
-                    });
-                  const label = start
-                    ? `${datePart} · ${timeFmt(start).replace(/ AM| PM/, "")}–${timeFmt(end)}`
-                    : `${datePart} · ${timeFmt(end)}`;
-                  return (
-                    <span
-                      key={m.marketId}
-                      title={m.question ?? undefined}
-                      className="text-[10px] font-mono text-muted-foreground bg-muted/30 border border-border/40 rounded-md px-2.5 py-1 whitespace-nowrap hover:bg-muted/50 transition-colors cursor-help"
-                    >
-                      {label}
-                    </span>
-                  );
-                })}
-              </div>
-            </div>
+        <section className="border border-border/40 rounded-lg bg-card/30 overflow-hidden">
+          <PanelHeader title="Trades" subtitle="Simulated NO positions" />
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="text-[10px] uppercase tracking-wider text-muted-foreground border-b border-border/30">
+                <tr>
+                  <th className="text-left p-3">Market</th>
+                  <th className="text-right p-3">Entry</th>
+                  <th className="text-right p-3">Shares</th>
+                  <th className="text-right p-3">Cost</th>
+                  <th className="text-right p-3">Expected</th>
+                  <th className="text-right p-3">Realized</th>
+                  <th className="text-left p-3">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {trades.map((trade) => (
+                  <tr key={trade.id} className="border-b border-border/20">
+                    <td className="p-3 min-w-[360px]">
+                      <div className="font-medium">{trade.marketQuestion}</div>
+                      <div className="text-xs text-muted-foreground">{trade.deadlineDate}</div>
+                    </td>
+                    <td className="p-3 text-right font-mono">{n(trade.entryPrice, 4)}</td>
+                    <td className="p-3 text-right font-mono">{n(trade.entryShares, 2)}</td>
+                    <td className="p-3 text-right font-mono">${n(trade.actualCost, 2)}</td>
+                    <td className="p-3 text-right font-mono">${n(trade.expectedNetProfit, 3)}</td>
+                    <td className={`p-3 text-right font-mono ${pnlColor(parseFloat(trade.realizedPnl ?? "0"))}`}>
+                      {trade.realizedPnl ? formatPnl(parseFloat(trade.realizedPnl)) : "-"}
+                    </td>
+                    <td className="p-3"><StatusBadge value={trade.status} /></td>
+                  </tr>
+                ))}
+                {!tradesLoading && trades.length === 0 && (
+                  <tr>
+                    <td className="p-6 text-center text-muted-foreground" colSpan={7}>
+                      No simulated trades yet.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
           </div>
-        </div>
-      )}
+        </section>
+      </main>
+      <SystemStatusIndicator stats={stats} />
     </div>
   );
 }
 
-function SidebarCard({
-  title,
-  children,
-}: {
-  title: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="border border-border/30 rounded-lg bg-card/30 p-3">
-      <div className="text-[10px] text-muted-foreground tracking-widest mb-2 border-b border-border/20 pb-1">
-        {title}
-      </div>
-      {children}
-    </div>
-  );
-}
-
-function StatRow({
+function Metric({
   label,
   value,
   accent,
   warn,
+  className,
 }: {
   label: string;
-  value: string;
+  value: string | number;
   accent?: boolean;
   warn?: boolean;
+  className?: string;
 }) {
   return (
-    <div className="flex justify-between">
-      <span className="text-muted-foreground">{label}</span>
-      <span
-        className={
-          warn
-            ? "text-red-400"
-            : accent
-              ? "text-emerald-500"
-              : "text-foreground"
-        }
-      >
+    <div className="border border-border/30 rounded p-3">
+      <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</div>
+      <div className={`mt-1 text-lg font-semibold font-mono ${warn ? "text-amber-400" : accent ? "text-emerald-400" : className ?? ""}`}>
         {value}
-      </span>
+      </div>
     </div>
+  );
+}
+
+function PanelHeader({ title, subtitle }: { title: string; subtitle: string }) {
+  return (
+    <div className="px-4 py-3 border-b border-border/30 flex items-end justify-between gap-3">
+      <div>
+        <h2 className="font-semibold">{title}</h2>
+        <p className="text-xs text-muted-foreground mt-0.5">{subtitle}</p>
+      </div>
+    </div>
+  );
+}
+
+function StatusBadge({ value }: { value: string }) {
+  const tone =
+    value === "traded" || value === "OPEN" || value === "candidate"
+      ? "text-emerald-400 border-emerald-500/30 bg-emerald-500/10"
+      : value === "rejected" || value === "LOSS"
+        ? "text-red-400 border-red-500/30 bg-red-500/10"
+        : "text-muted-foreground border-border/40 bg-muted/20";
+  return (
+    <span className={`inline-flex rounded px-2 py-0.5 text-[10px] font-mono uppercase ${tone}`}>
+      {value}
+    </span>
   );
 }

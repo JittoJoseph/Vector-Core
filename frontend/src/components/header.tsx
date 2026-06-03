@@ -28,10 +28,10 @@ export function Header() {
         <div className="container mx-auto px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <h1 className="text-lg font-bold font-mono tracking-widest text-foreground">
-              PENGUINX
+              VECTOR CORE
             </h1>
             <span className="text-xs font-mono text-muted-foreground hidden sm:block">
-              MARKET ENGINE
+              DEADLINE ENGINE
             </span>
           </div>
           <div className="text-xs font-mono text-muted-foreground tabular-nums">
@@ -47,7 +47,7 @@ export function Header() {
       <div className="container mx-auto px-4 py-3 flex items-center justify-between">
         <div className="flex items-center gap-4">
           <h1 className="text-lg font-bold font-mono tracking-widest text-foreground">
-            PENGUINX
+            VECTOR CORE
           </h1>
           <nav className="hidden sm:flex items-center gap-1">
             {navItems.map((item) => (

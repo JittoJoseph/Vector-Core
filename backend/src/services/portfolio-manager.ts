@@ -20,7 +20,7 @@ const logger = createModuleLogger("portfolio-manager");
  * - Position sizing = portfolioValue / maxPositions
  * - portfolioValue = cash + sum of open positions at current price
  * - Only the *actual fill cost* (shares × avgPrice + fees) is deducted from cash
- * - Budget is always sized at maxEntryPrice (worst-case we'd accept), so even
+ * - Budget is always sized at maxNoEntryPrice (worst-case we'd accept), so even
  *   if entering at a lower price the budget can absorb fills up to the limit
  * - Minimum position: POLYMARKET_MIN_ORDER_SIZE shares (protocol-level = 5)
  * - Cash balance is persisted in DB so it survives restarts
@@ -73,12 +73,12 @@ export class PortfolioManager {
   /**
    * Compute the budget for the next position.
    *
-   * Budget is sized at **maxEntryPrice** (the worst-case price we'd accept),
+   * Budget is sized at **maxNoEntryPrice** (the worst-case price we'd accept),
    * not at the current best ask. This guarantees the budget can fill at
    * least POLYMARKET_MIN_ORDER_SIZE shares even if every eligible ask level
    * is right at our limit price.
    *
-   *   maxPrice   = config.strategy.maxEntryPrice
+   *   maxPrice   = config.strategy.maxNoEntryPrice
    *   rawBudget  = portfolioValue / maxSimultaneousPositions
    *   minBudget  = MIN_ORDER_SIZE × (maxPrice + fee_at_maxPrice)
    *   budget     = max(rawBudget, minBudget)
@@ -91,7 +91,7 @@ export class PortfolioManager {
   computePositionBudget(openPositionsValue: number): number {
     const config = getConfig();
     const minShares = POLYMARKET_MIN_ORDER_SIZE;
-    const maxPrice = config.strategy.maxEntryPrice;
+    const maxPrice = config.strategy.maxNoEntryPrice;
     const portfolioValue = this.cashBalance.plus(openPositionsValue);
     const rawBudget = portfolioValue.div(
       config.strategy.maxSimultaneousPositions,
@@ -114,7 +114,7 @@ export class PortfolioManager {
           minShares,
           maxEntryPrice: maxPrice,
         },
-        `Insufficient cash for ${minShares}-share minimum at maxEntryPrice — skipping`,
+      `Insufficient cash for ${minShares}-share minimum at maxNoEntryPrice — skipping`,
       );
       return 0;
     }

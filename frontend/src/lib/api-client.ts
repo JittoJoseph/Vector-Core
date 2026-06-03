@@ -7,6 +7,8 @@ import type {
   SystemStats,
   LiveMarketInfo,
   DiscoveredMarket,
+  EventFamily,
+  Opportunity,
   PerformanceMetrics,
   PortfolioState,
   MonteCarloResult,
@@ -86,6 +88,26 @@ export class ApiClient {
 
     const qs = searchParams.toString();
     return fetchWithRetry(`${this.baseUrl}/api/markets${qs ? `?${qs}` : ""}`);
+  }
+
+  async getFamilies(params?: { limit?: number }): Promise<EventFamily[]> {
+    const searchParams = new URLSearchParams();
+    if (params?.limit) searchParams.set("limit", String(params.limit));
+    const qs = searchParams.toString();
+    return fetchWithRetry(`${this.baseUrl}/api/families${qs ? `?${qs}` : ""}`);
+  }
+
+  async getOpportunities(params?: { limit?: number }): Promise<Opportunity[]> {
+    const searchParams = new URLSearchParams();
+    if (params?.limit) searchParams.set("limit", String(params.limit));
+    const qs = searchParams.toString();
+    return fetchWithRetry(
+      `${this.baseUrl}/api/opportunities${qs ? `?${qs}` : ""}`,
+    );
+  }
+
+  async getLiveMarkets(): Promise<LiveMarketInfo[]> {
+    return fetchWithRetry(`${this.baseUrl}/api/live-markets`);
   }
 
   async getSystemStats(): Promise<SystemStats> {
