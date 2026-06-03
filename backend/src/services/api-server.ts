@@ -1,4 +1,8 @@
-import express, { type NextFunction, type Request, type Response } from "express";
+import express, {
+  type NextFunction,
+  type Request,
+  type Response,
+} from "express";
 import { createServer, type Server } from "http";
 import { WebSocket, WebSocketServer } from "ws";
 import { desc, eq } from "drizzle-orm";
@@ -7,7 +11,10 @@ import { getConfig } from "../utils/config.js";
 import { getDb, getPortfolio, wipeAndResetPortfolio } from "../db/client.js";
 import * as schema from "../db/schema.js";
 import { getMarketOrchestrator } from "./market-orchestrator.js";
-import { calculatePortfolioPerformance, type TimePeriod } from "./performance-calculator.js";
+import {
+  calculatePortfolioPerformance,
+  type TimePeriod,
+} from "./performance-calculator.js";
 import { runMonteCarloAnalysis } from "./monte-carlo.js";
 
 const logger = createModuleLogger("api-server");
@@ -33,7 +40,8 @@ export class ApiServer {
       ws.on("message", (raw) => {
         try {
           const msg = JSON.parse(raw.toString()) as { type?: string };
-          if (msg.type === "ping") ws.send(JSON.stringify({ type: "pong", ts: Date.now() }));
+          if (msg.type === "ping")
+            ws.send(JSON.stringify({ type: "pong", ts: Date.now() }));
         } catch {
           // ignore
         }
@@ -41,13 +49,20 @@ export class ApiServer {
     });
 
     const orchestrator = getMarketOrchestrator();
-    orchestrator.on("tradeOpened", (data) => this.broadcast({ type: "tradeOpened", data }));
-    orchestrator.on("tradeResolved", (data) => this.broadcast({ type: "tradeResolved", data }));
+    orchestrator.on("tradeOpened", (data) =>
+      this.broadcast({ type: "tradeOpened", data }),
+    );
+    orchestrator.on("tradeResolved", (data) =>
+      this.broadcast({ type: "tradeResolved", data }),
+    );
     this.broadcastInterval = setInterval(() => this.broadcastState(), 2000);
 
     return new Promise((resolve) => {
       this.server!.listen(config.server.port, config.server.host, () => {
-        logger.info({ host: config.server.host, port: config.server.port }, "API server started");
+        logger.info(
+          { host: config.server.host, port: config.server.port },
+          "API server started",
+        );
         resolve();
       });
     });
@@ -66,7 +81,11 @@ export class ApiServer {
     return this.app;
   }
 
-  private corsMiddleware(req: Request, res: Response, next: NextFunction): void {
+  private corsMiddleware(
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ): void {
     res.header("Access-Control-Allow-Origin", "*");
     res.header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
     res.header("Access-Control-Allow-Headers", "Content-Type, Authorization");
@@ -87,10 +106,14 @@ export class ApiServer {
   }
 
   private setupRoutes(): void {
-    this.app.get("/ping", (_req, res) => res.json({ pong: true, ts: Date.now() }));
+    this.app.get("/ping", (_req, res) => res.json("pong"));
     this.app.get("/health", (_req, res) => {
       const orchestrator = getMarketOrchestrator();
-      res.json({ status: "ok", uptime: process.uptime(), ...orchestrator.getStats() });
+      res.json({
+        status: "ok",
+        uptime: process.uptime(),
+        ...orchestrator.getStats(),
+      });
     });
 
     this.app.get(["/api/system/stats", "/api/stats"], (_req, res) => {
@@ -220,7 +243,8 @@ export class ApiServer {
           res.status(404).json({ error: "Portfolio not initialised" });
           return;
         }
-        const openPositionsValue = getMarketOrchestrator().computeOpenPositionsValue();
+        const openPositionsValue =
+          getMarketOrchestrator().computeOpenPositionsValue();
         const cashBalance = parseFloat(portfolio.cashBalance);
         const initialCapital = parseFloat(portfolio.initialCapital);
         const portfolioValue = cashBalance + openPositionsValue;
@@ -229,7 +253,10 @@ export class ApiServer {
           cashBalance,
           openPositionsValue,
           portfolioValue,
-          roi: initialCapital > 0 ? ((portfolioValue - initialCapital) / initialCapital) * 100 : 0,
+          roi:
+            initialCapital > 0
+              ? ((portfolioValue - initialCapital) / initialCapital) * 100
+              : 0,
           createdAt: portfolio.createdAt,
           updatedAt: portfolio.updatedAt,
         });
@@ -243,7 +270,11 @@ export class ApiServer {
       try {
         const db = getDb();
         const limit = Math.min(parseInt(req.query.limit as string) || 50, 200);
-        const rows = await db.select().from(schema.auditLogs).orderBy(desc(schema.auditLogs.createdAt)).limit(limit);
+        const rows = await db
+          .select()
+          .from(schema.auditLogs)
+          .orderBy(desc(schema.auditLogs.createdAt))
+          .limit(limit);
         res.json(rows);
       } catch {
         res.status(500).json({ error: "Failed to get audit logs" });
@@ -265,21 +296,33 @@ export class ApiServer {
       }
     });
 
-    this.app.post("/api/admin/pause", (req, res, next) => this.adminAuth(req, res, next), (_req, res) => {
-      getMarketOrchestrator().pause();
-      res.json({ success: true, paused: true });
-    });
+    this.app.post(
+      "/api/admin/pause",
+      (req, res, next) => this.adminAuth(req, res, next),
+      (_req, res) => {
+        getMarketOrchestrator().pause();
+        res.json({ success: true, paused: true });
+      },
+    );
 
-    this.app.post("/api/admin/resume", (req, res, next) => this.adminAuth(req, res, next), async (_req, res) => {
-      await getMarketOrchestrator().resume();
-      res.json({ success: true, paused: false });
-    });
+    this.app.post(
+      "/api/admin/resume",
+      (req, res, next) => this.adminAuth(req, res, next),
+      async (_req, res) => {
+        await getMarketOrchestrator().resume();
+        res.json({ success: true, paused: false });
+      },
+    );
 
-    this.app.delete("/api/admin/wipe", (req, res, next) => this.adminAuth(req, res, next), async (_req, res) => {
-      getMarketOrchestrator().pause();
-      await wipeAndResetPortfolio(getConfig().portfolio.startingCapital);
-      res.json({ success: true });
-    });
+    this.app.delete(
+      "/api/admin/wipe",
+      (req, res, next) => this.adminAuth(req, res, next),
+      async (_req, res) => {
+        getMarketOrchestrator().pause();
+        await wipeAndResetPortfolio(getConfig().portfolio.startingCapital);
+        res.json({ success: true });
+      },
+    );
   }
 
   private broadcast(message: unknown): void {
