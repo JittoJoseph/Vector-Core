@@ -271,6 +271,53 @@ export class MarketOrchestrator extends EventEmitter {
     }
 
     await this.evaluateTradeCandidates();
+    this.cleanupTrackedMarkets();
+  }
+
+  private cleanupTrackedMarkets(): void {
+    const config = getConfig();
+    const now = Date.now();
+    const maxDeadline = now + config.strategy.deadlineLookaheadDays * 24 * 60 * 60 * 1000;
+    const toUntrack: string[] = [];
+
+    for (const [marketId, state] of this.trackedMarkets.entries()) {
+      const hasPosition = Array.from(this.openPositions.values()).some((p) => p.marketId === marketId);
+      if (hasPosition) continue;
+
+      if (state.resolved) {
+        toUntrack.push(marketId);
+        continue;
+      }
+
+      const deadlineTime = new Date(state.deadline).getTime();
+      
+      // Prune if past deadline (subject to allowPostDeadlineEntries)
+      if (!config.strategy.allowPostDeadlineEntries && deadlineTime <= now) {
+        toUntrack.push(marketId);
+        continue;
+      }
+
+      // Prune if too far in the future
+      if (deadlineTime > maxDeadline) {
+        toUntrack.push(marketId);
+        continue;
+      }
+    }
+
+    for (const marketId of toUntrack) {
+      this.untrackMarket(marketId);
+    }
+  }
+
+  private untrackMarket(marketId: string): void {
+    const state = this.trackedMarkets.get(marketId);
+    if (!state) return;
+    
+    this.wsWatcher.unsubscribe([state.noTokenId]);
+    this.tokenToMarket.delete(state.noTokenId);
+    if (state.conditionId) this.conditionIdToMarket.delete(state.conditionId);
+    this.trackedMarkets.delete(marketId);
+    logger.info({ marketId, question: state.question }, "Untracked market (no longer eligible)");
   }
 
   private async persistClassifiedEvent(event: GammaEvent): Promise<void> {
@@ -408,7 +455,18 @@ export class MarketOrchestrator extends EventEmitter {
       });
 
     if (classificationStatus === "candidate") {
-      this.trackMarket(item, m);
+      const config = getConfig();
+      const now = Date.now();
+      const maxDeadline = now + config.strategy.deadlineLookaheadDays * 24 * 60 * 60 * 1000;
+      const deadlineTime = new Date(item.deadline).getTime();
+      
+      const isPastDeadline = deadlineTime <= now;
+      const isTooFar = deadlineTime > maxDeadline;
+      
+      const shouldTrack = (!isPastDeadline || config.strategy.allowPostDeadlineEntries) && !isTooFar;
+      if (shouldTrack) {
+        this.trackMarket(item, m);
+      }
     }
   }
 
@@ -462,6 +520,10 @@ export class MarketOrchestrator extends EventEmitter {
 
     for (const market of rows) {
       if (new Date(market.deadline).getTime() > maxDeadline.getTime()) continue;
+      
+      // If we are actively evaluating it, ensure it is tracked for WS prices
+      this.trackMarketFromDb(market);
+
       if (this.openPositions.size >= config.strategy.maxSimultaneousPositions) break;
       if (this.inFlightTokens.has(market.noTokenId)) continue;
       if ([...this.openPositions.values()].some((p) => p.marketId === market.id)) continue;
@@ -736,64 +798,62 @@ export class MarketOrchestrator extends EventEmitter {
         deadline: trade.deadline,
       });
       if (market) {
-        const item: TrackedMarket = {
-          marketId: market.id,
-          eventId: market.eventId,
-          eventSlug: market.eventSlug,
-          eventTitle: market.eventTitle,
-          question: market.question,
-          slug: market.slug,
-          conditionId: market.conditionId,
-          deadline: market.deadline,
-          deadlineDate: market.deadlineDate,
-          noTokenId: market.noTokenId,
-          yesTokenId: market.yesTokenId,
-          noPrice: market.noPrice ? parseFloat(market.noPrice) : null,
-          feeSchedule: (market.feeSchedule as FeeSchedule | null) ?? null,
-          resolutionRules: market.resolutionRules,
-          lastPrices: {},
-          resolved: false,
-        };
-        this.trackedMarkets.set(market.id, item);
-        this.tokenToMarket.set(market.noTokenId, market.id);
-        if (market.conditionId) this.conditionIdToMarket.set(market.conditionId, market.id);
-        this.wsWatcher.subscribe([market.noTokenId]);
+        this.trackMarketFromDb(market);
       }
     }
   }
 
+  private trackMarketFromDb(market: typeof schema.deadlineMarkets.$inferSelect): void {
+    if (this.trackedMarkets.has(market.id)) return;
+    const item: TrackedMarket = {
+      marketId: market.id,
+      eventId: market.eventId,
+      eventSlug: market.eventSlug,
+      eventTitle: market.eventTitle,
+      question: market.question,
+      slug: market.slug,
+      conditionId: market.conditionId,
+      deadline: market.deadline,
+      deadlineDate: market.deadlineDate,
+      noTokenId: market.noTokenId,
+      yesTokenId: market.yesTokenId,
+      noPrice: market.noPrice ? parseFloat(market.noPrice) : null,
+      feeSchedule: (market.feeSchedule as FeeSchedule | null) ?? null,
+      resolutionRules: market.resolutionRules,
+      lastPrices: {},
+      resolved: false,
+    };
+    this.trackedMarkets.set(market.id, item);
+    this.tokenToMarket.set(market.noTokenId, market.id);
+    if (market.conditionId) this.conditionIdToMarket.set(market.conditionId, market.id);
+    this.wsWatcher.subscribe([market.noTokenId]);
+  }
+
   private async loadRecentTrackedMarkets(): Promise<void> {
     const db = getDb();
-    const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const config = getConfig();
+    const now = Date.now();
+    const maxDeadline = now + config.strategy.deadlineLookaheadDays * 24 * 60 * 60 * 1000;
+    const cutoff = new Date(now - 24 * 60 * 60 * 1000);
+    
     const rows = await db
       .select()
       .from(schema.deadlineMarkets)
       .where(gte(schema.deadlineMarkets.deadline, cutoff))
       .orderBy(desc(schema.deadlineMarkets.deadline))
       .limit(200);
+      
     for (const market of rows) {
       if (market.classificationStatus !== "candidate" && market.classificationStatus !== "traded") continue;
-      this.trackedMarkets.set(market.id, {
-        marketId: market.id,
-        eventId: market.eventId,
-        eventSlug: market.eventSlug,
-        eventTitle: market.eventTitle,
-        question: market.question,
-        slug: market.slug,
-        conditionId: market.conditionId,
-        deadline: market.deadline,
-        deadlineDate: market.deadlineDate,
-        noTokenId: market.noTokenId,
-        yesTokenId: market.yesTokenId,
-        noPrice: market.noPrice ? parseFloat(market.noPrice) : null,
-        feeSchedule: (market.feeSchedule as FeeSchedule | null) ?? null,
-        resolutionRules: market.resolutionRules,
-        lastPrices: {},
-        resolved: false,
-      });
-      this.tokenToMarket.set(market.noTokenId, market.id);
-      if (market.conditionId) this.conditionIdToMarket.set(market.conditionId, market.id);
-      this.wsWatcher.subscribe([market.noTokenId]);
+      
+      const deadlineTime = new Date(market.deadline).getTime();
+      const isPastDeadline = deadlineTime <= now;
+      const isTooFar = deadlineTime > maxDeadline;
+      
+      if (!config.strategy.allowPostDeadlineEntries && isPastDeadline) continue;
+      if (isTooFar) continue;
+
+      this.trackMarketFromDb(market);
     }
   }
 }
