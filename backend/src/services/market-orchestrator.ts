@@ -2,7 +2,7 @@ import { EventEmitter } from "events";
 import { and, desc, eq, gte, sql, inArray } from "drizzle-orm";
 import { createModuleLogger } from "../utils/logger.js";
 import { getConfig } from "../utils/config.js";
-import { getDb, createSimulatedTrade, loadOpenTradesWithMarkets, logAudit, resolveTrade } from "../db/client.js";
+import { getDb, createSimulatedTrade, loadOpenTradesWithMarkets, logAudit, resolveTrade, wipeAndResetPortfolio } from "../db/client.js";
 import * as schema from "../db/schema.js";
 import { getPolymarketClient, PolymarketClient } from "./polymarket-client.js";
 import { classifyEvent } from "./deadline-classifier.js";
@@ -117,7 +117,12 @@ export class MarketOrchestrator extends EventEmitter {
       clearInterval(this.scanTimer);
       this.scanTimer = null;
     }
-    logger.warn("System paused — discovery and new entries stopped");
+    if (this.settlementTimer) {
+      clearInterval(this.settlementTimer);
+      this.settlementTimer = null;
+    }
+    this.wsWatcher.stop();
+    logger.warn("System paused — discovery, settlement polling, and WS stopped");
   }
 
   async resume(): Promise<void> {
@@ -126,15 +131,51 @@ export class MarketOrchestrator extends EventEmitter {
     this.pausedByRiskGuard = false;
     this.riskPauseTriggeredAt = null;
     this.consecutiveLossCount = 0;
+    
+    this.wsWatcher.start();
     await this.portfolioManager.reload();
     await this.scan();
+    
     const config = getConfig();
-    this.scanTimer = setInterval(() => {
-      this.scan().catch((error) =>
-        logger.error({ error }, "Deadline market scan failed"),
-      );
-    }, config.strategy.scanIntervalMs);
+    if (!this.scanTimer) {
+      this.scanTimer = setInterval(() => {
+        this.scan().catch((error) =>
+          logger.error({ error }, "Deadline market scan failed"),
+        );
+      }, config.strategy.scanIntervalMs);
+    }
+    if (!this.settlementTimer) {
+      this.settlementTimer = setInterval(() => {
+        this.pollOpenPositionSettlements().catch((error) =>
+          logger.error({ error }, "Settlement polling failed"),
+        );
+      }, 60_000);
+    }
     logger.info("System resumed");
+  }
+
+  async wipe(): Promise<void> {
+    this.pause();
+    
+    const config = getConfig();
+    await wipeAndResetPortfolio(config.portfolio.startingCapital);
+    
+    this.trackedMarkets.clear();
+    this.tokenToMarket.clear();
+    this.conditionIdToMarket.clear();
+    this.openPositions.clear();
+    this.inFlightTokens.clear();
+    this.evaluatedMarketIds.clear();
+    this.wsWatcher.clear();
+
+    this.cycleCount = 0;
+    this.discoveredCount = 0;
+    this.candidateCount = 0;
+    this.consecutiveLossCount = 0;
+    this.pausedByRiskGuard = false;
+    this.riskPauseTriggeredAt = null;
+
+    logger.warn("System wiped, portfolio reset, and engine paused.");
   }
 
   isPaused(): boolean {
@@ -289,9 +330,12 @@ export class MarketOrchestrator extends EventEmitter {
       });
 
       for (const event of changedEvents) {
+        if (this.paused) break;
         await this.persistClassifiedEvent(event);
       }
     }
+
+    if (this.paused) return;
 
     // Update real metrics from DB
     const db = getDb();
@@ -495,6 +539,7 @@ export class MarketOrchestrator extends EventEmitter {
     this.evaluatedMarketIds.clear();
 
     for (const market of rows) {
+      if (this.paused) break;
       if (new Date(market.deadline).getTime() > maxDeadline.getTime()) continue;
       
       // Mark as evaluated and ensure it is tracked for WS prices

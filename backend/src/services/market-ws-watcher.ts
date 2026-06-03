@@ -71,6 +71,12 @@ export class MarketWebSocketWatcher extends EventEmitter {
     logger.info("Market WebSocket watcher stopped");
   }
 
+  clear(): void {
+    this.subscribedTokens.clear();
+    this.pendingSubscribes.clear();
+    this.pendingUnsubscribes.clear();
+  }
+
   subscribe(tokenIds: string[]): void {
     const newTokens = tokenIds.filter((id) => !this.subscribedTokens.has(id));
     if (newTokens.length === 0) return;

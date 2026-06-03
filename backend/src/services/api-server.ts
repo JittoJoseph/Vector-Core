@@ -305,8 +305,8 @@ export class ApiServer {
       "/api/admin/wipe",
       (req, res, next) => this.adminAuth(req, res, next),
       async (_req, res) => {
-        getMarketOrchestrator().pause();
-        await wipeAndResetPortfolio(getConfig().portfolio.startingCapital);
+        const orchestrator = getMarketOrchestrator();
+        await orchestrator.wipe();
         res.json({ success: true });
       },
     );
