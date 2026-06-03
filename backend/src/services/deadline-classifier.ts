@@ -78,38 +78,39 @@ export function normalizeUnderlyingKey(question: string): string {
     .toLowerCase();
 }
 
-function classifyRejection(market: GammaMarket): string | null {
+function isEligibleYesNoDeadlineMarket(market: GammaMarket): boolean {
   const question = market.question ?? "";
   const groupTitle = market.groupItemTitle ?? "";
   const text = `${question} ${groupTitle}`;
 
-  if (market.negRiskOther) return "neg_risk_other";
-  if (market.active !== true) return "inactive";
-  if (market.closed === true) return "closed";
-  if (market.acceptingOrders !== true) return "not_accepting_orders";
-  if (market.enableOrderBook !== true) return "orderbook_disabled";
-  if (EXCLUDED_TEXT_RE.test(text)) return "excluded_deadline_shape";
-  if (SPORTS_HINT_RE.test(text) && !/\bby\s+/.test(question)) return "sports_or_winner_group";
-  if (!parseExplicitDeadline(text)) return "missing_explicit_month_day_deadline";
+  if (market.negRiskOther) return false;
+  if (market.active !== true) return false;
+  if (market.closed === true) return false;
+  if (market.acceptingOrders !== true) return false;
+  if (market.enableOrderBook !== true) return false;
+  if (EXCLUDED_TEXT_RE.test(text)) return false;
+  if (SPORTS_HINT_RE.test(text) && !/\bby\s+/.test(question)) return false;
+  if (!parseExplicitDeadline(text)) return false;
 
   const outcomes = PolymarketClient.parseOutcomes(market);
   const tokenIds = PolymarketClient.parseClobTokenIds(market);
-  if (outcomes.length !== 2 || tokenIds.length !== 2) return "not_binary_tokenized";
+  if (outcomes.length !== 2 || tokenIds.length !== 2) return false;
   const yesIndex = outcomes.findIndex((o) => o.toLowerCase() === "yes");
   const noIndex = outcomes.findIndex((o) => o.toLowerCase() === "no");
-  if (yesIndex < 0 || noIndex < 0) return "not_yes_no";
+  if (yesIndex < 0 || noIndex < 0) return false;
 
-  return null;
+  return tokenIds[yesIndex] != null && tokenIds[noIndex] != null;
 }
 
 export function classifyEvent(event: GammaEvent): ClassifiedMarket[] {
   const eventId = String(event.id);
   const eventSlug = event.slug ?? eventId;
   const eventTitle = event.title ?? eventSlug;
-  const provisional: ClassifiedMarket[] = [];
+  const eligible: ClassifiedMarket[] = [];
 
   for (const market of event.markets ?? []) {
-    const rejectionReason = classifyRejection(market);
+    if (!isEligibleYesNoDeadlineMarket(market)) continue;
+
     const text = `${market.question ?? ""} ${market.groupItemTitle ?? ""}`;
     const parsed = parseExplicitDeadline(text);
     const outcomes = PolymarketClient.parseOutcomes(market);
@@ -119,27 +120,9 @@ export function classifyEvent(event: GammaEvent): ClassifiedMarket[] {
     const noIndex = outcomes.findIndex((o) => o.toLowerCase() === "no");
     const underlyingKey = normalizeUnderlyingKey(market.question ?? eventTitle);
 
-    if (!parsed || yesIndex < 0 || noIndex < 0 || tokenIds[yesIndex] == null || tokenIds[noIndex] == null) {
-      provisional.push({
-        eventId,
-        eventSlug,
-        eventTitle,
-        market,
-        underlyingKey,
-        deadline: parsed?.deadline ?? new Date(0),
-        deadlineDate: parsed?.deadlineDate ?? "",
-        yesTokenId: tokenIds[yesIndex] ?? "",
-        noTokenId: tokenIds[noIndex] ?? "",
-        outcomes,
-        outcomePrices: prices,
-        noPrice: prices[noIndex] ?? null,
-        familyKind: "single_deadline",
-        rejectionReason: rejectionReason ?? "not_classifiable",
-      });
-      continue;
-    }
+    if (!parsed || yesIndex < 0 || noIndex < 0) continue;
 
-    provisional.push({
+    eligible.push({
       eventId,
       eventSlug,
       eventTitle,
@@ -153,33 +136,22 @@ export function classifyEvent(event: GammaEvent): ClassifiedMarket[] {
       outcomePrices: prices,
       noPrice: prices[noIndex] ?? null,
       familyKind: "single_deadline",
-      rejectionReason,
+      rejectionReason: null,
     });
   }
 
-  const valid = provisional.filter((m) => !m.rejectionReason);
   const datesByKey = new Map<string, Set<string>>();
-  const countByDate = new Map<string, number>();
-  for (const item of valid) {
+  for (const item of eligible) {
     if (!datesByKey.has(item.underlyingKey)) {
       datesByKey.set(item.underlyingKey, new Set());
     }
     datesByKey.get(item.underlyingKey)!.add(item.deadlineDate);
-    countByDate.set(item.deadlineDate, (countByDate.get(item.deadlineDate) ?? 0) + 1);
   }
 
-  return provisional.map((item) => {
-    if (item.rejectionReason) return item;
+  return eligible.flatMap((item) => {
     const uniqueDates = datesByKey.get(item.underlyingKey)?.size ?? 1;
-    if (uniqueDates >= 2) return { ...item, familyKind: "deadline_ladder" };
-    const sameDateCount = countByDate.get(item.deadlineDate) ?? 1;
-    if (sameDateCount >= 2) {
-      return {
-        ...item,
-        familyKind: "same_deadline_group",
-        rejectionReason: "same_deadline_group_watchlist_only",
-      };
-    }
-    return item;
+    return uniqueDates >= 2
+      ? [{ ...item, familyKind: "deadline_ladder" as const }]
+      : [];
   });
 }

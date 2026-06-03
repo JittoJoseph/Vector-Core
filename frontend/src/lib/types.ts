@@ -172,7 +172,6 @@ export interface SystemStats {
     scanner: {
       discoveredCount: number;
       candidateCount: number;
-      rejectedCount: number;
     };
     ws: {
       connected: boolean;

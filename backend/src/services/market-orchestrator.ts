@@ -1,5 +1,5 @@
 import { EventEmitter } from "events";
-import { and, desc, eq, gte } from "drizzle-orm";
+import { and, desc, eq, gte, sql } from "drizzle-orm";
 import { createModuleLogger } from "../utils/logger.js";
 import { getConfig } from "../utils/config.js";
 import { getDb, createSimulatedTrade, loadOpenTradesWithMarkets, logAudit, resolveTrade } from "../db/client.js";
@@ -71,7 +71,6 @@ export class MarketOrchestrator extends EventEmitter {
   private cycleCount = 0;
   private discoveredCount = 0;
   private candidateCount = 0;
-  private rejectedCount = 0;
   private consecutiveLossCount = 0;
   private pausedByRiskGuard = false;
   private riskPauseTriggeredAt: number | null = null;
@@ -81,6 +80,7 @@ export class MarketOrchestrator extends EventEmitter {
     if (this.running) return;
     this.running = true;
     await this.portfolioManager.init();
+    await this.pruneNonLadderRows();
     await this.loadOpenPositions();
     await this.loadRecentTrackedMarkets();
     this.wireEvents();
@@ -152,7 +152,6 @@ export class MarketOrchestrator extends EventEmitter {
       scanner: {
         discoveredCount: this.discoveredCount,
         candidateCount: this.candidateCount,
-        rejectedCount: this.rejectedCount,
       },
       ws: this.wsWatcher.getStats(),
       strategy: {
@@ -217,6 +216,35 @@ export class MarketOrchestrator extends EventEmitter {
     );
   }
 
+  private async pruneNonLadderRows(): Promise<void> {
+    const db = getDb();
+    await db.execute(sql`
+      DELETE FROM ${schema.orderbookSnapshots}
+      WHERE market_id IN (
+        SELECT id FROM ${schema.deadlineMarkets}
+        WHERE classification_status NOT IN ('candidate', 'traded')
+           OR family_kind <> 'deadline_ladder'
+      )
+    `);
+    await db.execute(sql`
+      DELETE FROM ${schema.opportunities}
+      WHERE market_id IN (
+        SELECT id FROM ${schema.deadlineMarkets}
+        WHERE classification_status NOT IN ('candidate', 'traded')
+           OR family_kind <> 'deadline_ladder'
+      )
+    `);
+    await db.execute(sql`
+      DELETE FROM ${schema.deadlineMarkets}
+      WHERE classification_status NOT IN ('candidate', 'traded')
+         OR family_kind <> 'deadline_ladder'
+    `);
+    await db.execute(sql`
+      DELETE FROM ${schema.eventFamilies}
+      WHERE family_kind <> 'deadline_ladder'
+    `);
+  }
+
   async scan(): Promise<void> {
     if (this.paused) return;
     const config = getConfig();
@@ -248,18 +276,24 @@ export class MarketOrchestrator extends EventEmitter {
   private async persistClassifiedEvent(event: GammaEvent): Promise<void> {
     const db = getDb();
     const classified = classifyEvent(event);
-    const valid = classified.filter((m) => !m.rejectionReason);
-    const uniqueDates = new Set(valid.map((m) => m.deadlineDate));
-    const familyKind =
-      valid.some((m) => m.familyKind === "deadline_ladder")
-        ? "deadline_ladder"
-        : classified.some((m) => m.familyKind === "same_deadline_group")
-          ? "same_deadline_group"
-          : "single_deadline";
+    if (classified.length === 0) return;
+
+    const uniqueDates = new Set(classified.map((m) => m.deadlineDate));
+    const familyKind = "deadline_ladder";
     const eventId = String(event.id);
     const eventSlug = event.slug ?? eventId;
     const eventTitle = event.title ?? eventSlug;
     const normalizedKey = eventTitle.toLowerCase().replace(/\s+/g, " ").trim();
+    const eventSummary = {
+      id: eventId,
+      slug: eventSlug,
+      title: eventTitle,
+      active: event.active ?? true,
+      closed: event.closed ?? false,
+      liquidity: event.liquidityClob ?? event.liquidity ?? 0,
+      volume24hr: event.volume24hr ?? 0,
+      updatedAt: event.updatedAt ?? null,
+    };
 
     await db
       .insert(schema.eventFamilies)
@@ -274,7 +308,7 @@ export class MarketOrchestrator extends EventEmitter {
         closed: event.closed ?? false,
         liquidity: String(event.liquidityClob ?? event.liquidity ?? 0),
         volume24h: String(event.volume24hr ?? 0),
-        raw: event as any,
+        raw: eventSummary as any,
         lastFetchedAt: new Date(),
         updatedAt: new Date(),
       })
@@ -288,32 +322,24 @@ export class MarketOrchestrator extends EventEmitter {
           closed: event.closed ?? false,
           liquidity: String(event.liquidityClob ?? event.liquidity ?? 0),
           volume24h: String(event.volume24hr ?? 0),
-          raw: event as any,
+          raw: eventSummary as any,
           lastFetchedAt: new Date(),
           updatedAt: new Date(),
         },
       });
 
+    this.discoveredCount += classified.length;
+    this.candidateCount += classified.length;
+
     for (const item of classified) {
       await this.persistClassifiedMarket(item);
     }
-
-    this.discoveredCount += classified.length;
-    this.candidateCount += valid.filter((m) => m.familyKind === "deadline_ladder").length;
-    this.rejectedCount += classified.filter((m) => m.rejectionReason).length;
   }
 
   private async persistClassifiedMarket(item: ClassifiedMarket): Promise<void> {
     const db = getDb();
     const m = item.market;
-    const classificationStatus =
-      !item.rejectionReason && item.familyKind === "deadline_ladder"
-        ? "candidate"
-        : item.familyKind === "same_deadline_group"
-          ? "watchlist"
-          : item.rejectionReason
-            ? "rejected"
-            : "research";
+    const classificationStatus = "candidate";
 
     await db
       .insert(schema.deadlineMarkets)

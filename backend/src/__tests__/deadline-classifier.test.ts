@@ -71,21 +71,17 @@ describe("classifyEvent", () => {
     expect(rows.every((row) => row.rejectionReason === null)).toBe(true);
   });
 
-  it("marks same-date outcome groups as watchlist-only", () => {
+  it("drops same-date outcome groups instead of storing watchlist noise", () => {
     const rows = classifyEvent(
       event([
         market({ id: "a", question: "Will Bank A fail by June 30, 2026?" }),
         market({ id: "b", question: "Will Bank B fail by June 30, 2026?" }),
       ]),
     );
-    expect(rows.every((row) => row.familyKind === "same_deadline_group")).toBe(
-      true,
-    );
-    expect(rows.every((row) => row.rejectionReason === "same_deadline_group_watchlist_only"))
-      .toBe(true);
+    expect(rows).toEqual([]);
   });
 
-  it("rejects margin, by-election, and placeholder markets", () => {
+  it("drops margin, by-election, and placeholder markets", () => {
     const rows = classifyEvent(
       event([
         market({ id: "margin", question: "Will Karen Bass win by 0-5% by June 30, 2026?" }),
@@ -93,10 +89,22 @@ describe("classifyEvent", () => {
         market({ id: "other", question: "Will Person AR win by June 30, 2026?", negRiskOther: true }),
       ]),
     );
-    expect(rows.map((row) => row.rejectionReason)).toEqual([
-      "excluded_deadline_shape",
-      "excluded_deadline_shape",
-      "neg_risk_other",
-    ]);
+    expect(rows).toEqual([]);
+  });
+
+  it("drops rejected non-Yes/No markets entirely", () => {
+    const rows = classifyEvent(
+      event([
+        market({
+          id: "spread",
+          question: "Spread: Spurs (-15.5)",
+          outcomes: '["Spurs","Knicks"]',
+          clobTokenIds: '["spurs-token","knicks-token"]',
+          groupItemTitle: "Spread -15.5",
+        }),
+      ]),
+    );
+
+    expect(rows).toEqual([]);
   });
 });

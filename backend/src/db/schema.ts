@@ -85,9 +85,7 @@ export const deadlineMarkets = pgTable(
     statusIdx: index("deadline_markets_status_idx").on(
       table.classificationStatus,
     ),
-    noTokenIdx: uniqueIndex("deadline_markets_no_token_idx").on(
-      table.noTokenId,
-    ),
+    noTokenIdx: index("deadline_markets_no_token_idx").on(table.noTokenId),
   }),
 );
 

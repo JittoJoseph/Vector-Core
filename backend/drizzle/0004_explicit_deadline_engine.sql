@@ -139,7 +139,7 @@ CREATE INDEX "event_families_updated_at_idx" ON "event_families" ("updated_at");
 CREATE INDEX "deadline_markets_event_idx" ON "deadline_markets" ("event_id");
 CREATE INDEX "deadline_markets_deadline_idx" ON "deadline_markets" ("deadline");
 CREATE INDEX "deadline_markets_status_idx" ON "deadline_markets" ("classification_status");
-CREATE UNIQUE INDEX "deadline_markets_no_token_idx" ON "deadline_markets" ("no_token_id");
+CREATE INDEX "deadline_markets_no_token_idx" ON "deadline_markets" ("no_token_id");
 CREATE INDEX "opportunities_market_idx" ON "opportunities" ("market_id");
 CREATE INDEX "opportunities_status_idx" ON "opportunities" ("status");
 CREATE INDEX "opportunities_created_at_idx" ON "opportunities" ("created_at");

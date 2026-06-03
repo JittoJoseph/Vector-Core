@@ -79,8 +79,6 @@ export function DashboardPage() {
     [families],
   );
 
-  const rejectedCount = markets.filter((m) => m.classificationStatus === "rejected").length;
-  const watchlistCount = markets.filter((m) => m.classificationStatus === "watchlist").length;
   const openTrades = trades.filter((t) => t.status === "OPEN");
   const settledTrades = trades.filter((t) => t.status === "SETTLED");
   const totalPnl = settledTrades.reduce(
@@ -119,8 +117,8 @@ export function DashboardPage() {
             <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mt-5">
               <Metric label="Ladders" value={ladderFamilies.length} />
               <Metric label="Candidates" value={candidateMarkets.length} />
-              <Metric label="Watchlist" value={watchlistCount} />
-              <Metric label="Rejected" value={rejectedCount} />
+              <Metric label="Open Trades" value={openTrades.length} />
+              <Metric label="Settled" value={settledTrades.length} />
               <Metric label="Live Tokens" value={liveMarkets.length} />
             </div>
           </div>
