@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect, useMemo } from "react";
+import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { Header } from "./header";
 import { SystemStatusIndicator } from "./system-status-indicator";
 import { TradesTable } from "./trades-table";
@@ -74,8 +74,11 @@ export function DashboardPage() {
   const [families, setFamilies] = useState<EventFamily[]>([]);
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
   const [refreshingExtra, setRefreshingExtra] = useState(false);
+  const fetchingExtraRef = useRef(false);
 
   const fetchExtraData = useCallback(async () => {
+    if (fetchingExtraRef.current) return;
+    fetchingExtraRef.current = true;
     setRefreshingExtra(true);
     try {
       const api = getApiClient();
@@ -87,11 +90,19 @@ export function DashboardPage() {
       setOpportunities(opportunityRows);
     } finally {
       setRefreshingExtra(false);
+      fetchingExtraRef.current = false;
     }
   }, []);
 
   useEffect(() => {
     fetchExtraData();
+  }, [fetchExtraData]);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      fetchExtraData().catch(() => {});
+    }, 10_000);
+    return () => clearInterval(interval);
   }, [fetchExtraData]);
 
   const handleManualRefresh = useCallback(async () => {

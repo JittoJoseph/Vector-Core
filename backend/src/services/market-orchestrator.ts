@@ -71,6 +71,18 @@ export class MarketOrchestrator extends EventEmitter {
   private cycleCount = 0;
   private discoveredCount = 0;
   private candidateCount = 0;
+  private lastScanStartedAt: number | null = null;
+  private lastScanFinishedAt: number | null = null;
+  private lastScanError: string | null = null;
+  private lastDecisionAt: number | null = null;
+  private lastTradeOpenedAt: number | null = null;
+  private recentDecisions: Array<{
+    ts: number;
+    marketId: string;
+    eventId: string;
+    status: string;
+    reason: string;
+  }> = [];
   private consecutiveLossCount = 0;
   private pausedByRiskGuard = false;
   private riskPauseTriggeredAt: number | null = null;
@@ -152,6 +164,14 @@ export class MarketOrchestrator extends EventEmitter {
       scanner: {
         discoveredCount: this.discoveredCount,
         candidateCount: this.candidateCount,
+      },
+      activity: {
+        lastScanStartedAt: this.lastScanStartedAt,
+        lastScanFinishedAt: this.lastScanFinishedAt,
+        lastScanError: this.lastScanError,
+        lastDecisionAt: this.lastDecisionAt,
+        lastTradeOpenedAt: this.lastTradeOpenedAt,
+        recentDecisions: this.recentDecisions.slice(-25),
       },
       ws: this.wsWatcher.getStats(),
       strategy: {
@@ -247,30 +267,39 @@ export class MarketOrchestrator extends EventEmitter {
 
   async scan(): Promise<void> {
     if (this.paused) return;
+    this.lastScanStartedAt = Date.now();
     const config = getConfig();
     this.cycleCount++;
-    let cursor: string | null = null;
-    const events: GammaEvent[] = [];
+    try {
+      let cursor: string | null = null;
+      const events: GammaEvent[] = [];
 
-    for (let page = 0; page < config.strategy.discoveryPages; page++) {
-      const result = await this.client.listEventsKeyset({
-        limit: 100,
-        after_cursor: cursor ?? undefined,
-        active: true,
-        closed: false,
-        order: "volume24hr",
-        ascending: false,
-      });
-      events.push(...result.events);
-      cursor = result.nextCursor;
-      if (!cursor) break;
+      for (let page = 0; page < config.strategy.discoveryPages; page++) {
+        const result = await this.client.listEventsKeyset({
+          limit: 100,
+          after_cursor: cursor ?? undefined,
+          active: true,
+          closed: false,
+          order: "volume24hr",
+          ascending: false,
+        });
+        events.push(...result.events);
+        cursor = result.nextCursor;
+        if (!cursor) break;
+      }
+
+      for (const event of events) {
+        await this.persistClassifiedEvent(event);
+      }
+
+      await this.evaluateTradeCandidates();
+      this.lastScanError = null;
+    } catch (error) {
+      this.lastScanError = error instanceof Error ? error.message : String(error);
+      throw error;
+    } finally {
+      this.lastScanFinishedAt = Date.now();
     }
-
-    for (const event of events) {
-      await this.persistClassifiedEvent(event);
-    }
-
-    await this.evaluateTradeCandidates();
   }
 
   private async persistClassifiedEvent(event: GammaEvent): Promise<void> {
@@ -583,6 +612,7 @@ export class MarketOrchestrator extends EventEmitter {
         entryPrice: fill.averagePrice,
         shares: fill.totalShares,
       });
+      this.lastTradeOpenedAt = Date.now();
       this.emit("tradeOpened", { trade });
     } catch (error) {
       logger.error({ error, marketId: market.id }, "Candidate evaluation failed");
@@ -632,6 +662,18 @@ export class MarketOrchestrator extends EventEmitter {
         depthAtLimit: depthAtLimit?.toString() ?? null,
         raw: raw as any,
       });
+    }
+
+    this.lastDecisionAt = Date.now();
+    this.recentDecisions.push({
+      ts: this.lastDecisionAt,
+      marketId: market.id,
+      eventId: market.eventId,
+      status,
+      reason,
+    });
+    if (this.recentDecisions.length > 200) {
+      this.recentDecisions.splice(0, this.recentDecisions.length - 200);
     }
   }
 

@@ -1,5 +1,5 @@
 /**
- * API client for the PenguinX BTC end-of-window micro-profit simulation backend.
+ * API client for the Vector Core deadline-ladder simulation backend.
  */
 
 import type {
@@ -17,9 +17,9 @@ import type {
 } from "./types";
 
 const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_BASE_URL || "https://penguinx.onrender.com";
+  process.env.NEXT_PUBLIC_API_BASE_URL || "https://vector-core.onrender.com";
 const WS_BASE_URL =
-  process.env.NEXT_PUBLIC_WS_BASE_URL || "wss://penguinx.onrender.com";
+  process.env.NEXT_PUBLIC_WS_BASE_URL || "wss://vector-core.onrender.com";
 
 async function fetchWithRetry<T>(
   url: string,

@@ -106,7 +106,9 @@ export class ApiServer {
   }
 
   private setupRoutes(): void {
-    this.app.get("/ping", (_req, res) => res.json("pong"));
+    this.app.get("/ping", (_req, res) =>
+      res.json({ pong: true, ts: Date.now() }),
+    );
     this.app.get("/health", (_req, res) => {
       const orchestrator = getMarketOrchestrator();
       res.json({
