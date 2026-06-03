@@ -204,11 +204,11 @@ export function DashboardPage() {
                   />
                   <StatusMetric
                     label="Discovered Ladders"
-                    value={`${stats.orchestrator.scanner.candidateCount} event families`}
+                    value={`${stats.orchestrator.scanner.discoveredLadders} event families`}
                   />
                   <StatusMetric
                     label="Evaluated Decisions"
-                    value={`${stats.orchestrator.scanner.discoveredCount} opportunities`}
+                    value={`${stats.orchestrator.scanner.evaluatedOpportunities} opportunities`}
                   />
                   <StatusMetric
                     label="Cycles executed"
@@ -615,7 +615,7 @@ export function DashboardPage() {
                   <SidebarRow label="Open Positions" value={stats.orchestrator.openPositions.toString()} />
                   <SidebarRow label="Monitored Markets" value={stats.orchestrator.activeMarkets.toString()} />
                   <SidebarRow label="Trades Executed" value={stats.orchestrator.cycleCount.toString()} />
-                  <SidebarRow label="Discovered Count" value={stats.orchestrator.scanner.discoveredCount.toLocaleString()} />
+                  <SidebarRow label="Discovered Count" value={stats.orchestrator.scanner.discoveredLadders.toLocaleString()} />
                   <SidebarRow label="Uptime WS messages" value={stats.orchestrator.ws.messageCount.toLocaleString()} />
                   <SidebarRow label="WS Connect Retries" value={stats.orchestrator.ws.reconnectAttempts.toString()} />
                 </div>

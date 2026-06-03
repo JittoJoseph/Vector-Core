@@ -170,8 +170,8 @@ export interface SystemStats {
     openPositions: number;
     cycleCount: number;
     scanner: {
-      discoveredCount: number;
-      candidateCount: number;
+      discoveredLadders: number;
+      evaluatedOpportunities: number;
     };
     ws: {
       connected: boolean;

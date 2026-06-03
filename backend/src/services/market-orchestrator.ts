@@ -69,8 +69,8 @@ export class MarketOrchestrator extends EventEmitter {
   private running = false;
   private paused = false;
   private cycleCount = 0;
-  private discoveredCount = 0;
-  private candidateCount = 0;
+  private discoveredLadders = 0;
+  private evaluatedOpportunities = 0;
   private consecutiveLossCount = 0;
   private pausedByRiskGuard = false;
   private riskPauseTriggeredAt: number | null = null;
@@ -169,8 +169,8 @@ export class MarketOrchestrator extends EventEmitter {
     this.wsWatcher.clear();
 
     this.cycleCount = 0;
-    this.discoveredCount = 0;
-    this.candidateCount = 0;
+    this.discoveredLadders = 0;
+    this.evaluatedOpportunities = 0;
     this.consecutiveLossCount = 0;
     this.pausedByRiskGuard = false;
     this.riskPauseTriggeredAt = null;
@@ -191,14 +191,14 @@ export class MarketOrchestrator extends EventEmitter {
       openPositions: this.openPositions.size,
       cycleCount: this.cycleCount,
       scanner: {
-        discoveredCount: this.discoveredCount,
-        candidateCount: this.candidateCount,
+        discoveredLadders: this.discoveredLadders,
+        evaluatedOpportunities: this.evaluatedOpportunities,
       },
       ws: this.wsWatcher.getStats(),
       strategy: {
         watchedTokens: this.tokenToMarket.size,
         triggersCount: this.cycleCount,
-        evaluatedTokens: this.inFlightTokens.size,
+        evaluatedTokens: this.evaluatedMarketIds.size,
       },
       risk: {
         consecutiveLossCount: this.consecutiveLossCount,
@@ -345,8 +345,8 @@ export class MarketOrchestrator extends EventEmitter {
       .from(schema.deadlineMarkets)
       .where(eq(schema.deadlineMarkets.classificationStatus, "candidate"));
 
-    this.candidateCount = familiesCount[0]?.count ?? 0;
-    this.discoveredCount = marketsCount[0]?.count ?? 0;
+    this.discoveredLadders = familiesCount[0]?.count ?? 0;
+    this.evaluatedOpportunities = marketsCount[0]?.count ?? 0;
 
     await this.evaluateTradeCandidates();
     this.cleanupTrackedMarkets();
@@ -357,11 +357,7 @@ export class MarketOrchestrator extends EventEmitter {
 
     for (const [marketId, state] of this.trackedMarkets.entries()) {
       const hasPosition = Array.from(this.openPositions.values()).some((p) => p.marketId === marketId);
-      if (hasPosition) continue;
-
-      // If it has no open position and it was not actively evaluated in this cycle, 
-      // it is no longer relevant (resolved, closed, rejected, past deadline, out of top 100, etc.)
-      if (!this.evaluatedMarketIds.has(marketId)) {
+      if (!hasPosition) {
         toUntrack.push(marketId);
       }
     }
@@ -516,7 +512,6 @@ export class MarketOrchestrator extends EventEmitter {
 
   private async evaluateTradeCandidates(): Promise<void> {
     const config = getConfig();
-    if (this.openPositions.size >= config.strategy.maxSimultaneousPositions) return;
     const db = getDb();
     const now = new Date();
     const maxDeadline = new Date(
@@ -542,11 +537,10 @@ export class MarketOrchestrator extends EventEmitter {
       if (this.paused) break;
       if (new Date(market.deadline).getTime() > maxDeadline.getTime()) continue;
       
-      // Mark as evaluated and ensure it is tracked for WS prices
       this.evaluatedMarketIds.add(market.id);
-      this.trackMarketFromDb(market);
 
-      if (this.openPositions.size >= config.strategy.maxSimultaneousPositions) break;
+      const hasMaxPositions = this.openPositions.size >= config.strategy.maxSimultaneousPositions;
+      if (!config.portfolio.allowNegativeBalance && hasMaxPositions) continue;
       if (this.inFlightTokens.has(market.noTokenId)) continue;
       if ([...this.openPositions.values()].some((p) => p.marketId === market.id)) continue;
       await this.evaluateCandidate(market);
@@ -657,6 +651,8 @@ export class MarketOrchestrator extends EventEmitter {
         actualCost: fill.netCost,
         deadline: market.deadline,
       });
+
+      this.trackMarketFromDb(market);
 
       await this.recordOpportunity(market, "traded", "trade_opened", raw, top, depthAtLimit, expectedNetProfit);
       await db.update(schema.deadlineMarkets).set({ classificationStatus: "traded", updatedAt: new Date() }).where(eq(schema.deadlineMarkets.id, market.id));
