@@ -14,6 +14,21 @@ interface TradeDetailPopupProps {
   marketQuestion?: string | null;
 }
 
+function polymarketMarketUrl({
+  eventSlug,
+  marketSlug,
+}: {
+  eventSlug?: string | null;
+  marketSlug?: string | null;
+}): string {
+  if (eventSlug && marketSlug) {
+    return `https://polymarket.com/event/${eventSlug}/${marketSlug}`;
+  }
+  if (eventSlug) return `https://polymarket.com/event/${eventSlug}`;
+  if (marketSlug) return `https://polymarket.com/market/${marketSlug}`;
+  return "https://polymarket.com";
+}
+
 export function TradeDetailPopup({
   trade,
   open,
@@ -52,10 +67,10 @@ export function TradeDetailPopup({
   const outcome = trade.exitOutcome;
   const isWin = outcome === "WIN";
 
-  const polyUrl =
-    (marketSlug ?? trade.marketSlug)
-      ? `https://polymarket.com/event/${marketSlug ?? trade.marketSlug}`
-      : `https://polymarket.com/market/${trade.marketId}`;
+  const polyUrl = polymarketMarketUrl({
+    eventSlug: trade.eventSlug,
+    marketSlug: marketSlug ?? trade.marketSlug,
+  });
 
   const resolvedQuestion = marketQuestion ?? trade.marketQuestion;
 

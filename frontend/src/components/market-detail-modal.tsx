@@ -19,8 +19,12 @@ interface MarketDetailModalProps {
 }
 
 function polymarketMarketUrl(market: DiscoveredMarket): string {
-  if (market.slug) return `https://polymarket.com/event/${market.slug}`;
-  return `https://polymarket.com/market/${market.id}`;
+  if (market.eventSlug && market.slug) {
+    return `https://polymarket.com/event/${market.eventSlug}/${market.slug}`;
+  }
+  if (market.eventSlug) return `https://polymarket.com/event/${market.eventSlug}`;
+  if (market.slug) return `https://polymarket.com/market/${market.slug}`;
+  return "https://polymarket.com";
 }
 
 function Chip({ children }: { children: React.ReactNode }) {

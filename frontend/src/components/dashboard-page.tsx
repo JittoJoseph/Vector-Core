@@ -27,8 +27,20 @@ function daysTo(deadline: string): string {
   return `${days.toFixed(1)}d`;
 }
 
-function polyUrl(slug?: string | null): string {
+function polymarketEventUrl(slug?: string | null): string {
   return slug ? `https://polymarket.com/event/${slug}` : "https://polymarket.com";
+}
+
+function polymarketMarketUrl(market: {
+  eventSlug?: string | null;
+  slug?: string | null;
+}): string {
+  if (market.eventSlug && market.slug) {
+    return `https://polymarket.com/event/${market.eventSlug}/${market.slug}`;
+  }
+  if (market.eventSlug) return `https://polymarket.com/event/${market.eventSlug}`;
+  if (market.slug) return `https://polymarket.com/market/${market.slug}`;
+  return "https://polymarket.com";
 }
 
 export function DashboardPage() {
@@ -167,7 +179,7 @@ export function DashboardPage() {
                     <tr key={market.id} className="border-b border-border/20 hover:bg-muted/20">
                       <td className="p-3 min-w-[360px]">
                         <a
-                          href={polyUrl(market.slug ?? market.eventSlug)}
+                          href={polymarketMarketUrl(market)}
                           target="_blank"
                           rel="noreferrer"
                           className="font-medium hover:text-blue-400 inline-flex items-center gap-1"
@@ -208,7 +220,7 @@ export function DashboardPage() {
                 {ladderFamilies.slice(0, 12).map((family) => (
                   <a
                     key={family.id}
-                    href={polyUrl(family.slug)}
+                    href={polymarketEventUrl(family.slug)}
                     target="_blank"
                     rel="noreferrer"
                     className="block p-3 hover:bg-muted/20"
