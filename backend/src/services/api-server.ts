@@ -15,7 +15,7 @@ import {
   calculatePortfolioPerformance,
   type TimePeriod,
 } from "./performance-calculator.js";
-import { runMonteCarloAnalysis } from "./monte-carlo.js";
+
 
 const logger = createModuleLogger("api-server");
 
@@ -281,20 +281,7 @@ export class ApiServer {
       }
     });
 
-    this.app.get("/api/analysis", async (req, res) => {
-      try {
-        const simulations = parseInt(req.query.simulations as string) || 10_000;
-        const tradesPerSim = parseInt(req.query.tradesPerSim as string) || 100;
-        const result = await runMonteCarloAnalysis({
-          simulations: Math.min(simulations, 50_000),
-          tradesPerSim: Math.min(tradesPerSim, 500),
-        });
-        res.json(result);
-      } catch (error: any) {
-        const msg = error?.message || "Analysis failed";
-        res.status(msg.includes("No settled") ? 400 : 500).json({ error: msg });
-      }
-    });
+
 
     this.app.post(
       "/api/admin/pause",
