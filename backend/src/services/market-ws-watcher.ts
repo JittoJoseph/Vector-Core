@@ -38,6 +38,10 @@ export class MarketWebSocketWatcher extends EventEmitter {
   private pingTimer: ReturnType<typeof setInterval> | null = null;
   private messageCount = 0;
 
+  private pendingSubscribes = new Set<string>();
+  private pendingUnsubscribes = new Set<string>();
+  private flushTimer: ReturnType<typeof setTimeout> | null = null;
+
   private static readonly PING_INTERVAL = 10000;
   private static readonly MAX_RECONNECT_DELAY = 60000;
   private static readonly BASE_RECONNECT_DELAY = 1000;
@@ -71,28 +75,56 @@ export class MarketWebSocketWatcher extends EventEmitter {
     const newTokens = tokenIds.filter((id) => !this.subscribedTokens.has(id));
     if (newTokens.length === 0) return;
 
-    newTokens.forEach((id) => this.subscribedTokens.add(id));
+    newTokens.forEach((id) => {
+      this.subscribedTokens.add(id);
+      this.pendingSubscribes.add(id);
+      this.pendingUnsubscribes.delete(id);
+    });
 
-    if (this.ws?.readyState === WebSocket.OPEN) {
-      const msg: SubscriptionUpdateMessage = {
-        assets_ids: newTokens,
-        operation: "subscribe",
-      };
-      this.ws.send(JSON.stringify(msg));
-      logger.info({ count: newTokens.length }, "Subscribed to new tokens");
-    }
+    this.scheduleFlush();
   }
 
   unsubscribe(tokenIds: string[]): void {
-    tokenIds.forEach((id) => this.subscribedTokens.delete(id));
+    tokenIds.forEach((id) => {
+      if (this.subscribedTokens.has(id)) {
+        this.subscribedTokens.delete(id);
+        this.pendingUnsubscribes.add(id);
+        this.pendingSubscribes.delete(id);
+      }
+    });
 
-    if (this.ws?.readyState === WebSocket.OPEN) {
-      const msg: SubscriptionUpdateMessage = {
-        assets_ids: tokenIds,
-        operation: "unsubscribe",
-      };
-      this.ws.send(JSON.stringify(msg));
-    }
+    this.scheduleFlush();
+  }
+
+  private scheduleFlush(): void {
+    if (this.flushTimer) return;
+    this.flushTimer = setTimeout(() => {
+      this.flushTimer = null;
+      if (this.ws?.readyState === WebSocket.OPEN) {
+        if (this.pendingSubscribes.size > 0) {
+          const msg: SubscriptionUpdateMessage = {
+            assets_ids: Array.from(this.pendingSubscribes),
+            operation: "subscribe",
+          };
+          this.ws.send(JSON.stringify(msg));
+          logger.info({ count: this.pendingSubscribes.size }, "Subscribed to new tokens (batched)");
+          this.pendingSubscribes.clear();
+        }
+        if (this.pendingUnsubscribes.size > 0) {
+          const msg: SubscriptionUpdateMessage = {
+            assets_ids: Array.from(this.pendingUnsubscribes),
+            operation: "unsubscribe",
+          };
+          this.ws.send(JSON.stringify(msg));
+          logger.info({ count: this.pendingUnsubscribes.size }, "Unsubscribed from tokens (batched)");
+          this.pendingUnsubscribes.clear();
+        }
+      } else {
+        // If not connected, clear pending queues, as the reconnect logic will resubscribe to all `subscribedTokens` anyway
+        this.pendingSubscribes.clear();
+        this.pendingUnsubscribes.clear();
+      }
+    }, 50);
   }
 
   isConnected(): boolean {

@@ -75,6 +75,7 @@ export class MarketOrchestrator extends EventEmitter {
   private pausedByRiskGuard = false;
   private riskPauseTriggeredAt: number | null = null;
   private riskAutoResumeTimer: ReturnType<typeof setTimeout> | null = null;
+  private evaluatedMarketIds = new Set<string>();
 
   async start(): Promise<void> {
     if (this.running) return;
@@ -82,7 +83,6 @@ export class MarketOrchestrator extends EventEmitter {
     await this.portfolioManager.init();
     await this.pruneNonLadderRows();
     await this.loadOpenPositions();
-    await this.loadRecentTrackedMarkets();
     this.wireEvents();
     this.wsWatcher.start();
     await this.scan();
@@ -275,32 +275,16 @@ export class MarketOrchestrator extends EventEmitter {
   }
 
   private cleanupTrackedMarkets(): void {
-    const config = getConfig();
-    const now = Date.now();
-    const maxDeadline = now + config.strategy.deadlineLookaheadDays * 24 * 60 * 60 * 1000;
     const toUntrack: string[] = [];
 
     for (const [marketId, state] of this.trackedMarkets.entries()) {
       const hasPosition = Array.from(this.openPositions.values()).some((p) => p.marketId === marketId);
       if (hasPosition) continue;
 
-      if (state.resolved) {
+      // If it has no open position and it was not actively evaluated in this cycle, 
+      // it is no longer relevant (resolved, closed, rejected, past deadline, out of top 100, etc.)
+      if (!this.evaluatedMarketIds.has(marketId)) {
         toUntrack.push(marketId);
-        continue;
-      }
-
-      const deadlineTime = new Date(state.deadline).getTime();
-      
-      // Prune if past deadline (subject to allowPostDeadlineEntries)
-      if (!config.strategy.allowPostDeadlineEntries && deadlineTime <= now) {
-        toUntrack.push(marketId);
-        continue;
-      }
-
-      // Prune if too far in the future
-      if (deadlineTime > maxDeadline) {
-        toUntrack.push(marketId);
-        continue;
       }
     }
 
@@ -453,47 +437,6 @@ export class MarketOrchestrator extends EventEmitter {
           updatedAt: new Date(),
         },
       });
-
-    if (classificationStatus === "candidate") {
-      const config = getConfig();
-      const now = Date.now();
-      const maxDeadline = now + config.strategy.deadlineLookaheadDays * 24 * 60 * 60 * 1000;
-      const deadlineTime = new Date(item.deadline).getTime();
-      
-      const isPastDeadline = deadlineTime <= now;
-      const isTooFar = deadlineTime > maxDeadline;
-      
-      const shouldTrack = (!isPastDeadline || config.strategy.allowPostDeadlineEntries) && !isTooFar;
-      if (shouldTrack) {
-        this.trackMarket(item, m);
-      }
-    }
-  }
-
-  private trackMarket(item: ClassifiedMarket, market: GammaMarket): void {
-    if (this.trackedMarkets.has(market.id)) return;
-    const state: TrackedMarket = {
-      marketId: market.id,
-      eventId: item.eventId,
-      eventSlug: item.eventSlug,
-      eventTitle: item.eventTitle,
-      question: market.question ?? "",
-      slug: market.slug ?? null,
-      conditionId: market.conditionId ?? null,
-      deadline: item.deadline,
-      deadlineDate: item.deadlineDate,
-      noTokenId: item.noTokenId,
-      yesTokenId: item.yesTokenId,
-      noPrice: item.noPrice,
-      feeSchedule: market.feeSchedule ?? null,
-      resolutionRules: market.description ?? null,
-      lastPrices: {},
-      resolved: false,
-    };
-    this.trackedMarkets.set(market.id, state);
-    this.tokenToMarket.set(item.noTokenId, market.id);
-    if (market.conditionId) this.conditionIdToMarket.set(market.conditionId, market.id);
-    this.wsWatcher.subscribe([item.noTokenId]);
   }
 
   private async evaluateTradeCandidates(): Promise<void> {
@@ -518,10 +461,13 @@ export class MarketOrchestrator extends EventEmitter {
       .orderBy(schema.deadlineMarkets.deadline)
       .limit(100);
 
+    this.evaluatedMarketIds.clear();
+
     for (const market of rows) {
       if (new Date(market.deadline).getTime() > maxDeadline.getTime()) continue;
       
-      // If we are actively evaluating it, ensure it is tracked for WS prices
+      // Mark as evaluated and ensure it is tracked for WS prices
+      this.evaluatedMarketIds.add(market.id);
       this.trackMarketFromDb(market);
 
       if (this.openPositions.size >= config.strategy.maxSimultaneousPositions) break;
@@ -827,34 +773,6 @@ export class MarketOrchestrator extends EventEmitter {
     this.tokenToMarket.set(market.noTokenId, market.id);
     if (market.conditionId) this.conditionIdToMarket.set(market.conditionId, market.id);
     this.wsWatcher.subscribe([market.noTokenId]);
-  }
-
-  private async loadRecentTrackedMarkets(): Promise<void> {
-    const db = getDb();
-    const config = getConfig();
-    const now = Date.now();
-    const maxDeadline = now + config.strategy.deadlineLookaheadDays * 24 * 60 * 60 * 1000;
-    const cutoff = new Date(now - 24 * 60 * 60 * 1000);
-    
-    const rows = await db
-      .select()
-      .from(schema.deadlineMarkets)
-      .where(gte(schema.deadlineMarkets.deadline, cutoff))
-      .orderBy(desc(schema.deadlineMarkets.deadline))
-      .limit(200);
-      
-    for (const market of rows) {
-      if (market.classificationStatus !== "candidate" && market.classificationStatus !== "traded") continue;
-      
-      const deadlineTime = new Date(market.deadline).getTime();
-      const isPastDeadline = deadlineTime <= now;
-      const isTooFar = deadlineTime > maxDeadline;
-      
-      if (!config.strategy.allowPostDeadlineEntries && isPastDeadline) continue;
-      if (isTooFar) continue;
-
-      this.trackMarketFromDb(market);
-    }
   }
 }
 
