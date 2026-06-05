@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useEffect, useMemo } from "react";
 import { Header } from "./header";
-import { TradesTable } from "./trades-table";
+import { TradesTable, MarketCountdown } from "./trades-table";
 import { TradeDetailPopup } from "./trade-detail-popup";
 import { ActivityPanel } from "./activity-panel";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -163,24 +163,43 @@ export function DashboardPage() {
       .map(([reason, count]) => ({ reason, pct: (count / total) * 100 }));
   }, [opportunities]);
 
-  // Sidebar Metrics
-  const avgExpectedProfit =
-    openTrades.length > 0
-      ? openTrades.reduce(
-          (sum, t) => sum + parseFloat(t.expectedNetProfit || "0"),
-          0,
-        ) / openTrades.length
-      : 0;
+  let liveUnrealizedPnl = 0;
+  let aggregateExpectedValue = 0;
+  let closestExpiration: Date | null = null;
+  const expirationBuckets = { "<24h": 0, "1-3d": 0, "4-7d": 0, ">7d": 0 };
 
-  let bestPos: SimulatedTrade | null = null;
-  let worstPos: SimulatedTrade | null = null;
+  const now = new Date();
+
   for (const t of openTrades) {
     const pnl = parseFloat(t.expectedNetProfit || "0");
-    if (!bestPos || pnl > parseFloat(bestPos.expectedNetProfit || "0"))
-      bestPos = t;
-    if (!worstPos || pnl < parseFloat(worstPos.expectedNetProfit || "0"))
-      worstPos = t;
+    aggregateExpectedValue += pnl;
+
+    const entryPrice = parseFloat(t.entryPrice);
+    const shares = parseFloat(t.entryShares || "0");
+    const fees = parseFloat(t.entryFees || "0");
+    
+    const livePrice = t.tokenId ? (livePricesMap[t.tokenId] ?? null) : null;
+    const liveMid = livePrice?.mid ?? null;
+    if (liveMid !== null) {
+      liveUnrealizedPnl += (liveMid - entryPrice) * shares - fees;
+    }
+
+    const endStr = t.marketEndDate ?? (t.marketId ? marketEndDates[t.marketId] : null);
+    if (endStr) {
+      const d = new Date(endStr);
+      if (!closestExpiration || d < closestExpiration) {
+        closestExpiration = d;
+      }
+      
+      const hours = (d.getTime() - now.getTime()) / (1000 * 60 * 60);
+      if (hours < 24) expirationBuckets["<24h"]++;
+      else if (hours < 72) expirationBuckets["1-3d"]++;
+      else if (hours < 168) expirationBuckets["4-7d"]++;
+      else expirationBuckets[">7d"]++;
+    }
   }
+  
+  const livePortfolioValue = cashBalance + openPositionsValue + liveUnrealizedPnl;
 
   const evaluatedCount =
     stats?.orchestrator.scanner.evaluatedOpportunities || 0;
@@ -208,12 +227,11 @@ export function DashboardPage() {
       <main className="flex-1 px-4 py-4 pb-16 max-w-7xl mx-auto w-full space-y-4">
         {/* ── TOP LEVEL COMMAND PANELS ── */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {/* SYSTEM OPERATIONAL STATE */}
-          <div className="border border-border/30 rounded bg-card/25 p-5 flex flex-col">
+          {/* ENGINE HEALTH (MINIMAL) */}
+          <div className="border border-border/30 rounded bg-card/25 p-5 flex flex-col justify-between">
             <div className="flex items-center justify-between mb-5">
               <div className="text-[11px] tracking-[0.2em] text-muted-foreground/80 uppercase flex items-center gap-2 font-bold">
-                <Server size={14} className="text-muted-foreground" /> System
-                Operational State
+                <Server size={14} className="text-muted-foreground" /> Engine Health
               </div>
               <button
                 onClick={handleManualRefresh}
@@ -226,13 +244,13 @@ export function DashboardPage() {
               </button>
             </div>
 
-            <div className="grid grid-cols-2 gap-y-6 gap-x-4">
+            <div className="grid grid-cols-2 gap-4">
               <div>
                 <div className="text-[9px] text-muted-foreground/60 uppercase tracking-widest mb-1.5">
                   Trading Engine
                 </div>
                 <div
-                  className={`text-xs font-bold ${isPaused ? "text-amber-500" : stats?.orchestrator.running ? "text-emerald-400" : "text-muted-foreground"}`}
+                  className={`text-sm font-bold ${isPaused ? "text-amber-500" : stats?.orchestrator.running ? "text-emerald-400" : "text-muted-foreground"}`}
                 >
                   {isPaused
                     ? "PAUSED"
@@ -246,88 +264,65 @@ export function DashboardPage() {
                   Websocket Feed
                 </div>
                 <div
-                  className={`text-xs font-bold ${stats?.orchestrator.ws.connected ? "text-emerald-400" : "text-red-400"}`}
+                  className={`text-sm font-bold ${stats?.orchestrator.ws.connected ? "text-emerald-400" : "text-red-400"}`}
                 >
                   {stats?.orchestrator.ws.connected
                     ? "CONNECTED"
                     : "DISCONNECTED"}
                 </div>
               </div>
-              <div>
-                <div className="text-[9px] text-muted-foreground/60 uppercase tracking-widest mb-1.5">
-                  Discovered Ladders
-                </div>
-                <div className="text-sm font-semibold">
-                  {discoveredLaddersCount}{" "}
-                  <span className="text-xs font-normal text-muted-foreground/60">
-                    event families
-                  </span>
-                </div>
-              </div>
-              <div>
-                <div className="text-[9px] text-muted-foreground/60 uppercase tracking-widest mb-1.5">
-                  Evaluated Decisions
-                </div>
-                <div className="text-sm font-semibold">
-                  {evaluatedCount}{" "}
-                  <span className="text-xs font-normal text-muted-foreground/60">
-                    opportunities
-                  </span>
-                </div>
-              </div>
             </div>
           </div>
 
-          {/* PORTFOLIO & CAPITAL SUMMARY */}
+          {/* PORTFOLIO HEALTH (MARK TO MARKET) */}
           <div className="border border-border/30 rounded bg-card/25 p-5 flex flex-col">
             <div className="flex items-center justify-between mb-5">
               <div className="text-[11px] tracking-[0.2em] text-muted-foreground/80 uppercase flex items-center gap-2 font-bold">
                 <TrendingUp size={14} className="text-muted-foreground" />{" "}
-                Portfolio & Capital Summary
+                Portfolio Health (Live)
               </div>
             </div>
 
-            <div className="grid grid-cols-3 gap-y-6 gap-x-4">
+            <div className="grid grid-cols-4 gap-y-6 gap-x-4">
               <div className="col-span-1">
                 <div className="text-[9px] text-muted-foreground/60 uppercase tracking-widest mb-1.5">
-                  Net Profit / Loss
+                  Unrealized PnL
                 </div>
                 <div
-                  className={`text-xl font-bold tracking-tight leading-none ${pnlColor(netPnl)}`}
+                  className={`text-xl font-bold tracking-tight leading-none ${pnlColor(liveUnrealizedPnl)}`}
                 >
-                  {formatPnl(animatedNetPnl)}
+                  {formatPnl(liveUnrealizedPnl)}
                 </div>
                 <div
                   className={`text-[10px] mt-1.5 font-bold ${pnlColor(netPnl, "80")}`}
                 >
-                  {roi >= 0 ? "+" : ""}
-                  {roi.toFixed(2)}% ROI (ALL)
+                  {formatPnl(animatedNetPnl)} (Realized)
                 </div>
               </div>
               <div className="col-span-1">
                 <div className="text-[9px] text-muted-foreground/60 uppercase tracking-widest mb-1.5">
-                  Asset Allocation
+                  Portfolio Value
                 </div>
                 <div className="text-xl font-bold tracking-tight leading-none text-foreground">
                   $
-                  {portfolioValue.toLocaleString(undefined, {
+                  {livePortfolioValue.toLocaleString(undefined, {
                     minimumFractionDigits: 2,
                     maximumFractionDigits: 2,
                   })}
                 </div>
                 <div className="text-[10px] mt-1.5 text-muted-foreground/80">
-                  Cash: $
-                  {cashBalance.toLocaleString(undefined, {
-                    minimumFractionDigits: 1,
-                    maximumFractionDigits: 1,
-                  })}
+                  Cash: ${cashBalance.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}
                 </div>
-                <div className="text-[10px] mt-0.5 text-muted-foreground/80">
-                  Invested: $
-                  {openPositionsValue.toLocaleString(undefined, {
-                    minimumFractionDigits: 1,
-                    maximumFractionDigits: 1,
-                  })}
+              </div>
+              <div className="col-span-1">
+                <div className="text-[9px] text-muted-foreground/60 uppercase tracking-widest mb-1.5">
+                  Aggregate Exp Value
+                </div>
+                <div className="text-xl font-bold tracking-tight leading-none text-foreground">
+                  {formatPnl(aggregateExpectedValue)}
+                </div>
+                <div className="text-[10px] mt-1.5 text-muted-foreground/80">
+                  Across {openTrades.length} positions
                 </div>
               </div>
               <div className="col-span-1">
@@ -368,25 +363,25 @@ export function DashboardPage() {
                 <TabsList className="bg-transparent h-auto p-0 gap-2">
                   <TabsTrigger
                     value="positions"
-                    className="data-[state=active]:bg-foreground data-[state=active]:text-background text-muted-foreground/60 px-3 py-1.5 text-[11px] font-mono tracking-wider font-bold rounded transition-colors hover:text-foreground"
+                    className="data-[state=active]:bg-foreground data-[state=active]:text-background text-muted-foreground/60 px-4 py-2 text-xs font-mono tracking-wider font-bold rounded transition-colors hover:text-foreground"
                   >
                     POSITIONS ({openTrades.length})
                   </TabsTrigger>
                   <TabsTrigger
                     value="history"
-                    className="data-[state=active]:bg-foreground data-[state=active]:text-background text-muted-foreground/60 px-3 py-1.5 text-[11px] font-mono tracking-wider font-bold rounded transition-colors hover:text-foreground"
+                    className="data-[state=active]:bg-foreground data-[state=active]:text-background text-muted-foreground/60 px-4 py-2 text-xs font-mono tracking-wider font-bold rounded transition-colors hover:text-foreground"
                   >
                     TRADE HISTORY ({settledTrades.length})
                   </TabsTrigger>
                   <TabsTrigger
                     value="pipeline"
-                    className="data-[state=active]:bg-foreground data-[state=active]:text-background text-muted-foreground/60 px-3 py-1.5 text-[11px] font-mono tracking-wider font-bold rounded transition-colors hover:text-foreground"
+                    className="data-[state=active]:bg-foreground data-[state=active]:text-background text-muted-foreground/60 px-4 py-2 text-xs font-mono tracking-wider font-bold rounded transition-colors hover:text-foreground"
                   >
                     PIPELINE
                   </TabsTrigger>
                   <TabsTrigger
                     value="diagnostics"
-                    className="data-[state=active]:bg-foreground data-[state=active]:text-background text-muted-foreground/60 px-3 py-1.5 text-[11px] font-mono tracking-wider font-bold rounded transition-colors hover:text-foreground"
+                    className="data-[state=active]:bg-foreground data-[state=active]:text-background text-muted-foreground/60 px-4 py-2 text-xs font-mono tracking-wider font-bold rounded transition-colors hover:text-foreground"
                   >
                     DIAGNOSTICS
                   </TabsTrigger>
@@ -456,8 +451,67 @@ export function DashboardPage() {
               </TabsContent>
 
               {/* MARKET PIPELINE TAB */}
-              <TabsContent value="pipeline" className="mt-0 flex-1 p-0">
-                <div className="overflow-x-auto">
+              <TabsContent value="pipeline" className="mt-0 flex-1 p-0 flex flex-col h-full">
+                {/* PIPELINE FUNNEL & REJECTIONS */}
+                <div className="bg-card/50 border-b border-border/20 p-6 flex flex-col md:flex-row gap-8">
+                  <div className="flex-1">
+                    <div className="text-[10px] tracking-[0.15em] text-muted-foreground uppercase font-bold mb-4">
+                      Dominant Rejection Reason
+                    </div>
+                    {rejectionStats.length > 0 ? (
+                      <div className="flex flex-col gap-2">
+                        <div className="text-xl font-bold text-red-400">
+                          {rejectionStats[0].reason}
+                        </div>
+                        <div className="text-sm text-muted-foreground">
+                          Accounted for {rejectionStats[0].pct.toFixed(1)}% of all rejected opportunities.
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="text-sm text-muted-foreground">
+                        No significant rejections yet.
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex-1">
+                    <div className="text-[10px] tracking-[0.15em] text-muted-foreground uppercase font-bold mb-4">
+                      Rejection Funnel Breakdown
+                    </div>
+                    {rejectionStats.length > 0 ? (
+                      <div className="flex flex-col gap-3">
+                        {rejectionStats.slice(0, 5).map((stat) => (
+                          <div key={stat.reason} className="flex flex-col gap-1.5">
+                            <div className="flex justify-between text-[11px]">
+                              <span className="text-foreground/80">{stat.reason}</span>
+                              <span className="text-muted-foreground font-bold">{stat.pct.toFixed(1)}%</span>
+                            </div>
+                            <div className="w-full bg-muted/20 h-1.5 rounded-full overflow-hidden">
+                              <div
+                                className="bg-amber-500/50 h-full rounded-full"
+                                style={{ width: `${stat.pct}%` }}
+                              />
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="text-[11px] text-muted-foreground">
+                        Not enough recent rejections to analyze.
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* WAITING CANDIDATES TABLE */}
+                <div className="p-4 border-b border-border/20 bg-muted/5 flex items-center justify-between">
+                  <div className="text-[10px] tracking-[0.15em] text-muted-foreground uppercase font-bold">
+                    Waiting Candidates
+                  </div>
+                  <div className="text-xs font-bold text-foreground">
+                    {candidateMarkets.length}
+                  </div>
+                </div>
+                <div className="overflow-x-auto flex-1">
                   <table className="w-full text-xs font-mono">
                     <thead>
                       <tr className="border-b border-border/30">
@@ -491,12 +545,13 @@ export function DashboardPage() {
                                 }
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                className="font-medium text-foreground hover:text-blue-400 inline-flex items-center gap-1"
+                                className="font-medium text-foreground hover:text-blue-400 inline-flex items-center gap-1 truncate max-w-[400px]"
+                                title={m.question}
                               >
-                                {m.question}
+                                <span className="truncate">{m.question}</span>
                                 <ExternalLink
                                   size={10}
-                                  className="text-muted-foreground/40"
+                                  className="text-muted-foreground/40 shrink-0"
                                 />
                               </a>
                             </div>
@@ -567,37 +622,34 @@ export function DashboardPage() {
                     </div>
                     <div>
                       <div className="text-[10px] tracking-[0.15em] text-muted-foreground uppercase font-bold mb-3">
-                        Recent Rejection Reasons
+                        Scanner Strategy Telemetry
                       </div>
-                      {rejectionStats.length > 0 ? (
-                        <div className="flex flex-col gap-2">
-                          {rejectionStats.slice(0, 5).map((stat) => (
-                            <div
-                              key={stat.reason}
-                              className="flex flex-col gap-1"
-                            >
-                              <div className="flex justify-between text-[11px]">
-                                <span className="text-foreground/80">
-                                  {stat.reason}
-                                </span>
-                                <span className="text-muted-foreground font-bold">
-                                  {stat.pct.toFixed(1)}%
-                                </span>
-                              </div>
-                              <div className="w-full bg-muted/20 h-1.5 rounded-full overflow-hidden">
-                                <div
-                                  className="bg-amber-500/50 h-full rounded-full"
-                                  style={{ width: `${stat.pct}%` }}
-                                />
-                              </div>
-                            </div>
-                          ))}
+                      <div className="flex flex-col gap-4">
+                        <div className="flex justify-between items-center border-b border-border/10 pb-3">
+                          <span className="text-[11px] text-muted-foreground uppercase tracking-widest">
+                            Discovered Ladders
+                          </span>
+                          <span className="text-sm font-bold text-foreground">
+                            {discoveredLaddersCount}
+                          </span>
                         </div>
-                      ) : (
-                        <div className="text-[11px] text-muted-foreground">
-                          Not enough recent rejections to analyze.
+                        <div className="flex justify-between items-center border-b border-border/10 pb-3">
+                          <span className="text-[11px] text-muted-foreground uppercase tracking-widest">
+                            Evaluated Opportunities
+                          </span>
+                          <span className="text-sm font-bold text-foreground">
+                            {evaluatedCount}
+                          </span>
                         </div>
-                      )}
+                        <div className="flex justify-between items-center pb-3">
+                          <span className="text-[11px] text-muted-foreground uppercase tracking-widest">
+                            Acceptance Rate
+                          </span>
+                          <span className="text-sm font-bold text-blue-400">
+                            {acceptanceRate.toFixed(2)}%
+                          </span>
+                        </div>
+                      </div>
                     </div>
                   </div>
                   <div className="flex flex-col">
@@ -618,74 +670,67 @@ export function DashboardPage() {
             </Tabs>
           </div>
 
-          {/* RIGHT SIDEBAR: EVALUATION & CONFIGURATION */}
+          {/* RIGHT SIDEBAR: EXPOSURE & CONFIGURATION */}
           <div className="w-full lg:w-[320px] shrink-0 flex flex-col gap-6">
-            {/* STRATEGY EVALUATION */}
+            {/* TIME EXPOSURE */}
             <div className="border border-border/30 rounded-xl bg-card/25 p-5">
               <div className="text-[11px] tracking-[0.2em] text-muted-foreground/80 uppercase font-bold mb-5 flex items-center gap-2">
                 <Workflow size={14} className="text-muted-foreground" />{" "}
-                Strategy Evaluation
+                Time Exposure
               </div>
               <div className="flex flex-col gap-4">
-                <div className="flex justify-between items-end">
-                  <span className="text-[10px] text-muted-foreground uppercase tracking-widest">
-                    Open Positions
+                <div className="flex justify-between items-center bg-muted/10 p-2 rounded">
+                  <span className="text-[10px] text-muted-foreground uppercase tracking-widest font-bold text-amber-500">
+                    Closest Expiration
                   </span>
-                  <span className="text-xs font-bold text-foreground tabular-nums">
-                    {openTrades.length}
-                  </span>
-                </div>
-                <div className="flex justify-between items-end">
-                  <span className="text-[10px] text-muted-foreground uppercase tracking-widest">
-                    Capital At Risk
-                  </span>
-                  <span className="text-xs font-bold text-foreground tabular-nums">
-                    ${openPositionsValue.toFixed(2)}
-                  </span>
-                </div>
-                <div className="flex justify-between items-end">
-                  <span className="text-[10px] text-muted-foreground uppercase tracking-widest">
-                    Avg Expected Profit
-                  </span>
-                  <span
-                    className={`text-xs font-bold tabular-nums ${avgExpectedProfit > 0 ? "text-emerald-400" : "text-muted-foreground"}`}
-                  >
-                    ${avgExpectedProfit.toFixed(2)}
-                  </span>
-                </div>
-                <div className="flex justify-between items-end">
-                  <span className="text-[10px] text-muted-foreground uppercase tracking-widest">
-                    Best Expected Pos
-                  </span>
-                  <span className="text-[11px] font-mono text-emerald-400 tabular-nums">
-                    {bestPos
-                      ? `$${parseFloat(bestPos.expectedNetProfit || "0").toFixed(2)}`
-                      : "—"}
+                  <span className="text-xs font-bold text-foreground">
+                    {closestExpiration ? (
+                      <MarketCountdown endDate={closestExpiration.toISOString()} />
+                    ) : (
+                      "—"
+                    )}
                   </span>
                 </div>
                 <div className="w-full h-px bg-border/20 my-1" />
                 <div className="flex justify-between items-end">
                   <span className="text-[10px] text-muted-foreground uppercase tracking-widest">
-                    Candidate Markets
+                    Expiring &lt; 24h
                   </span>
                   <span className="text-xs font-bold text-foreground tabular-nums">
-                    {candidateMarkets.length}
+                    {expirationBuckets["<24h"]}
                   </span>
                 </div>
                 <div className="flex justify-between items-end">
                   <span className="text-[10px] text-muted-foreground uppercase tracking-widest">
-                    Acceptance Rate
+                    Expiring 1-3d
                   </span>
-                  <span className="text-xs font-bold text-blue-400 tabular-nums">
-                    {acceptanceRate.toFixed(2)}%
+                  <span className="text-xs font-bold text-foreground tabular-nums">
+                    {expirationBuckets["1-3d"]}
                   </span>
                 </div>
                 <div className="flex justify-between items-end">
-                  <span className="text-[10px] text-muted-foreground/50 uppercase tracking-widest">
-                    Evaluated Checks
+                  <span className="text-[10px] text-muted-foreground uppercase tracking-widest">
+                    Expiring 4-7d
                   </span>
-                  <span className="text-xs font-medium text-muted-foreground/70 tabular-nums">
-                    {evaluatedCount}
+                  <span className="text-xs font-bold text-foreground tabular-nums">
+                    {expirationBuckets["4-7d"]}
+                  </span>
+                </div>
+                <div className="flex justify-between items-end">
+                  <span className="text-[10px] text-muted-foreground uppercase tracking-widest">
+                    Expiring &gt; 7d
+                  </span>
+                  <span className="text-xs font-bold text-foreground tabular-nums">
+                    {expirationBuckets[">7d"]}
+                  </span>
+                </div>
+                <div className="w-full h-px bg-border/20 my-1" />
+                <div className="flex justify-between items-end">
+                  <span className="text-[10px] text-muted-foreground uppercase tracking-widest">
+                    Total Open Positions
+                  </span>
+                  <span className="text-xs font-bold text-blue-400 tabular-nums">
+                    {openTrades.length}
                   </span>
                 </div>
               </div>

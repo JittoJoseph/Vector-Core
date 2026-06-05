@@ -319,7 +319,7 @@ export function TradesTable({
 // Inline MarketCountdown component for portability
 import { useEffect, useState } from "react";
 
-function MarketCountdown({ endDate }: { endDate: string }) {
+export function MarketCountdown({ endDate }: { endDate: string }) {
   const [timeLeft, setTimeLeft] = useState("");
 
   useEffect(() => {
