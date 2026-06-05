@@ -15,3 +15,21 @@ export function pnlColor(value: number, opacity?: string): string {
 export function formatPnl(value: number, decimals = 4): string {
   return `${value >= 0 ? "+" : "-"}$${Math.abs(value).toFixed(decimals)}`;
 }
+
+export function polymarketMarketUrl({
+  eventSlug,
+  marketSlug,
+  marketId,
+}: {
+  eventSlug?: string | null;
+  marketSlug?: string | null;
+  marketId?: string | null;
+}): string {
+  if (eventSlug && marketSlug) {
+    return `https://polymarket.com/event/${eventSlug}/${marketSlug}`;
+  }
+  if (eventSlug) return `https://polymarket.com/event/${eventSlug}`;
+  if (marketSlug) return `https://polymarket.com/market/${marketSlug}`;
+  if (marketId) return `https://polymarket.com/market/${marketId}`;
+  return "https://polymarket.com";
+}
