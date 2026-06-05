@@ -174,14 +174,15 @@ export function DashboardPage() {
     const entryPrice = parseFloat(t.entryPrice);
     const shares = parseFloat(t.entryShares || "0");
     const fees = parseFloat(t.entryFees || "0");
-    
+
     const livePrice = t.tokenId ? (livePricesMap[t.tokenId] ?? null) : null;
     const liveMid = livePrice?.mid ?? null;
     if (liveMid !== null) {
       liveUnrealizedPnl += (liveMid - entryPrice) * shares - fees;
     }
 
-    const endStr = t.marketEndDate ?? (t.marketId ? marketEndDates[t.marketId] : null);
+    const endStr =
+      t.marketEndDate ?? (t.marketId ? marketEndDates[t.marketId] : null);
     if (endStr) {
       const d = new Date(endStr);
       if (!closestExpiration || d < closestExpiration) {
@@ -190,7 +191,7 @@ export function DashboardPage() {
       } else if (d.getTime() === closestExpiration.getTime()) {
         closestTrades.push(t);
       }
-      
+
       const hours = (d.getTime() - now.getTime()) / (1000 * 60 * 60);
       if (hours < 24) expirationBuckets["<24h"]++;
       else if (hours < 72) expirationBuckets["1-3d"]++;
@@ -198,8 +199,9 @@ export function DashboardPage() {
       else expirationBuckets[">7d"]++;
     }
   }
-  
-  const livePortfolioValue = cashBalance + openPositionsValue + liveUnrealizedPnl;
+
+  const livePortfolioValue =
+    cashBalance + openPositionsValue + liveUnrealizedPnl;
 
   const evaluatedCount =
     stats?.orchestrator.scanner.evaluatedOpportunities || 0;
@@ -231,7 +233,8 @@ export function DashboardPage() {
           <div className="border border-border/30 rounded bg-card/25 p-5 flex flex-col justify-between">
             <div className="flex items-center justify-between mb-5">
               <div className="text-[11px] tracking-[0.2em] text-muted-foreground/80 uppercase flex items-center gap-2 font-bold">
-                <Server size={14} className="text-muted-foreground" /> Engine Health
+                <Server size={14} className="text-muted-foreground" /> Engine
+                Health
               </div>
               <button
                 onClick={handleManualRefresh}
@@ -311,7 +314,11 @@ export function DashboardPage() {
                   })}
                 </div>
                 <div className="text-[10px] mt-1.5 text-muted-foreground/80">
-                  Cash: ${cashBalance.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}
+                  Cash: $
+                  {cashBalance.toLocaleString(undefined, {
+                    minimumFractionDigits: 1,
+                    maximumFractionDigits: 1,
+                  })}
                 </div>
               </div>
               <div className="col-span-1">
@@ -319,7 +326,11 @@ export function DashboardPage() {
                   Capital At Risk
                 </div>
                 <div className="text-xl font-bold tracking-tight leading-none text-foreground">
-                  ${openPositionsValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  $
+                  {openPositionsValue.toLocaleString(undefined, {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  })}
                 </div>
                 <div className="text-[10px] mt-1.5 text-muted-foreground/80">
                   Across {openTrades.length} positions
@@ -359,33 +370,32 @@ export function DashboardPage() {
               onValueChange={setActiveTab}
               className="flex flex-col flex-1"
             >
-              <div className="border-b border-border/30 px-3 py-2 flex items-center justify-between bg-card">
-                <TabsList className="bg-transparent h-auto p-0 gap-2">
-                  <TabsTrigger
-                    value="positions"
-                    className="!bg-transparent !shadow-none data-[state=active]:text-foreground text-muted-foreground/40 hover:!bg-transparent hover:text-muted-foreground/80 px-4 py-2 text-xs font-mono tracking-wider font-bold rounded transition-colors"
+              <div className="border-b border-border/30 px-3 py-2 flex items-center gap-4 bg-card">
+                {[
+                  {
+                    id: "positions",
+                    label: `POSITIONS (${openTrades.length})`,
+                  },
+                  {
+                    id: "history",
+                    label: `TRADE HISTORY (${settledTrades.length})`,
+                  },
+                  { id: "pipeline", label: "PIPELINE" },
+                  { id: "diagnostics", label: "DIAGNOSTICS" },
+                ].map((tab) => (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    onClick={() => setActiveTab(tab.id)}
+                    className={`px-2 py-1.5 text-xs font-mono tracking-wider font-bold transition-colors ${
+                      activeTab === tab.id
+                        ? "text-foreground"
+                        : "text-muted-foreground/80 hover:text-foreground"
+                    }`}
                   >
-                    POSITIONS ({openTrades.length})
-                  </TabsTrigger>
-                  <TabsTrigger
-                    value="history"
-                    className="!bg-transparent !shadow-none data-[state=active]:text-foreground text-muted-foreground/40 hover:!bg-transparent hover:text-muted-foreground/80 px-4 py-2 text-xs font-mono tracking-wider font-bold rounded transition-colors"
-                  >
-                    TRADE HISTORY ({settledTrades.length})
-                  </TabsTrigger>
-                  <TabsTrigger
-                    value="pipeline"
-                    className="!bg-transparent !shadow-none data-[state=active]:text-foreground text-muted-foreground/40 hover:!bg-transparent hover:text-muted-foreground/80 px-4 py-2 text-xs font-mono tracking-wider font-bold rounded transition-colors"
-                  >
-                    PIPELINE
-                  </TabsTrigger>
-                  <TabsTrigger
-                    value="diagnostics"
-                    className="!bg-transparent !shadow-none data-[state=active]:text-foreground text-muted-foreground/40 hover:!bg-transparent hover:text-muted-foreground/80 px-4 py-2 text-xs font-mono tracking-wider font-bold rounded transition-colors"
-                  >
-                    DIAGNOSTICS
-                  </TabsTrigger>
-                </TabsList>
+                    {tab.label}
+                  </button>
+                ))}
               </div>
 
               {/* OPEN POSITIONS TAB */}
@@ -451,7 +461,10 @@ export function DashboardPage() {
               </TabsContent>
 
               {/* MARKET PIPELINE TAB */}
-              <TabsContent value="pipeline" className="mt-0 flex-1 p-0 flex flex-col h-full">
+              <TabsContent
+                value="pipeline"
+                className="mt-0 flex-1 p-0 flex flex-col h-full"
+              >
                 {/* PIPELINE FUNNEL & REJECTIONS */}
                 <div className="bg-card/50 border-b border-border/20 p-6 flex flex-col md:flex-row gap-8">
                   <div className="flex-1">
@@ -464,7 +477,8 @@ export function DashboardPage() {
                           {rejectionStats[0].reason}
                         </div>
                         <div className="text-sm text-muted-foreground">
-                          Accounted for {rejectionStats[0].pct.toFixed(1)}% of all rejected opportunities.
+                          Accounted for {rejectionStats[0].pct.toFixed(1)}% of
+                          all rejected opportunities.
                         </div>
                       </div>
                     ) : (
@@ -480,10 +494,17 @@ export function DashboardPage() {
                     {rejectionStats.length > 0 ? (
                       <div className="flex flex-col gap-3">
                         {rejectionStats.slice(0, 5).map((stat) => (
-                          <div key={stat.reason} className="flex flex-col gap-1.5">
+                          <div
+                            key={stat.reason}
+                            className="flex flex-col gap-1.5"
+                          >
                             <div className="flex justify-between text-[11px]">
-                              <span className="text-foreground/80">{stat.reason}</span>
-                              <span className="text-muted-foreground font-bold">{stat.pct.toFixed(1)}%</span>
+                              <span className="text-foreground/80">
+                                {stat.reason}
+                              </span>
+                              <span className="text-muted-foreground font-bold">
+                                {stat.pct.toFixed(1)}%
+                              </span>
                             </div>
                             <div className="w-full bg-muted/20 h-1.5 rounded-full overflow-hidden">
                               <div
@@ -675,8 +696,8 @@ export function DashboardPage() {
             {/* TIME EXPOSURE */}
             <div className="border border-border/30 rounded-xl bg-card/25 p-5">
               <div className="text-[11px] tracking-[0.2em] text-muted-foreground/80 uppercase font-bold mb-5 flex items-center gap-2">
-                <Workflow size={14} className="text-muted-foreground" />{" "}
-                Time Exposure
+                <Workflow size={14} className="text-muted-foreground" /> Time
+                Exposure
               </div>
               <div className="flex flex-col gap-4">
                 <div className="flex flex-col gap-2">
@@ -686,9 +707,13 @@ export function DashboardPage() {
                   {closestTrades.length > 0 && closestExpiration ? (
                     <div className="flex flex-col gap-2">
                       <div className="flex items-center gap-2 mb-1">
-                        <span className="text-[10px] text-muted-foreground uppercase">Resolving In:</span>
+                        <span className="text-[10px] text-muted-foreground uppercase">
+                          Resolving In:
+                        </span>
                         <span className="text-xs font-bold text-amber-500/80">
-                          <MarketCountdown endDate={closestExpiration.toISOString()} />
+                          <MarketCountdown
+                            endDate={closestExpiration.toISOString()}
+                          />
                         </span>
                       </div>
                       <div className="flex flex-col gap-2">
@@ -696,24 +721,32 @@ export function DashboardPage() {
                           const entryPrice = parseFloat(trade.entryPrice);
                           const shares = parseFloat(trade.entryShares || "0");
                           const fees = parseFloat(trade.entryFees || "0");
-                          const actualCost = parseFloat(trade.actualCost || "1");
-                          
-                          const livePrice = trade.tokenId ? (livePricesMap[trade.tokenId] ?? null) : null;
+                          const actualCost = parseFloat(
+                            trade.actualCost || "1",
+                          );
+
+                          const livePrice = trade.tokenId
+                            ? (livePricesMap[trade.tokenId] ?? null)
+                            : null;
                           const liveMid = livePrice?.mid ?? null;
                           let pnl: number | null = null;
                           let pnlPct: number | null = null;
                           if (liveMid !== null) {
                             pnl = (liveMid - entryPrice) * shares - fees;
-                            pnlPct = actualCost > 0 ? (pnl / actualCost) * 100 : null;
+                            pnlPct =
+                              actualCost > 0 ? (pnl / actualCost) * 100 : null;
                           }
 
                           return (
-                            <div 
+                            <div
                               key={trade.id}
                               className="border border-border/30 bg-muted/10 rounded p-3 flex flex-col gap-2 cursor-pointer hover:bg-muted/20 transition-colors"
                               onClick={() => setSelectedTrade(trade)}
                             >
-                              <div className="text-[11px] font-medium text-foreground truncate" title={trade.marketQuestion || "Unknown"}>
+                              <div
+                                className="text-[11px] font-medium text-foreground truncate"
+                                title={trade.marketQuestion || "Unknown"}
+                              >
                                 {trade.marketQuestion}
                               </div>
                               <div className="flex justify-between items-end">
@@ -723,15 +756,22 @@ export function DashboardPage() {
                                 <div className="flex flex-col gap-1 items-end">
                                   {pnl !== null ? (
                                     <div className="flex items-center gap-1">
-                                      <span className={`text-xs font-bold ${pnl >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                                      <span
+                                        className={`text-xs font-bold ${pnl >= 0 ? "text-emerald-400" : "text-red-400"}`}
+                                      >
                                         {formatPnl(pnl)}
                                       </span>
-                                      <span className={`text-[10px] ${pnlPct! >= 0 ? "text-emerald-400/60" : "text-red-400/60"}`}>
-                                        ({pnlPct! >= 0 ? "+" : ""}{pnlPct!.toFixed(1)}%)
+                                      <span
+                                        className={`text-[10px] ${pnlPct! >= 0 ? "text-emerald-400/60" : "text-red-400/60"}`}
+                                      >
+                                        ({pnlPct! >= 0 ? "+" : ""}
+                                        {pnlPct!.toFixed(1)}%)
                                       </span>
                                     </div>
                                   ) : (
-                                    <span className="text-xs font-bold text-muted-foreground/40">—</span>
+                                    <span className="text-xs font-bold text-muted-foreground/40">
+                                      —
+                                    </span>
                                   )}
                                 </div>
                               </div>
