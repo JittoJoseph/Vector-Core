@@ -278,7 +278,7 @@ export function DashboardPage() {
           </div>
 
           {/* PORTFOLIO HEALTH (MARK TO MARKET) */}
-          <div className="border border-border/30 rounded bg-card/25 p-5 flex flex-col">
+          <div className="border border-border/30 rounded bg-card/25 p-5 flex flex-col justify-between">
             <div className="flex items-center justify-between mb-5">
               <div className="text-[11px] tracking-[0.2em] text-muted-foreground/80 uppercase flex items-center gap-2 font-bold">
                 <TrendingUp size={14} className="text-muted-foreground" />{" "}
@@ -286,23 +286,8 @@ export function DashboardPage() {
               </div>
             </div>
 
-            <div className="grid grid-cols-4 gap-y-6 gap-x-4">
-              <div className="col-span-1">
-                <div className="text-[9px] text-muted-foreground/60 uppercase tracking-widest mb-1.5">
-                  Unrealized PnL
-                </div>
-                <div
-                  className={`text-xl font-bold tracking-tight leading-none ${pnlColor(liveUnrealizedPnl)}`}
-                >
-                  {formatPnl(liveUnrealizedPnl)}
-                </div>
-                <div
-                  className={`text-[10px] mt-1.5 font-bold ${pnlColor(netPnl, "80")}`}
-                >
-                  {formatPnl(animatedNetPnl)} (Realized)
-                </div>
-              </div>
-              <div className="col-span-1">
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-y-6 gap-x-4">
+              <div className="flex flex-col">
                 <div className="text-[9px] text-muted-foreground/60 uppercase tracking-widest mb-1.5">
                   Portfolio Value
                 </div>
@@ -321,29 +306,31 @@ export function DashboardPage() {
                   })}
                 </div>
               </div>
-              <div className="col-span-1">
+
+              <div className="flex flex-col">
                 <div className="text-[9px] text-muted-foreground/60 uppercase tracking-widest mb-1.5">
-                  Capital At Risk
+                  Unrealized PnL
                 </div>
-                <div className="text-xl font-bold tracking-tight leading-none text-foreground">
-                  $
-                  {openPositionsValue.toLocaleString(undefined, {
-                    minimumFractionDigits: 2,
-                    maximumFractionDigits: 2,
-                  })}
+                <div
+                  className={`text-xl font-bold tracking-tight leading-none ${pnlColor(liveUnrealizedPnl)}`}
+                >
+                  {formatPnl(liveUnrealizedPnl)}
                 </div>
-                <div className="text-[10px] mt-1.5 text-muted-foreground/80">
-                  Across {openTrades.length} positions
+                <div
+                  className={`text-[10px] mt-1.5 font-bold ${pnlColor(netPnl, "80")}`}
+                >
+                  {formatPnl(animatedNetPnl)} (Realized)
                 </div>
               </div>
-              <div className="col-span-1">
-                <div className="text-[9px] text-muted-foreground/60 uppercase tracking-widest mb-1.5 flex justify-end">
+
+              <div className="flex flex-col col-span-2 sm:col-span-1">
+                <div className="text-[9px] text-muted-foreground/60 uppercase tracking-widest mb-1.5">
                   Win Rate
                 </div>
-                <div className="text-xl font-bold tracking-tight leading-none text-right">
+                <div className="text-xl font-bold tracking-tight leading-none text-foreground">
                   {winRate.toFixed(1)}%
                 </div>
-                <div className="text-[9px] mt-2 flex items-center justify-end gap-1.5 font-bold text-muted-foreground/60">
+                <div className="text-[9px] mt-1.5 flex items-center gap-1.5 font-bold text-muted-foreground/60">
                   <span className="text-emerald-400">
                     {performance?.wins || 0}W
                   </span>
