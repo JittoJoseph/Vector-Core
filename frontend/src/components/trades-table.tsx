@@ -1,7 +1,7 @@
 "use client";
 
 import type { SimulatedTrade, LiveMarketPrice } from "@/lib/types";
-import { pnlColor, formatPnl } from "@/lib/utils";
+import { pnlColor, formatPnl, polymarketMarketUrl } from "@/lib/utils";
 import { ExternalLink } from "lucide-react";
 
 interface TradesTableProps {
@@ -70,11 +70,14 @@ export function TradesTable({
       <table className="w-full text-xs font-mono">
         <thead>
           <tr className="border-b border-border/30">
-            <th className="text-left py-2.5 px-3 font-medium text-muted-foreground tracking-wider text-[10px]">
-              MARKET QUESTION
-            </th>
             {type === "OPEN" ? (
               <>
+                <th className="text-left py-2.5 px-3 font-medium text-amber-500/80 tracking-wider text-[10px]">
+                  TIME LEFT
+                </th>
+                <th className="text-left py-2.5 px-3 font-medium text-muted-foreground tracking-wider text-[10px]">
+                  MARKET QUESTION
+                </th>
                 <th className="text-right py-2.5 px-3 font-medium text-muted-foreground tracking-wider text-[10px]">
                   COST BASIS
                 </th>
@@ -87,6 +90,9 @@ export function TradesTable({
               </>
             ) : (
               <>
+                <th className="text-left py-2.5 px-3 font-medium text-muted-foreground tracking-wider text-[10px]">
+                  MARKET QUESTION
+                </th>
                 <th className="text-right py-2.5 px-3 font-medium text-muted-foreground tracking-wider text-[10px]">
                   RESOLUTION DATE
                 </th>
@@ -123,7 +129,11 @@ export function TradesTable({
               const unrealizedPnl = liveMid !== null ? (liveMid - entryPrice) * shares - fees : null;
               const unrealizedPnlPct = unrealizedPnl !== null && actualCost > 0 ? (unrealizedPnl / actualCost) * 100 : null;
 
-              const polyUrl = `https://polymarket.com/market/${trade.marketId}`;
+              const polyUrl = polymarketMarketUrl({
+                eventSlug: trade.eventSlug,
+                marketSlug: trade.marketSlug,
+                marketId: trade.marketId,
+              });
 
               return (
                 <tr
@@ -133,6 +143,17 @@ export function TradesTable({
                     idx % 2 === 0 ? "bg-transparent" : "bg-card/5"
                   }`}
                 >
+                  {/* TIME LEFT */}
+                  <td className="py-2.5 px-3 text-left whitespace-nowrap">
+                    {endDateStr ? (
+                      <div className="text-xs font-medium text-amber-500/80">
+                        <MarketCountdown endDate={endDateStr} />
+                      </div>
+                    ) : (
+                      <span className="text-muted-foreground/40">—</span>
+                    )}
+                  </td>
+
                   {/* MARKET QUESTION */}
                   <td className="py-2.5 px-3 max-w-[240px]">
                     <div className="flex flex-col gap-1">
@@ -147,11 +168,6 @@ export function TradesTable({
                         <span className="truncate">{trade.marketQuestion || "Unknown Market"}</span>
                         <ExternalLink size={10} className="text-muted-foreground/40 shrink-0" />
                       </a>
-                      {endDateStr && (
-                        <div className="text-[10px]">
-                          <MarketCountdown endDate={endDateStr} />
-                        </div>
-                      )}
                     </div>
                   </td>
 
@@ -212,6 +228,12 @@ export function TradesTable({
               const realizedPnlPct = actualCost > 0 ? (realizedPnl / actualCost) * 100 : 0;
               const exitTs = trade.exitTs ? new Date(trade.exitTs) : null;
 
+              const polyUrl = polymarketMarketUrl({
+                eventSlug: trade.eventSlug,
+                marketSlug: trade.marketSlug,
+                marketId: trade.marketId,
+              });
+
               return (
                 <tr
                   key={trade.id}
@@ -223,7 +245,7 @@ export function TradesTable({
                     <td className="py-2.5 px-3 max-w-[240px]">
                       <div className="flex flex-col">
                         <a
-                          href={`https://polymarket.com/market/${trade.marketId}`}
+                          href={polyUrl}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="font-medium text-[11px] text-foreground hover:text-blue-400 truncate inline-flex items-center gap-1.5"

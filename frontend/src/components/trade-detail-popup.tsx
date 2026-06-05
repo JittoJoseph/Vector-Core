@@ -1,7 +1,7 @@
 "use client";
 
 import type { SimulatedTrade } from "@/lib/types";
-import { formatPnl, pnlColor } from "@/lib/utils";
+import { formatPnl, pnlColor, polymarketMarketUrl } from "@/lib/utils";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { ExternalLink, X } from "lucide-react";
 
@@ -11,21 +11,6 @@ interface TradeDetailPopupProps {
   onClose: () => void;
   marketSlug?: string | null;
   marketQuestion?: string | null;
-}
-
-function polymarketMarketUrl({
-  eventSlug,
-  marketSlug,
-}: {
-  eventSlug?: string | null;
-  marketSlug?: string | null;
-}): string {
-  if (eventSlug && marketSlug) {
-    return `https://polymarket.com/event/${eventSlug}/${marketSlug}`;
-  }
-  if (eventSlug) return `https://polymarket.com/event/${eventSlug}`;
-  if (marketSlug) return `https://polymarket.com/market/${marketSlug}`;
-  return "https://polymarket.com";
 }
 
 export function TradeDetailPopup({

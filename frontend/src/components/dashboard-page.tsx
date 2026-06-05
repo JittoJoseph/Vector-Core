@@ -165,9 +165,7 @@ export function DashboardPage() {
 
   let liveUnrealizedPnl = 0;
   let closestExpiration: Date | null = null;
-  let closestTrade: SimulatedTrade | null = null;
-  let closestTradePnl: number | null = null;
-  let closestTradePnlPct: number | null = null;
+  let closestTrades: SimulatedTrade[] = [];
   const expirationBuckets = { "<24h": 0, "1-3d": 0, "4-7d": 0, ">7d": 0 };
 
   const now = new Date();
@@ -188,15 +186,9 @@ export function DashboardPage() {
       const d = new Date(endStr);
       if (!closestExpiration || d < closestExpiration) {
         closestExpiration = d;
-        closestTrade = t;
-        if (liveMid !== null) {
-          closestTradePnl = (liveMid - entryPrice) * shares - fees;
-          const actualCost = parseFloat(t.actualCost || "1");
-          closestTradePnlPct = actualCost > 0 ? (closestTradePnl / actualCost) * 100 : null;
-        } else {
-          closestTradePnl = null;
-          closestTradePnlPct = null;
-        }
+        closestTrades = [t];
+      } else if (d.getTime() === closestExpiration.getTime()) {
+        closestTrades.push(t);
       }
       
       const hours = (d.getTime() - now.getTime()) / (1000 * 60 * 60);
@@ -371,25 +363,25 @@ export function DashboardPage() {
                 <TabsList className="bg-transparent h-auto p-0 gap-2">
                   <TabsTrigger
                     value="positions"
-                    className="data-[state=active]:bg-foreground data-[state=active]:text-background text-muted-foreground/60 px-4 py-2 text-xs font-mono tracking-wider font-bold rounded transition-colors hover:text-muted-foreground"
+                    className="!bg-transparent !shadow-none data-[state=active]:text-foreground text-muted-foreground/40 hover:!bg-transparent hover:text-muted-foreground/80 px-4 py-2 text-xs font-mono tracking-wider font-bold rounded transition-colors"
                   >
                     POSITIONS ({openTrades.length})
                   </TabsTrigger>
                   <TabsTrigger
                     value="history"
-                    className="data-[state=active]:bg-foreground data-[state=active]:text-background text-muted-foreground/60 px-4 py-2 text-xs font-mono tracking-wider font-bold rounded transition-colors hover:text-muted-foreground"
+                    className="!bg-transparent !shadow-none data-[state=active]:text-foreground text-muted-foreground/40 hover:!bg-transparent hover:text-muted-foreground/80 px-4 py-2 text-xs font-mono tracking-wider font-bold rounded transition-colors"
                   >
                     TRADE HISTORY ({settledTrades.length})
                   </TabsTrigger>
                   <TabsTrigger
                     value="pipeline"
-                    className="data-[state=active]:bg-foreground data-[state=active]:text-background text-muted-foreground/60 px-4 py-2 text-xs font-mono tracking-wider font-bold rounded transition-colors hover:text-muted-foreground"
+                    className="!bg-transparent !shadow-none data-[state=active]:text-foreground text-muted-foreground/40 hover:!bg-transparent hover:text-muted-foreground/80 px-4 py-2 text-xs font-mono tracking-wider font-bold rounded transition-colors"
                   >
                     PIPELINE
                   </TabsTrigger>
                   <TabsTrigger
                     value="diagnostics"
-                    className="data-[state=active]:bg-foreground data-[state=active]:text-background text-muted-foreground/60 px-4 py-2 text-xs font-mono tracking-wider font-bold rounded transition-colors hover:text-muted-foreground"
+                    className="!bg-transparent !shadow-none data-[state=active]:text-foreground text-muted-foreground/40 hover:!bg-transparent hover:text-muted-foreground/80 px-4 py-2 text-xs font-mono tracking-wider font-bold rounded transition-colors"
                   >
                     DIAGNOSTICS
                   </TabsTrigger>
@@ -691,36 +683,61 @@ export function DashboardPage() {
                   <span className="text-[10px] text-amber-500/80 uppercase tracking-widest font-bold">
                     Next Position To Resolve
                   </span>
-                  {closestTrade && closestExpiration ? (
-                    <div 
-                      className="border border-amber-500/20 bg-amber-500/5 rounded p-3 flex flex-col gap-3 cursor-pointer hover:bg-amber-500/10 transition-colors"
-                      onClick={() => setSelectedTrade(closestTrade)}
-                    >
-                      <div className="text-[11px] font-medium text-foreground truncate" title={closestTrade.marketQuestion || "Unknown"}>
-                        {closestTrade.marketQuestion}
+                  {closestTrades.length > 0 && closestExpiration ? (
+                    <div className="flex flex-col gap-2">
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="text-[10px] text-muted-foreground uppercase">Resolving In:</span>
+                        <span className="text-xs font-bold text-amber-500/80">
+                          <MarketCountdown endDate={closestExpiration.toISOString()} />
+                        </span>
                       </div>
-                      <div className="flex justify-between items-end">
-                        <div className="flex flex-col gap-1">
-                          <span className="text-[10px] text-muted-foreground uppercase">Time Left</span>
-                          <span className="text-xs font-bold text-amber-500">
-                            <MarketCountdown endDate={closestExpiration.toISOString()} />
-                          </span>
-                        </div>
-                        <div className="flex flex-col gap-1 items-end">
-                          <span className="text-[10px] text-muted-foreground uppercase">PNL</span>
-                          {closestTradePnl !== null ? (
-                            <div className="flex items-center gap-1">
-                              <span className={`text-xs font-bold ${closestTradePnl >= 0 ? "text-emerald-400" : "text-red-400"}`}>
-                                {formatPnl(closestTradePnl)}
-                              </span>
-                              <span className={`text-[10px] ${closestTradePnlPct! >= 0 ? "text-emerald-400/60" : "text-red-400/60"}`}>
-                                ({closestTradePnlPct! >= 0 ? "+" : ""}{closestTradePnlPct!.toFixed(1)}%)
-                              </span>
+                      <div className="flex flex-col gap-2">
+                        {closestTrades.map((trade) => {
+                          const entryPrice = parseFloat(trade.entryPrice);
+                          const shares = parseFloat(trade.entryShares || "0");
+                          const fees = parseFloat(trade.entryFees || "0");
+                          const actualCost = parseFloat(trade.actualCost || "1");
+                          
+                          const livePrice = trade.tokenId ? (livePricesMap[trade.tokenId] ?? null) : null;
+                          const liveMid = livePrice?.mid ?? null;
+                          let pnl: number | null = null;
+                          let pnlPct: number | null = null;
+                          if (liveMid !== null) {
+                            pnl = (liveMid - entryPrice) * shares - fees;
+                            pnlPct = actualCost > 0 ? (pnl / actualCost) * 100 : null;
+                          }
+
+                          return (
+                            <div 
+                              key={trade.id}
+                              className="border border-border/30 bg-muted/10 rounded p-3 flex flex-col gap-2 cursor-pointer hover:bg-muted/20 transition-colors"
+                              onClick={() => setSelectedTrade(trade)}
+                            >
+                              <div className="text-[11px] font-medium text-foreground truncate" title={trade.marketQuestion || "Unknown"}>
+                                {trade.marketQuestion}
+                              </div>
+                              <div className="flex justify-between items-end">
+                                <div className="text-[10px] text-muted-foreground/60">
+                                  {shares.toFixed(1)} shares
+                                </div>
+                                <div className="flex flex-col gap-1 items-end">
+                                  {pnl !== null ? (
+                                    <div className="flex items-center gap-1">
+                                      <span className={`text-xs font-bold ${pnl >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                                        {formatPnl(pnl)}
+                                      </span>
+                                      <span className={`text-[10px] ${pnlPct! >= 0 ? "text-emerald-400/60" : "text-red-400/60"}`}>
+                                        ({pnlPct! >= 0 ? "+" : ""}{pnlPct!.toFixed(1)}%)
+                                      </span>
+                                    </div>
+                                  ) : (
+                                    <span className="text-xs font-bold text-muted-foreground/40">—</span>
+                                  )}
+                                </div>
+                              </div>
                             </div>
-                          ) : (
-                            <span className="text-xs font-bold text-muted-foreground/40">—</span>
-                          )}
-                        </div>
+                          );
+                        })}
                       </div>
                     </div>
                   ) : (
