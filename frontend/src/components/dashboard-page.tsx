@@ -2,12 +2,9 @@
 
 import { useState, useCallback, useEffect, useMemo } from "react";
 import { Header } from "./header";
-import { SystemStatusIndicator } from "./system-status-indicator";
 import { TradesTable } from "./trades-table";
 import { TradeDetailPopup } from "./trade-detail-popup";
-import { MarketsPanel } from "./markets-panel";
 import { ActivityPanel } from "./activity-panel";
-import { MarketDetailModal } from "./market-detail-modal";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { getApiClient } from "@/lib/api-client";
 import { pnlColor, formatPnl } from "@/lib/utils";
@@ -16,38 +13,37 @@ import {
   useSystemStats,
   useActiveMarkets,
   useLiveMarkets,
-  useCountdown,
   usePerformanceRealtime,
   useActivityLog,
-  useUnrealizedPnL,
   useAnimatedNumber,
 } from "@/lib/hooks";
-import type {
-  SimulatedTrade,
-  DiscoveredMarket,
-  LiveMarketPrice,
-  EventFamily,
-  Opportunity,
-} from "@/lib/types";
+import type { SimulatedTrade, Opportunity, LiveMarketPrice } from "@/lib/types";
 import {
-  ExternalLink,
-  TrendingUp,
   ShieldAlert,
   RefreshCw,
   Server,
+  Activity,
+  Briefcase,
+  TrendingUp,
+  ExternalLink,
   Workflow,
   SlidersHorizontal,
 } from "lucide-react";
 
 export function DashboardPage() {
   const [activeTab, setActiveTab] = useState("positions");
-  const [selectedTrade, setSelectedTrade] = useState<SimulatedTrade | null>(null);
-  const [selectedMarket, setSelectedMarket] = useState<DiscoveredMarket | null>(null);
-  const [performancePeriod, setPerformancePeriod] = useState<"1D" | "1W" | "1M" | "ALL">("ALL");
+  const [selectedTrade, setSelectedTrade] = useState<SimulatedTrade | null>(
+    null,
+  );
 
-  // Fetch real-time states via hooks
-  const { stats, loading: statsLoading, refetch: refetchStats } = useSystemStats();
+  // Core Hooks
+  const {
+    stats,
+    loading: statsLoading,
+    refetch: refetchStats,
+  } = useSystemStats();
   const liveMarkets = useLiveMarkets();
+
   const {
     trades,
     loading: tradesLoading,
@@ -58,7 +54,7 @@ export function DashboardPage() {
   } = useTrades();
 
   const {
-    markets,
+    markets: candidateMarketsRaw,
     loading: marketsLoading,
     loadMore: loadMoreMarkets,
     hasMore: hasMoreMarkets,
@@ -67,11 +63,9 @@ export function DashboardPage() {
   } = useActiveMarkets();
 
   const { activities, loading: activitiesLoading } = useActivityLog();
-  const { performance } = usePerformanceRealtime(performancePeriod);
-  const liveUnrealizedPnL = useUnrealizedPnL(trades, liveMarkets);
+  const { performance } = usePerformanceRealtime("ALL");
 
-  // States loaded via one-off REST (for tabs)
-  const [families, setFamilies] = useState<EventFamily[]>([]);
+  // Diagnostics state
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
   const [refreshingExtra, setRefreshingExtra] = useState(false);
 
@@ -79,12 +73,9 @@ export function DashboardPage() {
     setRefreshingExtra(true);
     try {
       const api = getApiClient();
-      const [familyRows, opportunityRows] = await Promise.all([
-        api.getFamilies({ limit: 50 }).catch(() => []),
-        api.getOpportunities({ limit: 100 }).catch(() => []),
-      ]);
-      setFamilies(familyRows);
-      setOpportunities(opportunityRows);
+      // Only fetch opportunities for rejection analytics
+      const opps = await api.getOpportunities({ limit: 500 }).catch(() => []);
+      setOpportunities(opps);
     } finally {
       setRefreshingExtra(false);
     }
@@ -104,25 +95,25 @@ export function DashboardPage() {
   }, [refetchStats, refetchTrades, refetchMarkets, fetchExtraData]);
 
   // Derived datasets
-  const openTrades = useMemo(() => trades.filter((t) => t.status === "OPEN"), [trades]);
-  const settledTrades = useMemo(() => trades.filter((t) => t.status === "SETTLED"), [trades]);
+  const openTrades = useMemo(
+    () => trades.filter((t) => t.status === "OPEN"),
+    [trades],
+  );
+  const settledTrades = useMemo(
+    () => trades.filter((t) => t.status === "SETTLED"),
+    [trades],
+  );
   const candidateMarkets = useMemo(
-    () => markets.filter((m) => m.classificationStatus === "candidate" || m.classificationStatus === "traded"),
-    [markets]
+    () =>
+      candidateMarketsRaw.filter(
+        (m) =>
+          m.classificationStatus === "candidate" ||
+          m.classificationStatus === "traded",
+      ),
+    [candidateMarketsRaw],
   );
 
-  // Stats calculation
-  const initialCapital = parseFloat(performance?.initialCapital || "0");
-  const cashBalance = parseFloat(performance?.cashBalance || "0");
-  const openPositionsValue = parseFloat(performance?.openPositionsValue || "0");
-  const portfolioValue = cashBalance + openPositionsValue;
-  const netPnl = portfolioValue - initialCapital;
-  const roi = initialCapital > 0 ? (netPnl / initialCapital) * 100 : 0;
-  const winRate = parseFloat(performance?.winRate || "0");
-
-  const animatedNetPnl = useAnimatedNumber(netPnl, 300);
-
-  // Live price map from monitored contracts
+  // Live prices map for Open Positions
   const livePricesMap = useMemo<Record<string, LiveMarketPrice>>(() => {
     const map: Record<string, LiveMarketPrice> = {};
     for (const m of liveMarkets) {
@@ -133,18 +124,72 @@ export function DashboardPage() {
     return map;
   }, [liveMarkets]);
 
+  // Market deadlines map
   const marketEndDates = useMemo<Record<string, string>>(() => {
     const map: Record<string, string> = {};
-    for (const m of liveMarkets) {
-      map[m.marketId] = m.deadline;
-    }
-    for (const m of markets) {
+    for (const m of liveMarkets) map[m.marketId] = m.deadline;
+    for (const m of candidateMarketsRaw)
       if (m.id && m.deadline) map[m.id] = m.deadline;
-    }
     return map;
-  }, [liveMarkets, markets]);
+  }, [liveMarkets, candidateMarketsRaw]);
 
+  // Financial Stats
+  const initialCapital = parseFloat(performance?.initialCapital || "0");
+  const cashBalance = parseFloat(performance?.cashBalance || "0");
+  const openPositionsValue = parseFloat(performance?.openPositionsValue || "0");
+  const portfolioValue = cashBalance + openPositionsValue;
+  const netPnl = portfolioValue - initialCapital;
+  const roi = initialCapital > 0 ? (netPnl / initialCapital) * 100 : 0;
+  const winRate = parseFloat(performance?.winRate || "0");
+
+  const animatedNetPnl = useAnimatedNumber(netPnl, 300);
   const isPaused = stats?.orchestrator.paused ?? false;
+
+  // Diagnostics Aggregation
+  const rejectionStats = useMemo(() => {
+    const rejections = opportunities.filter((o) => o.status === "rejected");
+    const total = rejections.length;
+    if (total === 0) return [];
+
+    const counts: Record<string, number> = {};
+    rejections.forEach((r) => {
+      let reason = r.reason || "Unknown";
+      if (reason.includes(" - ")) reason = reason.split(" - ")[1] || reason;
+      counts[reason] = (counts[reason] || 0) + 1;
+    });
+
+    return Object.entries(counts)
+      .sort((a, b) => b[1] - a[1])
+      .map(([reason, count]) => ({ reason, pct: (count / total) * 100 }));
+  }, [opportunities]);
+
+  // Sidebar Metrics
+  const avgExpectedProfit =
+    openTrades.length > 0
+      ? openTrades.reduce(
+          (sum, t) => sum + parseFloat(t.expectedNetProfit || "0"),
+          0,
+        ) / openTrades.length
+      : 0;
+
+  let bestPos: SimulatedTrade | null = null;
+  let worstPos: SimulatedTrade | null = null;
+  for (const t of openTrades) {
+    const pnl = parseFloat(t.expectedNetProfit || "0");
+    if (!bestPos || pnl > parseFloat(bestPos.expectedNetProfit || "0"))
+      bestPos = t;
+    if (!worstPos || pnl < parseFloat(worstPos.expectedNetProfit || "0"))
+      worstPos = t;
+  }
+
+  const evaluatedCount =
+    stats?.orchestrator.scanner.evaluatedOpportunities || 0;
+  const discoveredLaddersCount =
+    stats?.orchestrator.scanner.discoveredLadders || 0;
+  const acceptanceRate =
+    evaluatedCount > 0
+      ? ((openTrades.length + settledTrades.length) / evaluatedCount) * 100
+      : 0;
 
   return (
     <div className="min-h-screen bg-background text-foreground flex flex-col font-mono selection:bg-muted-foreground/30">
@@ -154,210 +199,204 @@ export function DashboardPage() {
         <div className="flex items-center justify-center gap-2 px-4 py-1.5 bg-red-950/20 border-b border-red-500/20 animate-pulse shrink-0">
           <ShieldAlert className="w-4 h-4 text-red-400 shrink-0" />
           <span className="text-[11px] font-bold text-red-400 tracking-widest uppercase">
-            SYSTEM PAUSED — Simulated trading is suspended. Go to settings to resume execution.
+            SYSTEM PAUSED — Simulated trading is suspended. Go to settings to
+            resume.
           </span>
         </div>
       )}
 
       <main className="flex-1 px-4 py-4 pb-16 max-w-7xl mx-auto w-full space-y-4">
-        {/* ── GROUNDED, CLEAN COMMAND CENTER PANEL ────────────── */}
-        <div className="border border-border/30 rounded-xl bg-card/25 overflow-hidden">
-          <div className="flex flex-col md:flex-row divide-y md:divide-y-0 md:divide-x divide-border/20">
-            
-            {/* LEFT: SYSTEM OPERATIONAL STATE */}
-            <div className="flex-1 p-5 flex flex-col gap-4 min-w-0">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Server className="w-3.5 h-3.5 text-muted-foreground" />
-                  <span className="text-[10px] tracking-[0.18em] text-muted-foreground uppercase font-bold">
-                    SYSTEM OPERATIONAL STATE
-                  </span>
+        {/* ── TOP LEVEL COMMAND PANELS ── */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          {/* SYSTEM OPERATIONAL STATE */}
+          <div className="border border-border/30 rounded bg-card/25 p-5 flex flex-col">
+            <div className="flex items-center justify-between mb-5">
+              <div className="text-[11px] tracking-[0.2em] text-muted-foreground/80 uppercase flex items-center gap-2 font-bold">
+                <Server size={14} className="text-muted-foreground" /> System
+                Operational State
+              </div>
+              <button
+                onClick={handleManualRefresh}
+                className="text-muted-foreground/50 hover:text-foreground transition-colors"
+              >
+                <RefreshCw
+                  size={12}
+                  className={refreshingExtra ? "animate-spin" : ""}
+                />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-2 gap-y-6 gap-x-4">
+              <div>
+                <div className="text-[9px] text-muted-foreground/60 uppercase tracking-widest mb-1.5">
+                  Trading Engine
                 </div>
-                <button
-                  onClick={handleManualRefresh}
-                  className="p-1 rounded border border-border/40 hover:bg-muted/40 transition-colors text-muted-foreground"
-                  title="Refresh state"
+                <div
+                  className={`text-xs font-bold ${isPaused ? "text-amber-500" : stats?.orchestrator.running ? "text-emerald-400" : "text-muted-foreground"}`}
                 >
-                  <RefreshCw size={11} className={refreshingExtra ? "animate-spin" : ""} />
-                </button>
-              </div>
-
-              {statsLoading ? (
-                <div className="text-[10px] text-muted-foreground animate-pulse py-8 text-center">
-                  Loading system statistics…
-                </div>
-              ) : stats ? (
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 pt-1">
-                  <StatusMetric
-                    label="Trading Engine"
-                    value={isPaused ? "PAUSED" : stats.orchestrator.running ? "RUNNING" : "IDLE"}
-                    statusColor={isPaused ? "text-red-400" : stats.orchestrator.running ? "text-emerald-400 font-bold" : "text-muted-foreground"}
-                  />
-                  <StatusMetric
-                    label="WebSocket Feed"
-                    value={stats.orchestrator.ws.connected ? "CONNECTED" : "DISCONNECTED"}
-                    statusColor={stats.orchestrator.ws.connected ? "text-emerald-400 font-bold" : "text-amber-500"}
-                  />
-                  <StatusMetric
-                    label="Monitored Markets"
-                    value={`${liveMarkets.length} Contracts`}
-                  />
-                  <StatusMetric
-                    label="Discovered Ladders"
-                    value={`${stats.orchestrator.scanner.discoveredLadders} event families`}
-                  />
-                  <StatusMetric
-                    label="Evaluated Decisions"
-                    value={`${stats.orchestrator.scanner.evaluatedOpportunities} opportunities`}
-                  />
-                  <StatusMetric
-                    label="Cycles executed"
-                    value={stats.orchestrator.cycleCount.toString()}
-                  />
-                </div>
-              ) : (
-                <div className="text-[10px] text-muted-foreground py-8 text-center">
-                  Unalbe to load system statistics.
-                </div>
-              )}
-            </div>
-
-            {/* RIGHT: PORTFOLIO PERFORMANCE SUMMARY */}
-            <div className="flex-1 p-5 flex flex-col gap-4 min-w-0">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <TrendingUp className="w-3.5 h-3.5 text-muted-foreground" />
-                  <span className="text-[10px] tracking-[0.18em] text-muted-foreground uppercase font-bold">
-                    PORTFOLIO & CAPITAL SUMMARY
-                  </span>
-                </div>
-                <div className="flex border border-border/30 rounded overflow-hidden text-[9px] bg-background/45">
-                  {(["1D", "1W", "1M", "ALL"] as const).map((p) => (
-                    <button
-                      key={p}
-                      onClick={() => setPerformancePeriod(p)}
-                      className={`px-2.5 py-1 transition-all ${
-                        performancePeriod === p
-                          ? "bg-muted text-foreground font-bold"
-                          : "text-muted-foreground hover:text-foreground"
-                      }`}
-                    >
-                      {p}
-                    </button>
-                  ))}
+                  {isPaused
+                    ? "PAUSED"
+                    : stats?.orchestrator.running
+                      ? "RUNNING"
+                      : "IDLE"}
                 </div>
               </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-1">
-                <div>
-                  <span className="text-[9px] text-muted-foreground/60 tracking-widest block uppercase">
-                    Net Profit / Loss
-                  </span>
-                  <div className={`text-xl font-bold font-mono tracking-tight tabular-nums mt-0.5 ${pnlColor(animatedNetPnl)}`}>
-                    {formatPnl(animatedNetPnl)}
-                  </div>
-                  <span className={`text-[10px] font-semibold mt-0.5 block font-mono ${pnlColor(roi)}`}>
-                    {roi >= 0 ? "+" : ""}{roi.toFixed(2)}% ROI ({performancePeriod})
-                  </span>
-                  <span className={`text-[9px] block mt-0.5 font-mono ${pnlColor(liveUnrealizedPnL)}`}>
-                    Unrealized: {formatPnl(liveUnrealizedPnL)}
+              <div>
+                <div className="text-[9px] text-muted-foreground/60 uppercase tracking-widest mb-1.5">
+                  Websocket Feed
+                </div>
+                <div
+                  className={`text-xs font-bold ${stats?.orchestrator.ws.connected ? "text-emerald-400" : "text-red-400"}`}
+                >
+                  {stats?.orchestrator.ws.connected
+                    ? "CONNECTED"
+                    : "DISCONNECTED"}
+                </div>
+              </div>
+              <div>
+                <div className="text-[9px] text-muted-foreground/60 uppercase tracking-widest mb-1.5">
+                  Discovered Ladders
+                </div>
+                <div className="text-sm font-semibold">
+                  {discoveredLaddersCount}{" "}
+                  <span className="text-xs font-normal text-muted-foreground/60">
+                    event families
                   </span>
                 </div>
-
-                <div>
-                  <span className="text-[9px] text-muted-foreground/60 tracking-widest block uppercase">
-                    Asset Allocation
-                  </span>
-                  <div className="text-xl font-bold font-mono tracking-tight tabular-nums mt-0.5 text-foreground">
-                    ${portfolioValue.toFixed(2)}
-                  </div>
-                  <div className="text-[9px] text-muted-foreground/60 mt-0.5 flex flex-col">
-                    <span>Cash: ${cashBalance.toFixed(1)}</span>
-                    <span>Invested: ${openPositionsValue.toFixed(1)}</span>
-                  </div>
+              </div>
+              <div>
+                <div className="text-[9px] text-muted-foreground/60 uppercase tracking-widest mb-1.5">
+                  Evaluated Decisions
                 </div>
-
-                <div>
-                  <div className="flex items-center justify-between text-[9px] text-muted-foreground/60 tracking-widest uppercase">
-                    <span>Win Rate</span>
-                    <span className="text-foreground font-bold">{winRate.toFixed(1)}%</span>
-                  </div>
-                  <div className="h-1.5 w-full rounded-full overflow-hidden bg-red-500/20 mt-1 flex">
-                    <div
-                      className="h-full bg-emerald-500 transition-all duration-500"
-                      style={{ width: `${winRate}%` }}
-                    />
-                  </div>
-                  <div className="flex justify-between text-[9px] font-bold mt-1 text-muted-foreground">
-                    <span className="text-emerald-500/80">{performance?.wins || 0}W</span>
-                    <span>/</span>
-                    <span className="text-red-400/80">{performance?.losses || 0}L</span>
-                    <span>/</span>
-                    <span>{trades.length} Total</span>
-                  </div>
+                <div className="text-sm font-semibold">
+                  {evaluatedCount}{" "}
+                  <span className="text-xs font-normal text-muted-foreground/60">
+                    opportunities
+                  </span>
                 </div>
               </div>
             </div>
+          </div>
 
+          {/* PORTFOLIO & CAPITAL SUMMARY */}
+          <div className="border border-border/30 rounded bg-card/25 p-5 flex flex-col">
+            <div className="flex items-center justify-between mb-5">
+              <div className="text-[11px] tracking-[0.2em] text-muted-foreground/80 uppercase flex items-center gap-2 font-bold">
+                <TrendingUp size={14} className="text-muted-foreground" />{" "}
+                Portfolio & Capital Summary
+              </div>
+            </div>
+
+            <div className="grid grid-cols-3 gap-y-6 gap-x-4">
+              <div className="col-span-1">
+                <div className="text-[9px] text-muted-foreground/60 uppercase tracking-widest mb-1.5">
+                  Net Profit / Loss
+                </div>
+                <div
+                  className={`text-xl font-bold tracking-tight leading-none ${pnlColor(netPnl)}`}
+                >
+                  {formatPnl(animatedNetPnl)}
+                </div>
+                <div
+                  className={`text-[10px] mt-1.5 font-bold ${pnlColor(netPnl, "80")}`}
+                >
+                  {roi >= 0 ? "+" : ""}
+                  {roi.toFixed(2)}% ROI (ALL)
+                </div>
+              </div>
+              <div className="col-span-1">
+                <div className="text-[9px] text-muted-foreground/60 uppercase tracking-widest mb-1.5">
+                  Asset Allocation
+                </div>
+                <div className="text-xl font-bold tracking-tight leading-none text-foreground">
+                  $
+                  {portfolioValue.toLocaleString(undefined, {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  })}
+                </div>
+                <div className="text-[10px] mt-1.5 text-muted-foreground/80">
+                  Cash: $
+                  {cashBalance.toLocaleString(undefined, {
+                    minimumFractionDigits: 1,
+                    maximumFractionDigits: 1,
+                  })}
+                </div>
+                <div className="text-[10px] mt-0.5 text-muted-foreground/80">
+                  Invested: $
+                  {openPositionsValue.toLocaleString(undefined, {
+                    minimumFractionDigits: 1,
+                    maximumFractionDigits: 1,
+                  })}
+                </div>
+              </div>
+              <div className="col-span-1">
+                <div className="text-[9px] text-muted-foreground/60 uppercase tracking-widest mb-1.5 flex justify-end">
+                  Win Rate
+                </div>
+                <div className="text-xl font-bold tracking-tight leading-none text-right">
+                  {winRate.toFixed(1)}%
+                </div>
+                <div className="text-[9px] mt-2 flex items-center justify-end gap-1.5 font-bold text-muted-foreground/60">
+                  <span className="text-emerald-400">
+                    {performance?.wins || 0}W
+                  </span>
+                  <span>/</span>
+                  <span className="text-red-400">
+                    {performance?.losses || 0}L
+                  </span>
+                  <span>/</span>
+                  <span className="text-foreground">
+                    {performance?.totalTrades || 0} Total
+                  </span>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
 
-        {/* ── TWO-COLUMN: TABS AREA & SIDEBAR ─────────── */}
-        <div className="grid grid-cols-1 lg:grid-cols-[1fr_280px] gap-4">
-          
-          {/* LEFT: MAIN TAB CONTENT */}
-          <div className="border border-border/30 rounded-lg bg-card/25 overflow-hidden flex flex-col">
-            <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-              <div className="border-b border-border/20 px-3 py-2 flex items-center justify-between bg-muted/10 shrink-0">
-                <TabsList className="bg-transparent gap-2 h-auto p-0 flex-wrap">
+        {/* ── MAIN SPLIT VIEW ── */}
+        <div className="flex flex-col lg:flex-row gap-4">
+          {/* LEFT: TABS & TABLES */}
+          <div className="flex-1 min-w-0 border border-border/30 rounded bg-card/25 overflow-hidden flex flex-col">
+            <Tabs
+              value={activeTab}
+              onValueChange={setActiveTab}
+              className="flex flex-col flex-1"
+            >
+              <div className="border-b border-border/30 px-3 py-2 flex items-center justify-between bg-card">
+                <TabsList className="bg-transparent h-auto p-0 gap-2">
                   <TabsTrigger
                     value="positions"
-                    className="data-[state=active]:bg-muted/40 data-[state=active]:text-foreground rounded px-3 py-1 text-[10px] font-mono tracking-wider font-bold"
+                    className="data-[state=active]:bg-foreground data-[state=active]:text-background text-muted-foreground/60 px-3 py-1.5 text-[11px] font-mono tracking-wider font-bold rounded transition-colors hover:text-foreground"
                   >
                     POSITIONS ({openTrades.length})
                   </TabsTrigger>
                   <TabsTrigger
-                    value="trades"
-                    className="data-[state=active]:bg-muted/40 data-[state=active]:text-foreground rounded px-3 py-1 text-[10px] font-mono tracking-wider font-bold"
+                    value="history"
+                    className="data-[state=active]:bg-foreground data-[state=active]:text-background text-muted-foreground/60 px-3 py-1.5 text-[11px] font-mono tracking-wider font-bold rounded transition-colors hover:text-foreground"
                   >
-                    TRADES ({settledTrades.length})
+                    TRADE HISTORY ({settledTrades.length})
                   </TabsTrigger>
                   <TabsTrigger
-                    value="monitored"
-                    className="data-[state=active]:bg-muted/40 data-[state=active]:text-foreground rounded px-3 py-1 text-[10px] font-mono tracking-wider font-bold"
+                    value="pipeline"
+                    className="data-[state=active]:bg-foreground data-[state=active]:text-background text-muted-foreground/60 px-3 py-1.5 text-[11px] font-mono tracking-wider font-bold rounded transition-colors hover:text-foreground"
                   >
-                    MONITORED ({liveMarkets.length})
+                    PIPELINE
                   </TabsTrigger>
                   <TabsTrigger
-                    value="candidates"
-                    className="data-[state=active]:bg-muted/40 data-[state=active]:text-foreground rounded px-3 py-1 text-[10px] font-mono tracking-wider font-bold"
+                    value="diagnostics"
+                    className="data-[state=active]:bg-foreground data-[state=active]:text-background text-muted-foreground/60 px-3 py-1.5 text-[11px] font-mono tracking-wider font-bold rounded transition-colors hover:text-foreground"
                   >
-                    CANDIDATES ({candidateMarkets.length})
-                  </TabsTrigger>
-                  <TabsTrigger
-                    value="families"
-                    className="data-[state=active]:bg-muted/40 data-[state=active]:text-foreground rounded px-3 py-1 text-[10px] font-mono tracking-wider font-bold"
-                  >
-                    LADDERS ({families.length})
-                  </TabsTrigger>
-                  <TabsTrigger
-                    value="opportunities"
-                    className="data-[state=active]:bg-muted/40 data-[state=active]:text-foreground rounded px-3 py-1 text-[10px] font-mono tracking-wider font-bold"
-                  >
-                    DECISIONS ({opportunities.length})
-                  </TabsTrigger>
-                  <TabsTrigger
-                    value="activity"
-                    className="data-[state=active]:bg-muted/40 data-[state=active]:text-foreground rounded px-3 py-1 text-[10px] font-mono tracking-wider font-bold"
-                  >
-                    ACTIVITY
+                    DIAGNOSTICS
                   </TabsTrigger>
                 </TabsList>
               </div>
 
-              {/* POSITIONS TAB */}
-              <TabsContent value="positions" className="mt-0">
+              {/* OPEN POSITIONS TAB */}
+              <TabsContent value="positions" className="mt-0 flex-1 p-0">
                 <TradesTable
+                  type="OPEN"
                   trades={openTrades}
                   loading={tradesLoading}
                   livePrices={livePricesMap}
@@ -369,9 +408,43 @@ export function DashboardPage() {
                 />
               </TabsContent>
 
-              {/* TRADES TAB */}
-              <TabsContent value="trades" className="mt-0">
+              {/* TRADE HISTORY TAB */}
+              <TabsContent
+                value="history"
+                className="mt-0 flex-1 p-0 flex flex-col"
+              >
+                <div className="bg-card/50 border-b border-border/20 px-4 py-3 flex items-center justify-between">
+                  <div className="flex gap-8">
+                    <div className="flex flex-col">
+                      <span className="text-[9px] text-muted-foreground uppercase tracking-widest">
+                        Realized PnL
+                      </span>
+                      <span
+                        className={`text-sm font-bold ${pnlColor(parseFloat(performance?.totalPnl || "0"))}`}
+                      >
+                        {formatPnl(parseFloat(performance?.totalPnl || "0"))}
+                      </span>
+                    </div>
+                    <div className="flex flex-col">
+                      <span className="text-[9px] text-muted-foreground uppercase tracking-widest">
+                        Avg Win
+                      </span>
+                      <span className="text-sm font-bold text-emerald-400">
+                        {formatPnl(parseFloat(performance?.avgWin || "0"))}
+                      </span>
+                    </div>
+                    <div className="flex flex-col">
+                      <span className="text-[9px] text-muted-foreground uppercase tracking-widest">
+                        Avg Loss
+                      </span>
+                      <span className="text-sm font-bold text-red-400">
+                        {formatPnl(parseFloat(performance?.avgLoss || "0"))}
+                      </span>
+                    </div>
+                  </div>
+                </div>
                 <TradesTable
+                  type="SETTLED"
                   trades={settledTrades}
                   loading={tradesLoading}
                   marketEndDates={marketEndDates}
@@ -382,139 +455,81 @@ export function DashboardPage() {
                 />
               </TabsContent>
 
-              {/* MONITORED TAB - High-density live Pricing Table */}
-              <TabsContent value="monitored" className="mt-0">
+              {/* MARKET PIPELINE TAB */}
+              <TabsContent value="pipeline" className="mt-0 flex-1 p-0">
                 <div className="overflow-x-auto">
                   <table className="w-full text-xs font-mono">
                     <thead>
-                      <tr className="border-b border-border/30 text-muted-foreground text-[10px] tracking-wider uppercase">
-                        <th className="text-left py-2.5 px-3 font-medium">Live Monitored question</th>
-                        <th className="text-right py-2.5 px-3 font-medium">YES Price</th>
-                        <th className="text-right py-2.5 px-3 font-medium">NO Price</th>
-                        <th className="text-right py-2.5 px-3 font-medium">Spread</th>
-                        <th className="text-right py-2.5 px-3 font-medium">Closes In</th>
-                        <th className="text-left py-2.5 px-3 font-medium">Status</th>
+                      <tr className="border-b border-border/30">
+                        <th className="text-left py-2.5 px-4 font-medium text-muted-foreground tracking-wider text-[10px]">
+                          CANDIDATE QUESTION
+                        </th>
+                        <th className="text-right py-2.5 px-4 font-medium text-muted-foreground tracking-wider text-[10px]">
+                          CLOSES
+                        </th>
+                        <th className="text-right py-2.5 px-4 font-medium text-muted-foreground tracking-wider text-[10px]">
+                          24H VOL
+                        </th>
+                        <th className="text-right py-2.5 px-4 font-medium text-muted-foreground tracking-wider text-[10px]">
+                          STATUS
+                        </th>
                       </tr>
                     </thead>
                     <tbody>
-                      {liveMarkets.map((m) => {
-                        const yesPrice = m.prices[m.yesTokenId]?.mid ?? null;
-                        const noPrice = m.prices[m.noTokenId]?.mid ?? null;
-                        const spread = m.prices[m.noTokenId] ? Math.abs((m.prices[m.yesTokenId]?.ask ?? 0) - (m.prices[m.yesTokenId]?.bid ?? 0)) : null;
-
-                        return (
-                          <tr key={m.marketId} className="border-b border-border/5 hover:bg-muted/15 transition-all">
-                            <td className="py-3 px-3 min-w-[360px]">
-                              <div className="flex flex-col gap-0.5">
-                                <a
-                                  href={m.slug ? `https://polymarket.com/event/${m.slug}` : `https://polymarket.com/market/${m.marketId}`}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="font-medium text-foreground hover:text-blue-400 inline-flex items-center gap-1"
-                                >
-                                  {m.question}
-                                  <ExternalLink size={10} className="text-muted-foreground/40" />
-                                </a>
-                                <span className="text-[10px] text-muted-foreground/60 uppercase">{m.eventTitle}</span>
-                              </div>
-                            </td>
-                            <td className="py-3 px-3 text-right font-semibold text-emerald-400 tabular-nums">
-                              {yesPrice !== null ? `${(yesPrice * 100).toFixed(1)}¢` : "—"}
-                            </td>
-                            <td className="py-3 px-3 text-right font-semibold text-red-400 tabular-nums">
-                              {noPrice !== null ? `${(noPrice * 100).toFixed(1)}¢` : "—"}
-                            </td>
-                            <td className="py-3 px-3 text-right text-muted-foreground tabular-nums">
-                              {spread !== null ? `${(spread * 100).toFixed(1)}¢` : "—"}
-                            </td>
-                            <td className="py-3 px-3 text-right text-foreground font-semibold font-mono tabular-nums">
-                              <MarketCountdown endDate={m.deadline} />
-                            </td>
-                            <td className="py-3 px-3">
-                              <span
-                                className={`inline-flex rounded px-1.5 py-0.5 text-[9px] font-bold uppercase ${
-                                  m.status === "ACTIVE"
-                                    ? "bg-emerald-500/10 text-emerald-500 border border-emerald-500/20"
-                                    : m.status === "UPCOMING"
-                                    ? "bg-amber-500/10 text-amber-500 border border-amber-500/20"
-                                    : "bg-muted text-muted-foreground border border-border/30"
-                                }`}
-                              >
-                                {m.status}
-                              </span>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                      {liveMarkets.length === 0 && (
-                        <tr>
-                          <td colSpan={6} className="py-12 text-center text-muted-foreground">
-                            No live contracts currently tracked. Engine is scanning...
-                          </td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              </TabsContent>
-
-              {/* CANDIDATES TAB */}
-              <TabsContent value="candidates" className="mt-0">
-                <MarketsPanel
-                  markets={candidateMarkets}
-                  trades={trades}
-                  loading={marketsLoading}
-                  loadingMore={loadingMoreMarkets}
-                  hasMore={hasMoreMarkets}
-                  onLoadMore={loadMoreMarkets}
-                  onMarketClick={setSelectedMarket}
-                />
-              </TabsContent>
-
-              {/* EVENT FAMILIES (LADDERS) TAB */}
-              <TabsContent value="families" className="mt-0">
-                <div className="overflow-x-auto">
-                  <table className="w-full text-xs font-mono">
-                    <thead>
-                      <tr className="border-b border-border/30 text-muted-foreground text-[10px] tracking-wider uppercase">
-                        <th className="text-left py-2.5 px-3 font-medium">Event Family / Title</th>
-                        <th className="text-right py-2.5 px-3 font-medium">Dates</th>
-                        <th className="text-right py-2.5 px-3 font-medium">24h Volume</th>
-                        <th className="text-left py-2.5 px-3 font-medium">Kind</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {families.map((f) => (
-                        <tr key={f.id} className="border-b border-border/5 hover:bg-muted/15 transition-all">
-                          <td className="py-3 px-3">
+                      {candidateMarkets.map((m) => (
+                        <tr
+                          key={m.id}
+                          className="border-b border-border/5 hover:bg-muted/15"
+                        >
+                          <td className="py-3 px-4 min-w-[300px]">
                             <div className="flex flex-col gap-0.5">
                               <a
-                                href={`https://polymarket.com/event/${f.slug}`}
+                                href={
+                                  m.slug
+                                    ? `https://polymarket.com/event/${m.slug}`
+                                    : `https://polymarket.com/market/${m.id}`
+                                }
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                className="font-semibold text-foreground hover:text-blue-400 inline-flex items-center gap-1"
+                                className="font-medium text-foreground hover:text-blue-400 inline-flex items-center gap-1"
                               >
-                                {f.title}
-                                <ExternalLink size={10} className="text-muted-foreground/40" />
+                                {m.question}
+                                <ExternalLink
+                                  size={10}
+                                  className="text-muted-foreground/40"
+                                />
                               </a>
-                              <span className="text-[10px] text-muted-foreground/60">{f.slug}</span>
                             </div>
                           </td>
-                          <td className="py-3 px-3 text-right tabular-nums text-foreground">{f.explicitDateCount}</td>
-                          <td className="py-3 px-3 text-right tabular-nums text-foreground">
-                            {f.volume24h ? `$${parseFloat(f.volume24h).toLocaleString("en-US", { maximumFractionDigits: 0 })}` : "—"}
+                          <td className="py-3 px-4 text-right">
+                            {new Date(m.deadline).toLocaleDateString("en-US", {
+                              month: "short",
+                              day: "numeric",
+                            })}
                           </td>
-                          <td className="py-3 px-3">
-                            <span className="inline-flex rounded px-1.5 py-0.5 text-[9px] font-bold bg-muted text-muted-foreground border border-border/30">
-                              {f.familyKind.replace("_", " ")}
+                          <td className="py-3 px-4 text-right">
+                            $
+                            {m.volume24h
+                              ? parseFloat(m.volume24h).toLocaleString(
+                                  undefined,
+                                  { maximumFractionDigits: 0 },
+                                )
+                              : "0"}
+                          </td>
+                          <td className="py-3 px-4 text-right">
+                            <span className="inline-flex items-center text-[9px] font-bold tracking-wider px-2 py-0.5 rounded border border-blue-500/25 bg-blue-500/5 text-blue-400">
+                              WAITING FOR DRIFT
                             </span>
                           </td>
                         </tr>
                       ))}
-                      {families.length === 0 && (
+                      {candidateMarkets.length === 0 && (
                         <tr>
-                          <td colSpan={4} className="py-12 text-center text-muted-foreground">
-                            No event families registered yet.
+                          <td
+                            colSpan={4}
+                            className="py-12 text-center text-muted-foreground"
+                          >
+                            No candidate markets available.
                           </td>
                         </tr>
                       )}
@@ -523,205 +538,221 @@ export function DashboardPage() {
                 </div>
               </TabsContent>
 
-              {/* OPPORTUNITIES (DECISIONS) TAB */}
-              <TabsContent value="opportunities" className="mt-0">
-                <div className="overflow-x-auto">
-                  <table className="w-full text-xs font-mono">
-                    <thead>
-                      <tr className="border-b border-border/30 text-muted-foreground text-[10px] tracking-wider uppercase">
-                        <th className="text-left py-2.5 px-3 font-medium">Market Question</th>
-                        <th className="text-right py-2.5 px-3 font-medium">Ask Price</th>
-                        <th className="text-right py-2.5 px-3 font-medium">Spread</th>
-                        <th className="text-right py-2.5 px-3 font-medium">Exp. PnL</th>
-                        <th className="text-left py-2.5 px-3 font-medium">Decision Status / Reason</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {opportunities.map((opp) => (
-                        <tr key={opp.id} className="border-b border-border/5 hover:bg-muted/15 transition-all">
-                          <td className="py-3 px-3 min-w-[300px]">
-                            <div className="flex flex-col gap-0.5">
-                              <span className="font-medium text-foreground">{opp.reason?.split(" - ")[0] || "Simulated Market Scanner Check"}</span>
-                              <span className="text-[10px] text-muted-foreground/60">
-                                {new Date(opp.createdAt).toLocaleString()}
-                              </span>
-                            </div>
-                          </td>
-                          <td className="py-3 px-3 text-right tabular-nums text-foreground">
-                            {opp.noBestAsk ? `${(parseFloat(opp.noBestAsk) * 100).toFixed(1)}¢` : "—"}
-                          </td>
-                          <td className="py-3 px-3 text-right tabular-nums text-muted-foreground">
-                            {opp.spread ? `${(parseFloat(opp.spread) * 100).toFixed(1)}¢` : "—"}
-                          </td>
-                          <td className="py-3 px-3 text-right tabular-nums text-emerald-400 font-semibold">
-                            {opp.expectedNetProfit ? `$${parseFloat(opp.expectedNetProfit).toFixed(3)}` : "—"}
-                          </td>
-                          <td className="py-3 px-3">
-                            <div className="flex flex-col gap-1 items-start">
-                              <span
-                                className={`inline-flex rounded px-1.5 py-0.5 text-[9px] font-bold uppercase ${
-                                  opp.status === "traded" || opp.status === "accepted"
-                                    ? "bg-emerald-500/10 text-emerald-500 border border-emerald-500/20"
-                                    : opp.status === "rejected"
-                                    ? "bg-red-500/10 text-red-400 border border-red-500/20"
-                                    : "bg-muted text-muted-foreground border border-border/30"
-                                }`}
-                              >
-                                {opp.status}
-                              </span>
-                              {opp.reason && (
-                                <span className="text-[9px] text-muted-foreground/75 leading-normal max-w-[280px]">
-                                  {opp.reason.includes(" - ") ? opp.reason.substring(opp.reason.indexOf(" - ") + 3) : opp.reason}
+              {/* DIAGNOSTICS TAB */}
+              <TabsContent value="diagnostics" className="mt-0 flex-1 p-0">
+                <div className="grid grid-cols-1 md:grid-cols-2 divide-y md:divide-y-0 md:divide-x divide-border/20 h-full">
+                  <div className="p-6 flex flex-col gap-6">
+                    <div>
+                      <div className="text-[10px] tracking-[0.15em] text-muted-foreground uppercase flex items-center gap-1.5 font-bold mb-4">
+                        <Activity size={12} /> System Telemetry
+                      </div>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="border border-border/20 rounded p-3 bg-muted/5">
+                          <div className="text-[9px] text-muted-foreground uppercase tracking-widest mb-1">
+                            Scanner Loops
+                          </div>
+                          <div className="text-lg font-bold">
+                            {stats?.orchestrator.cycleCount || 0}
+                          </div>
+                        </div>
+                        <div className="border border-border/20 rounded p-3 bg-muted/5">
+                          <div className="text-[9px] text-muted-foreground uppercase tracking-widest mb-1">
+                            WS Messages
+                          </div>
+                          <div className="text-lg font-bold">
+                            {stats?.orchestrator.ws.messageCount || 0}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-[10px] tracking-[0.15em] text-muted-foreground uppercase font-bold mb-3">
+                        Recent Rejection Reasons
+                      </div>
+                      {rejectionStats.length > 0 ? (
+                        <div className="flex flex-col gap-2">
+                          {rejectionStats.slice(0, 5).map((stat) => (
+                            <div
+                              key={stat.reason}
+                              className="flex flex-col gap-1"
+                            >
+                              <div className="flex justify-between text-[11px]">
+                                <span className="text-foreground/80">
+                                  {stat.reason}
                                 </span>
-                              )}
+                                <span className="text-muted-foreground font-bold">
+                                  {stat.pct.toFixed(1)}%
+                                </span>
+                              </div>
+                              <div className="w-full bg-muted/20 h-1.5 rounded-full overflow-hidden">
+                                <div
+                                  className="bg-amber-500/50 h-full rounded-full"
+                                  style={{ width: `${stat.pct}%` }}
+                                />
+                              </div>
                             </div>
-                          </td>
-                        </tr>
-                      ))}
-                      {opportunities.length === 0 && (
-                        <tr>
-                          <td colSpan={5} className="py-12 text-center text-muted-foreground">
-                            No scanner opportunities evaluated yet.
-                          </td>
-                        </tr>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="text-[11px] text-muted-foreground">
+                          Not enough recent rejections to analyze.
+                        </div>
                       )}
-                    </tbody>
-                  </table>
+                    </div>
+                  </div>
+                  <div className="flex flex-col">
+                    <div className="p-4 border-b border-border/20 bg-muted/5 flex items-center gap-2">
+                      <div className="text-[10px] tracking-[0.15em] text-muted-foreground uppercase font-bold">
+                        Audit Log
+                      </div>
+                    </div>
+                    <div className="flex-1">
+                      <ActivityPanel
+                        activities={activities}
+                        loading={activitiesLoading}
+                      />
+                    </div>
+                  </div>
                 </div>
-              </TabsContent>
-
-              {/* ACTIVITY TAB */}
-              <TabsContent value="activity" className="mt-0">
-                <ActivityPanel activities={activities} loading={activitiesLoading} />
               </TabsContent>
             </Tabs>
           </div>
 
-          {/* RIGHT: SYSTEM & STRATEGY SIDEBAR */}
-          <div className="space-y-4">
-            
-            {/* System Stats Card */}
-            <div className="border border-border/30 rounded-lg bg-card/20 p-4 space-y-3">
-              <div className="text-[10px] text-muted-foreground font-bold tracking-widest border-b border-border/20 pb-1.5 uppercase flex items-center gap-1.5">
-                <Workflow size={11} className="text-muted-foreground/60" />
-                <span>Simulation Stats</span>
+          {/* RIGHT SIDEBAR: EVALUATION & CONFIGURATION */}
+          <div className="w-full lg:w-[320px] shrink-0 flex flex-col gap-6">
+            {/* STRATEGY EVALUATION */}
+            <div className="border border-border/30 rounded-xl bg-card/25 p-5">
+              <div className="text-[11px] tracking-[0.2em] text-muted-foreground/80 uppercase font-bold mb-5 flex items-center gap-2">
+                <Workflow size={14} className="text-muted-foreground" />{" "}
+                Strategy Evaluation
               </div>
-              {statsLoading ? (
-                <div className="text-[10px] text-muted-foreground animate-pulse py-4 text-center">
-                  Loading statistics…
+              <div className="flex flex-col gap-4">
+                <div className="flex justify-between items-end">
+                  <span className="text-[10px] text-muted-foreground uppercase tracking-widest">
+                    Open Positions
+                  </span>
+                  <span className="text-xs font-bold text-foreground tabular-nums">
+                    {openTrades.length}
+                  </span>
                 </div>
-              ) : stats ? (
-                <div className="space-y-2.5 text-[11px] font-mono">
-                  <SidebarRow label="Open Positions" value={stats.orchestrator.openPositions.toString()} />
-                  <SidebarRow label="Monitored Markets" value={stats.orchestrator.activeMarkets.toString()} />
-                  <SidebarRow label="Trades Executed" value={stats.orchestrator.cycleCount.toString()} />
-                  <SidebarRow label="Discovered Count" value={stats.orchestrator.scanner.discoveredLadders.toLocaleString()} />
-                  <SidebarRow label="Uptime WS messages" value={stats.orchestrator.ws.messageCount.toLocaleString()} />
-                  <SidebarRow label="WS Connect Retries" value={stats.orchestrator.ws.reconnectAttempts.toString()} />
+                <div className="flex justify-between items-end">
+                  <span className="text-[10px] text-muted-foreground uppercase tracking-widest">
+                    Capital At Risk
+                  </span>
+                  <span className="text-xs font-bold text-foreground tabular-nums">
+                    ${openPositionsValue.toFixed(2)}
+                  </span>
                 </div>
-              ) : null}
+                <div className="flex justify-between items-end">
+                  <span className="text-[10px] text-muted-foreground uppercase tracking-widest">
+                    Avg Expected Profit
+                  </span>
+                  <span
+                    className={`text-xs font-bold tabular-nums ${avgExpectedProfit > 0 ? "text-emerald-400" : "text-muted-foreground"}`}
+                  >
+                    ${avgExpectedProfit.toFixed(2)}
+                  </span>
+                </div>
+                <div className="flex justify-between items-end">
+                  <span className="text-[10px] text-muted-foreground uppercase tracking-widest">
+                    Best Expected Pos
+                  </span>
+                  <span className="text-[11px] font-mono text-emerald-400 tabular-nums">
+                    {bestPos
+                      ? `$${parseFloat(bestPos.expectedNetProfit || "0").toFixed(2)}`
+                      : "—"}
+                  </span>
+                </div>
+                <div className="w-full h-px bg-border/20 my-1" />
+                <div className="flex justify-between items-end">
+                  <span className="text-[10px] text-muted-foreground uppercase tracking-widest">
+                    Candidate Markets
+                  </span>
+                  <span className="text-xs font-bold text-foreground tabular-nums">
+                    {candidateMarkets.length}
+                  </span>
+                </div>
+                <div className="flex justify-between items-end">
+                  <span className="text-[10px] text-muted-foreground uppercase tracking-widest">
+                    Acceptance Rate
+                  </span>
+                  <span className="text-xs font-bold text-blue-400 tabular-nums">
+                    {acceptanceRate.toFixed(2)}%
+                  </span>
+                </div>
+                <div className="flex justify-between items-end">
+                  <span className="text-[10px] text-muted-foreground/50 uppercase tracking-widest">
+                    Evaluated Checks
+                  </span>
+                  <span className="text-xs font-medium text-muted-foreground/70 tabular-nums">
+                    {evaluatedCount}
+                  </span>
+                </div>
+              </div>
             </div>
 
-            {/* Current Settings / Context */}
-            <div className="border border-border/30 rounded-lg bg-card/20 p-4 space-y-3">
-              <div className="text-[10px] text-muted-foreground font-bold tracking-widest border-b border-border/20 pb-1.5 uppercase flex items-center justify-between">
-                <span>Active Parameters</span>
-                <SlidersHorizontal size={10} className="text-muted-foreground/50" />
+            {/* ACTIVE PARAMETERS */}
+            <div className="border border-border/30 rounded-xl bg-card/25 p-5">
+              <div className="text-[11px] tracking-[0.2em] text-muted-foreground/80 uppercase font-bold mb-5 flex items-center gap-2">
+                <SlidersHorizontal
+                  size={14}
+                  className="text-muted-foreground"
+                />{" "}
+                Active Parameters
               </div>
-              {stats?.config ? (
-                <div className="space-y-2.5 text-[11px] font-mono">
-                  <SidebarRow label="NO Price Range" value={`${(stats.config.minNoEntryPrice * 100).toFixed(0)}¢ – ${(stats.config.maxNoEntryPrice * 100).toFixed(0)}¢`} />
-                  <SidebarRow label="Max Allowable Spread" value={`${(stats.config.maxSpread * 100).toFixed(1)}¢`} />
-                  <SidebarRow label="Scanner Lookahead" value={`${stats.config.deadlineLookaheadDays} Days`} />
-                  <SidebarRow label="Min Liquidity Req." value={`$${(stats.config.minLiquidityNum).toLocaleString()}`} />
-                  <SidebarRow label="Min 24h Volume" value={`$${(stats.config.minVolume24h).toLocaleString()}`} />
-                  <SidebarRow label="Expected Profit Min" value={`$${stats.config.minExpectedNetProfit}`} />
+              <div className="flex flex-col gap-4">
+                <div className="flex justify-between items-end">
+                  <span className="text-[10px] text-muted-foreground uppercase tracking-widest">
+                    NO Price Range
+                  </span>
+                  <span className="text-[11px] font-mono text-foreground tabular-nums">
+                    {Math.round((stats?.config.minNoEntryPrice || 0) * 100)}¢ —{" "}
+                    {Math.round((stats?.config.maxNoEntryPrice || 0) * 100)}¢
+                  </span>
                 </div>
-              ) : (
-                <div className="text-[10px] text-muted-foreground py-4 text-center">
-                  Loading parameters…
+                <div className="flex justify-between items-end">
+                  <span className="text-[10px] text-muted-foreground uppercase tracking-widest">
+                    Max Allowable Spread
+                  </span>
+                  <span className="text-[11px] font-mono text-foreground tabular-nums">
+                    {((stats?.config.maxSpread || 0) * 100).toFixed(1)}¢
+                  </span>
                 </div>
-              )}
+                <div className="flex justify-between items-end">
+                  <span className="text-[10px] text-muted-foreground uppercase tracking-widest">
+                    Scanner Lookahead
+                  </span>
+                  <span className="text-[11px] font-mono text-foreground tabular-nums">
+                    {stats?.config.deadlineLookaheadDays || 0} Days
+                  </span>
+                </div>
+                <div className="flex justify-between items-end">
+                  <span className="text-[10px] text-muted-foreground uppercase tracking-widest">
+                    Min Liquidity Req
+                  </span>
+                  <span className="text-[11px] font-mono text-foreground tabular-nums">
+                    ${stats?.config.minLiquidityNum?.toLocaleString()}
+                  </span>
+                </div>
+                <div className="flex justify-between items-end">
+                  <span className="text-[10px] text-muted-foreground uppercase tracking-widest">
+                    Expected Profit Min
+                  </span>
+                  <span className="text-[11px] font-mono text-emerald-400 tabular-nums">
+                    ${stats?.config.minExpectedNetProfit || 0}
+                  </span>
+                </div>
+              </div>
             </div>
-
           </div>
-
         </div>
       </main>
 
-      <SystemStatusIndicator stats={stats} />
-
-      {/* Details Modals */}
       <TradeDetailPopup
         trade={selectedTrade}
-        open={selectedTrade !== null}
+        open={!!selectedTrade}
         onClose={() => setSelectedTrade(null)}
       />
-
-      <MarketDetailModal
-        market={selectedMarket}
-        trades={trades}
-        open={selectedMarket !== null}
-        onClose={() => setSelectedMarket(null)}
-      />
     </div>
   );
-}
-
-/* ─── Inline components ───────────────────────────────────────── */
-
-function SidebarRow({
-  label,
-  value,
-  accent,
-  warn,
-}: {
-  label: string;
-  value: string;
-  accent?: boolean;
-  warn?: boolean;
-}) {
-  return (
-    <div className="flex justify-between items-center text-[10px] md:text-[11px]">
-      <span className="text-muted-foreground">{label}</span>
-      <span
-        className={`font-semibold font-mono ${
-          warn
-            ? "text-red-400"
-            : accent
-            ? "text-emerald-500"
-            : "text-foreground"
-        }`}
-      >
-        {value}
-      </span>
-    </div>
-  );
-}
-
-function StatusMetric({
-  label,
-  value,
-  statusColor,
-}: {
-  label: string;
-  value: string;
-  statusColor?: string;
-}) {
-  return (
-    <div className="bg-background/40 p-2.5 rounded border border-border/20 flex flex-col gap-0.5 justify-center">
-      <span className="text-[9px] text-muted-foreground/60 uppercase tracking-wide truncate">{label}</span>
-      <span className={`text-[11px] font-bold font-mono ${statusColor ?? "text-foreground"}`}>{value}</span>
-    </div>
-  );
-}
-
-function MarketCountdown({ endDate }: { endDate: string }) {
-  const countdown = useCountdown(endDate);
-  if (!countdown) return <span>—</span>;
-  if (countdown.expired) return <span className="text-amber-500 font-bold">ENDED</span>;
-  const { days, hours, minutes, seconds } = countdown;
-  if (days > 0) return <span>{days}d {hours}h</span>;
-  if (hours > 0) return <span>{hours}:{String(minutes).padStart(2, "0")}:{String(seconds).padStart(2, "0")}</span>;
-  return <span className={minutes < 2 ? "text-red-400 animate-pulse font-bold" : ""}>{String(minutes).padStart(2, "0")}:{String(seconds).padStart(2, "0")}</span>;
 }
