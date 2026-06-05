@@ -1,18 +1,18 @@
 "use client";
 
 import type { SimulatedTrade, LiveMarketPrice } from "@/lib/types";
-import { MARKET_WINDOW_LABELS, type MarketWindow } from "@/lib/types";
 import { pnlColor, formatPnl } from "@/lib/utils";
+import { ExternalLink } from "lucide-react";
 
 interface TradesTableProps {
   trades: SimulatedTrade[];
   loading: boolean;
-  /** Real-time bid/ask/mid prices keyed by tokenId, refreshed every ~2s from WS */
+  type: "OPEN" | "SETTLED";
+  /** Real-time prices keyed by tokenId, refreshed from WS */
   livePrices?: Record<string, LiveMarketPrice>;
-  /** Market end dates keyed by marketId — fallback when trade.marketEndDate is absent */
+  /** Market end dates keyed by marketId */
   marketEndDates?: Record<string, string>;
   onTradeClick?: (trade: SimulatedTrade) => void;
-  /** Called when user clicks Show More */
   onLoadMore?: () => void;
   hasMore?: boolean;
   loadingMore?: boolean;
@@ -21,6 +21,7 @@ interface TradesTableProps {
 export function TradesTable({
   trades,
   loading,
+  type,
   livePrices = {},
   marketEndDates = {},
   onTradeClick,
@@ -33,7 +34,7 @@ export function TradesTable({
       <div className="flex items-center justify-center py-16">
         <div className="flex items-center gap-2 text-sm text-muted-foreground font-mono">
           <div className="w-1.5 h-1.5 rounded-full bg-muted-foreground/50 animate-pulse" />
-          Loading trades…
+          Loading...
         </div>
       </div>
     );
@@ -46,13 +47,22 @@ export function TradesTable({
           ○
         </div>
         <div className="text-sm text-muted-foreground font-mono">
-          No trades yet
-        </div>
-        <div className="text-xs text-muted-foreground/50 font-mono">
-          Waiting for end-of-window opportunities…
+          {type === "OPEN" ? "No open positions" : "No trade history"}
         </div>
       </div>
     );
+  }
+
+  const sortedTrades = [...trades];
+  if (type === "OPEN") {
+    sortedTrades.sort((a, b) => {
+      const aEnd = a.marketEndDate ?? (a.marketId ? marketEndDates[a.marketId] : null);
+      const bEnd = b.marketEndDate ?? (b.marketId ? marketEndDates[b.marketId] : null);
+      if (!aEnd && !bEnd) return 0;
+      if (!aEnd) return 1;
+      if (!bEnd) return -1;
+      return new Date(aEnd).getTime() - new Date(bEnd).getTime();
+    });
   }
 
   return (
@@ -61,248 +71,224 @@ export function TradesTable({
         <thead>
           <tr className="border-b border-border/30">
             <th className="text-left py-2.5 px-3 font-medium text-muted-foreground tracking-wider text-[10px]">
-              WINDOW
+              MARKET QUESTION
             </th>
-            <th className="text-left py-2.5 px-3 font-medium text-muted-foreground tracking-wider text-[10px]">
-              SIDE
-            </th>
-            <th className="text-right py-2.5 px-3 font-medium text-muted-foreground tracking-wider text-[10px]">
-              ENTRY
-            </th>
-            <th className="text-right py-2.5 px-3 font-medium text-muted-foreground tracking-wider text-[10px]">
-              EXIT
-            </th>
-            <th className="text-right py-2.5 px-3 font-medium text-muted-foreground tracking-wider text-[10px]">
-              SHARES
-            </th>
-            <th className="text-right py-2.5 px-3 font-medium text-muted-foreground tracking-wider text-[10px]">
-              P&L
-            </th>
-            <th className="text-right py-2.5 px-3 font-medium text-muted-foreground tracking-wider text-[10px]">
-              STATUS
-            </th>
+            {type === "OPEN" ? (
+              <>
+                <th className="text-right py-2.5 px-3 font-medium text-muted-foreground tracking-wider text-[10px]">
+                  COST BASIS
+                </th>
+                <th className="text-right py-2.5 px-3 font-medium text-muted-foreground tracking-wider text-[10px]">
+                  PRICE DRIFT
+                </th>
+                <th className="text-right py-2.5 px-3 font-medium text-muted-foreground tracking-wider text-[10px]">
+                  PNL / ROI
+                </th>
+              </>
+            ) : (
+              <>
+                <th className="text-right py-2.5 px-3 font-medium text-muted-foreground tracking-wider text-[10px]">
+                  RESOLUTION DATE
+                </th>
+                <th className="text-right py-2.5 px-3 font-medium text-muted-foreground tracking-wider text-[10px]">
+                  COST BASIS
+                </th>
+                <th className="text-right py-2.5 px-3 font-medium text-muted-foreground tracking-wider text-[10px]">
+                  OUTCOME
+                </th>
+                <th className="text-right py-2.5 px-3 font-medium text-muted-foreground tracking-wider text-[10px]">
+                  REALIZED PNL
+                </th>
+              </>
+            )}
           </tr>
         </thead>
         <tbody>
-          {trades.map((trade, idx) => {
+          {sortedTrades.map((trade, idx) => {
             const entryPrice = parseFloat(trade.entryPrice);
             const entryCents = Math.round(entryPrice * 100);
             const shares = parseFloat(trade.entryShares || "0");
             const fees = parseFloat(trade.entryFees || "0");
             const actualCost = parseFloat(trade.actualCost || "1");
-            const isUp = trade.outcomeLabel === "Up";
+            const expectedProfit = parseFloat(trade.expectedNetProfit || "0");
             const isClosed = trade.status === "SETTLED";
             const isOpen = trade.status === "OPEN";
 
-            // Exit price for closed trades
-            const exitPrice = trade.exitPrice
-              ? parseFloat(trade.exitPrice)
-              : null;
-            const exitCents =
-              exitPrice !== null ? Math.round(exitPrice * 100) : null;
+            const endDateStr = trade.marketEndDate ?? (trade.marketId ? marketEndDates[trade.marketId] : null);
 
-            // After market endDate passes the oracle hasn't resolved yet —
-            // the CLOB WS still quotes the token until final settlement.
-            // Keep showing the live price so we can track PnL while we wait.
-            const livePrice =
-              isOpen && trade.tokenId
-                ? (livePrices[trade.tokenId] ?? null)
-                : null;
-            const liveMid = livePrice?.mid ?? null;
-            const liveCents =
-              liveMid !== null ? Math.round(liveMid * 100) : null;
+            if (type === "OPEN") {
+              const livePrice = trade.tokenId ? (livePrices[trade.tokenId] ?? null) : null;
+              const liveMid = livePrice?.mid ?? null;
+              const liveCents = liveMid !== null ? Math.round(liveMid * 100) : null;
+              const unrealizedPnl = liveMid !== null ? (liveMid - entryPrice) * shares - fees : null;
+              const unrealizedPnlPct = unrealizedPnl !== null && actualCost > 0 ? (unrealizedPnl / actualCost) * 100 : null;
 
-            // isPending: market window closed but trade not yet resolved
-            const marketEndDate =
-              isOpen && trade.marketId && marketEndDates[trade.marketId]
-                ? new Date(marketEndDates[trade.marketId]!)
-                : null;
-            const isPending =
-              isOpen &&
-              marketEndDate !== null &&
-              marketEndDate.getTime() <= Date.now();
+              const polyUrl = `https://polymarket.com/market/${trade.marketId}`;
 
-            // Unrealized P&L for open trades: (currentMid - entryPrice) * shares - fees
-            const unrealizedPnl =
-              liveMid !== null ? (liveMid - entryPrice) * shares - fees : null;
-
-            // Realized P&L for closed trades
-            const realizedPnl = parseFloat(trade.realizedPnl || "0");
-            const hasPnl = isClosed && !!trade.realizedPnl;
-
-            // P&L percentages
-            const realizedPnlPct =
-              actualCost > 0 ? (realizedPnl / actualCost) * 100 : 0;
-            const unrealizedPnlPct =
-              unrealizedPnl !== null && actualCost > 0
-                ? (unrealizedPnl / actualCost) * 100
-                : null;
-
-            // Window label
-            const endDate = trade.marketId
-              ? (marketEndDates[trade.marketId] ?? null)
-              : null;
-            const windowInfo = extractTimeWindow(trade, endDate);
-
-            return (
-              <tr
-                key={trade.id}
-                onClick={() => onTradeClick?.(trade)}
-                className={`border-b border-border/5 cursor-pointer transition-colors duration-150 hover:bg-muted/15 ${
-                  idx % 2 === 0 ? "bg-transparent" : "bg-card/5"
-                } ${trade.status === "OPEN" ? "bg-emerald-500/5" : ""}`}
-              >
-                {/* WINDOW */}
-                <td className="py-3 px-3">
-                  <div className="flex flex-col gap-0.5">
-                    <span className="text-foreground text-xs">
-                      {windowInfo.time}
-                    </span>
-                    <span className="text-[10px] text-muted-foreground/60">
-                      {windowInfo.date}
-                    </span>
-                  </div>
-                </td>
-
-                {/* SIDE */}
-                <td className="py-3 px-3">
-                  <span
-                    className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold tracking-wider ${
-                      isUp
-                        ? "bg-emerald-500/10 text-emerald-500 border border-emerald-500/20"
-                        : "bg-red-500/10 text-red-500 border border-red-500/20"
-                    }`}
-                  >
-                    <span className="text-[9px]">{isUp ? "▲" : "▼"}</span>
-                    {isUp ? "UP" : "DOWN"}
-                  </span>
-                </td>
-
-                {/* ENTRY */}
-                <td className="py-3 px-3 text-right">
-                  <span className="text-foreground tabular-nums">
-                    {entryCents}¢
-                  </span>
-                </td>
-
-                {/* EXIT */}
-                <td className="py-3 px-3 text-right">
-                  {exitCents !== null ? (
-                    <span
-                      className={`tabular-nums font-medium ${
-                        exitCents >= entryCents
-                          ? "text-emerald-500"
-                          : "text-red-500"
-                      }`}
-                    >
-                      {exitCents}¢
-                    </span>
-                  ) : liveCents !== null ? (
-                    <div className="flex flex-col items-end gap-0.5">
-                      <span
-                        className={`tabular-nums font-medium ${
-                          liveCents >= entryCents
-                            ? "text-emerald-400"
-                            : "text-red-400"
-                        }`}
+              return (
+                <tr
+                  key={trade.id}
+                  onClick={() => onTradeClick?.(trade)}
+                  className={`border-b border-border/5 cursor-pointer transition-colors duration-150 hover:bg-muted/15 ${
+                    idx % 2 === 0 ? "bg-transparent" : "bg-card/5"
+                  }`}
+                >
+                  {/* MARKET QUESTION */}
+                  <td className="py-2.5 px-3 max-w-[240px]">
+                    <div className="flex flex-col gap-1">
+                      <a
+                        href={polyUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="font-medium text-[11px] text-foreground hover:text-blue-400 truncate inline-flex items-center gap-1.5"
+                        title={trade.marketQuestion || "Unknown Market"}
+                        onClick={(e) => e.stopPropagation()}
                       >
-                        {liveCents}¢
+                        <span className="truncate">{trade.marketQuestion || "Unknown Market"}</span>
+                        <ExternalLink size={10} className="text-muted-foreground/40 shrink-0" />
+                      </a>
+                      {endDateStr && (
+                        <div className="text-[10px]">
+                          <MarketCountdown endDate={endDateStr} />
+                        </div>
+                      )}
+                    </div>
+                  </td>
+
+                  {/* COST BASIS */}
+                  <td className="py-3 px-3 text-right">
+                    <div className="flex flex-col gap-0.5 items-end">
+                      <span className="text-foreground font-medium tabular-nums">
+                        ${actualCost.toFixed(2)}
                       </span>
-                      <span
-                        className={`text-[9px] font-mono ${
-                          isPending ? "text-amber-400" : "text-blue-400"
-                        }`}
-                      >
-                        ● {isPending ? "SETTLING" : "LIVE"}
+                      <span className="text-[10px] text-muted-foreground tabular-nums">
+                        {shares.toFixed(1)} shares
                       </span>
                     </div>
-                  ) : isPending ? (
-                    <span className="text-[10px] font-mono text-amber-500/80 px-1.5 py-0.5 rounded bg-amber-500/10 border border-amber-500/20">
-                      PENDING
-                    </span>
-                  ) : (
-                    <span className="text-muted-foreground/40">—</span>
-                  )}
-                </td>
+                  </td>
 
-                {/* SHARES */}
-                <td className="py-3 px-3 text-right tabular-nums text-muted-foreground">
-                  {shares.toFixed(1)}
-                </td>
-
-                {/* P&L */}
-                <td className="py-3 px-3 text-right">
-                  {hasPnl ? (
-                    <div className="flex flex-col items-end gap-0.5">
-                      <span
-                        className={`tabular-nums font-semibold ${pnlColor(realizedPnl)}`}
-                      >
-                        {formatPnl(realizedPnl)}
-                      </span>
-                      <span
-                        className={`text-[10px] tabular-nums ${pnlColor(realizedPnl, "60")}`}
-                      >
-                        {realizedPnlPct >= 0 ? "+" : ""}
-                        {realizedPnlPct.toFixed(2)}%
-                      </span>
+                  {/* PRICE DRIFT */}
+                  <td className="py-3 px-3 text-right">
+                    <div className="flex items-center justify-end gap-1.5 tabular-nums">
+                      <span className="text-muted-foreground">{entryCents}¢</span>
+                      <span className="text-muted-foreground/40">→</span>
+                      {liveCents !== null ? (
+                        <span className={`font-semibold ${liveCents >= entryCents ? "text-emerald-400" : "text-red-400"}`}>
+                          {liveCents}¢
+                        </span>
+                      ) : (
+                        <span className="text-muted-foreground/40">—</span>
+                      )}
                     </div>
-                  ) : unrealizedPnl !== null ? (
+                  </td>
+
+                  {/* PNL / ROI */}
+                  <td className="py-3 px-3 text-right">
                     <div className="flex flex-col items-end gap-0.5">
-                      <span
-                        className={`tabular-nums font-semibold ${
-                          unrealizedPnl >= 0
-                            ? "text-emerald-400"
-                            : "text-red-400"
-                        }`}
-                      >
-                        {formatPnl(unrealizedPnl)}
-                      </span>
-                      {unrealizedPnlPct !== null && (
-                        <span
-                          className={`text-[10px] tabular-nums ${
-                            unrealizedPnlPct >= 0
-                              ? "text-emerald-400/60"
-                              : "text-red-400/60"
-                          }`}
-                        >
-                          {unrealizedPnlPct >= 0 ? "+" : ""}
-                          {unrealizedPnlPct.toFixed(2)}%
+                      {unrealizedPnl !== null ? (
+                        <div className="flex items-center gap-1">
+                          <span className={`tabular-nums font-semibold ${unrealizedPnl >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                            {formatPnl(unrealizedPnl)}
+                          </span>
+                          <span className={`text-[10px] tabular-nums ${unrealizedPnlPct! >= 0 ? "text-emerald-400/60" : "text-red-400/60"}`}>
+                            ({unrealizedPnlPct! >= 0 ? "+" : ""}{unrealizedPnlPct!.toFixed(1)}%)
+                          </span>
+                        </div>
+                      ) : (
+                        <span className="text-muted-foreground/40">—</span>
+                      )}
+                      {expectedProfit > 0 && (
+                        <span className="text-[10px] text-muted-foreground/50 tabular-nums">
+                          Exp: {formatPnl(expectedProfit)}
                         </span>
                       )}
                     </div>
-                  ) : (
-                    <span className="text-muted-foreground/40">—</span>
-                  )}
-                </td>
+                  </td>
+                </tr>
+              );
+            } else {
+              // SETTLED VIEW
+              const realizedPnl = parseFloat(trade.realizedPnl || "0");
+              const realizedPnlPct = actualCost > 0 ? (realizedPnl / actualCost) * 100 : 0;
+              const exitTs = trade.exitTs ? new Date(trade.exitTs) : null;
 
-                {/* STATUS */}
-                <td className="py-3 px-3 text-right">
-                  {isClosed ? (
+              return (
+                <tr
+                  key={trade.id}
+                  onClick={() => onTradeClick?.(trade)}
+                  className={`border-b border-border/5 cursor-pointer transition-colors duration-150 hover:bg-muted/15 ${
+                    idx % 2 === 0 ? "bg-transparent" : "bg-card/5"
+                  }`}
+                >
+                    <td className="py-2.5 px-3 max-w-[240px]">
+                      <div className="flex flex-col">
+                        <a
+                          href={`https://polymarket.com/market/${trade.marketId}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="font-medium text-[11px] text-foreground hover:text-blue-400 truncate inline-flex items-center gap-1.5"
+                          title={trade.marketQuestion || "Unknown Market"}
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <span className="truncate">{trade.marketQuestion || "Unknown Market"}</span>
+                          <ExternalLink size={10} className="text-muted-foreground/40 shrink-0" />
+                        </a>
+                      </div>
+                    </td>
+
+                  {/* RESOLUTION DATE */}
+                  <td className="py-3 px-3 text-right">
+                    {exitTs ? (
+                      <div className="flex flex-col gap-0.5 items-end">
+                        <span className="text-foreground tabular-nums text-xs">
+                          {exitTs.toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                        </span>
+                        <span className="text-[10px] text-muted-foreground/60">
+                          {exitTs.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                        </span>
+                      </div>
+                    ) : (
+                      <span className="text-muted-foreground/40">—</span>
+                    )}
+                  </td>
+
+                  {/* COST BASIS */}
+                  <td className="py-3 px-3 text-right">
+                    <span className="text-foreground font-medium tabular-nums">
+                      ${actualCost.toFixed(2)}
+                    </span>
+                  </td>
+
+                  {/* OUTCOME */}
+                  <td className="py-3 px-3 text-right">
                     <span
-                      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold ${
+                      className={`inline-flex rounded px-1.5 py-0.5 text-[9px] font-bold uppercase ${
                         trade.exitOutcome === "WIN"
-                          ? "bg-emerald-500/10 text-emerald-500"
-                          : "bg-muted/40 text-muted-foreground"
+                          ? "bg-emerald-500/10 text-emerald-500 border border-emerald-500/20"
+                          : trade.exitOutcome === "LOSS"
+                          ? "bg-red-500/10 text-red-500 border border-red-500/20"
+                          : "bg-muted text-muted-foreground border border-border/30"
                       }`}
                     >
-                      {trade.exitReason
-                        ? `${trade.exitOutcome || "SETTLED"}`
-                        : trade.exitOutcome || "SETTLED"}
+                      {trade.exitOutcome || "SETTLED"}
                     </span>
-                  ) : isPending ? (
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/10 text-amber-400 border border-amber-500/20">
-                      <span className="w-1 h-1 rounded-full bg-amber-400 animate-pulse" />
-                      PENDING
-                    </span>
-                  ) : (
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-blue-500/10 text-blue-500">
-                      <span className="w-1 h-1 rounded-full bg-blue-500 animate-pulse" />
-                      OPEN
-                    </span>
-                  )}
-                </td>
-              </tr>
-            );
+                  </td>
+
+                  {/* REALIZED PNL */}
+                  <td className="py-3 px-3 text-right">
+                    <div className="flex flex-col items-end gap-0.5">
+                      <span className={`tabular-nums font-semibold ${pnlColor(realizedPnl)}`}>
+                        {formatPnl(realizedPnl)}
+                      </span>
+                      <span className={`text-[10px] tabular-nums ${pnlColor(realizedPnl, "60")}`}>
+                        {realizedPnlPct >= 0 ? "+" : ""}
+                        {realizedPnlPct.toFixed(1)}%
+                      </span>
+                    </div>
+                  </td>
+                </tr>
+              );
+            }
           })}
         </tbody>
       </table>
@@ -318,7 +304,7 @@ export function TradesTable({
             {loadingMore ? (
               <>
                 <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground/50 animate-pulse" />
-                Loading…
+                Loading...
               </>
             ) : (
               "Show more"
@@ -330,42 +316,37 @@ export function TradesTable({
   );
 }
 
-/* ─── Helpers ──────────────────────────────────────────────── */
+// Inline MarketCountdown component for portability
+import { useEffect, useState } from "react";
 
-function extractTimeWindow(
-  trade: SimulatedTrade,
-  marketEndDate: string | null,
-): { time: string; date: string } {
-  const windowType = trade.windowType as MarketWindow | null;
-  const label = windowType
-    ? (MARKET_WINDOW_LABELS[windowType] ?? windowType)
-    : null;
+function MarketCountdown({ endDate }: { endDate: string }) {
+  const [timeLeft, setTimeLeft] = useState("");
 
-  const fmtTime = (d: Date) =>
-    d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  useEffect(() => {
+    const end = new Date(endDate).getTime();
 
-  // Prefer trade.marketEndDate (from backend join), then fall back to prop
-  const endDateStr = trade.marketEndDate ?? marketEndDate;
+    const update = () => {
+      const now = Date.now();
+      const diff = end - now;
 
-  // Prefer showing the market window END time (closes at)
-  if (endDateStr) {
-    const endDate = new Date(endDateStr);
-    return {
-      time: fmtTime(endDate),
-      date: endDate.toLocaleDateString("en-US", {
-        month: "short",
-        day: "numeric",
-      }),
+      if (diff <= 0) {
+        setTimeLeft("Resolving...");
+        return;
+      }
+
+      const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+      const hours = Math.floor((diff / (1000 * 60 * 60)) % 24);
+      const minutes = Math.floor((diff / 1000 / 60) % 60);
+
+      if (days > 0) setTimeLeft(`${days}d ${hours}h`);
+      else if (hours > 0) setTimeLeft(`${hours}h ${minutes}m`);
+      else setTimeLeft(`${minutes}m`);
     };
-  }
 
-  // Fallback: show entry time when end date isn't available
-  const entryDate = new Date(trade.entryTs);
-  return {
-    time: fmtTime(entryDate),
-    date: entryDate.toLocaleDateString("en-US", {
-      month: "short",
-      day: "numeric",
-    }),
-  };
+    update();
+    const timer = setInterval(update, 60000);
+    return () => clearInterval(timer);
+  }, [endDate]);
+
+  return <span className={timeLeft === "Resolving..." ? "text-amber-400 font-bold" : "text-foreground font-semibold"}>{timeLeft}</span>;
 }
