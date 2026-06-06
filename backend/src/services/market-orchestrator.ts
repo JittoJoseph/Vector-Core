@@ -274,14 +274,6 @@ export class MarketOrchestrator extends EventEmitter {
   private async pruneNonLadderRows(): Promise<void> {
     const db = getDb();
     await db.execute(sql`
-      DELETE FROM ${schema.orderbookSnapshots}
-      WHERE market_id IN (
-        SELECT id FROM ${schema.deadlineMarkets}
-        WHERE classification_status NOT IN ('candidate', 'traded')
-           OR family_kind <> 'deadline_ladder'
-      )
-    `);
-    await db.execute(sql`
       DELETE FROM ${schema.opportunities}
       WHERE market_id IN (
         SELECT id FROM ${schema.deadlineMarkets}
@@ -325,7 +317,7 @@ export class MarketOrchestrator extends EventEmitter {
         const existing = await db
           .select({
             id: schema.eventFamilies.id,
-            updatedAt: sql<string>`${schema.eventFamilies.raw}->>'updatedAt'`,
+            updatedAt: schema.eventFamilies.updatedAt,
           })
           .from(schema.eventFamilies)
           .where(inArray(schema.eventFamilies.id, eventIds));
@@ -334,8 +326,8 @@ export class MarketOrchestrator extends EventEmitter {
         
         // Filter out events that haven't changed since last scan
         const changedEvents = pageEvents.filter((e) => {
-          const currentUpdatedAt = e.updatedAt ?? "";
-          const dbUpdatedAt = existingUpdates.get(String(e.id));
+          const currentUpdatedAt = e.updatedAt ? new Date(e.updatedAt).getTime() : 0;
+          const dbUpdatedAt = existingUpdates.get(String(e.id))?.getTime() ?? 0;
           return dbUpdatedAt !== currentUpdatedAt;
         });
 
@@ -427,9 +419,8 @@ export class MarketOrchestrator extends EventEmitter {
         closed: event.closed ?? false,
         liquidity: String(event.liquidityClob ?? event.liquidity ?? 0),
         volume24h: String(event.volume24hr ?? 0),
-        raw: eventSummary as any,
         lastFetchedAt: new Date(),
-        updatedAt: new Date(),
+        updatedAt: event.updatedAt ? new Date(event.updatedAt) : new Date(),
       })
       .onConflictDoUpdate({
         target: schema.eventFamilies.id,
@@ -441,9 +432,8 @@ export class MarketOrchestrator extends EventEmitter {
           closed: event.closed ?? false,
           liquidity: String(event.liquidityClob ?? event.liquidity ?? 0),
           volume24h: String(event.volume24hr ?? 0),
-          raw: eventSummary as any,
           lastFetchedAt: new Date(),
-          updatedAt: new Date(),
+          updatedAt: event.updatedAt ? new Date(event.updatedAt) : new Date(),
         },
       });
 
@@ -495,7 +485,6 @@ export class MarketOrchestrator extends EventEmitter {
         resolutionRules: m.description ?? null,
         resolutionSource: m.resolutionSource ?? null,
         umaResolutionStatus: m.umaResolutionStatus ?? null,
-        raw: m as any,
         lastFetchedAt: new Date(),
         updatedAt: new Date(),
       })
@@ -517,7 +506,6 @@ export class MarketOrchestrator extends EventEmitter {
           liquidityNum: (m.liquidityNum ?? 0).toString(),
           volume24h: (m.volume24hr ?? 0).toString(),
           feeSchedule: (m.feeSchedule ?? null) as any,
-          raw: m as any,
           lastFetchedAt: new Date(),
           updatedAt: new Date(),
         },
@@ -580,32 +568,32 @@ export class MarketOrchestrator extends EventEmitter {
         return;
       }
 
-      const { data: book, raw } = await this.client.getOrderbook(market.noTokenId);
+      const { data: book } = await this.client.getOrderbook(market.noTokenId);
       const top = getTopOfBook(book);
       if (top.bestBid == null || top.bestAsk == null || top.spread == null) {
-        await this.recordOpportunity(market, "rejected", "empty_no_orderbook", raw);
+        await this.recordOpportunity(market, "rejected", "empty_no_orderbook");
         return;
       }
       if (top.bestAsk < config.strategy.minNoEntryPrice || top.bestAsk > config.strategy.maxNoEntryPrice) {
-        await this.recordOpportunity(market, "rejected", "no_best_ask_outside_entry_band", raw, top);
+        await this.recordOpportunity(market, "rejected", "no_best_ask_outside_entry_band", top);
         return;
       }
       if (top.spread > config.strategy.maxSpread) {
-        await this.recordOpportunity(market, "rejected", "spread_too_wide", raw, top);
+        await this.recordOpportunity(market, "rejected", "spread_too_wide", top);
         return;
       }
 
       const depthAtLimit = estimateDepthAtOrBelow(book, config.strategy.maxNoEntryPrice);
       const budget = this.portfolioManager.computePositionBudget(this.computeOpenPositionsValue());
       if (budget <= 0) {
-        await this.recordOpportunity(market, "rejected", "insufficient_cash", raw, top, depthAtLimit);
+        await this.recordOpportunity(market, "rejected", "insufficient_cash", top, depthAtLimit);
         return;
       }
 
       const feeSchedule = (market.feeSchedule as FeeSchedule | null) ?? null;
       const fill = simulateLimitBuy(book, budget, config.strategy.maxNoEntryPrice, feeSchedule);
       if (fill.totalShares <= 0 || fill.belowMinimumOrderSize) {
-        await this.recordOpportunity(market, "rejected", "insufficient_fill_size", raw, top, depthAtLimit);
+        await this.recordOpportunity(market, "rejected", "insufficient_fill_size", top, depthAtLimit);
         return;
       }
 
@@ -615,7 +603,6 @@ export class MarketOrchestrator extends EventEmitter {
           market,
           "rejected",
           "expected_profit_below_threshold",
-          raw,
           top,
           depthAtLimit,
           expectedNetProfit,
@@ -625,7 +612,7 @@ export class MarketOrchestrator extends EventEmitter {
 
       const deducted = await this.portfolioManager.deductCash(fill.netCost);
       if (!deducted) {
-        await this.recordOpportunity(market, "rejected", "cash_deduction_failed", raw, top, depthAtLimit);
+        await this.recordOpportunity(market, "rejected", "cash_deduction_failed", top, depthAtLimit);
         return;
       }
 
@@ -651,7 +638,6 @@ export class MarketOrchestrator extends EventEmitter {
         noBestAskAtEntry: top.bestAsk.toFixed(8),
         depthAtLimit: depthAtLimit.toFixed(8),
         orderbookSnapshot: fill.orderbookSnapshot,
-        raw: { opportunity: "explicit_date_no", top, depthAtLimit },
       });
       if (!trade) throw new Error("Trade insert did not return a row");
 
@@ -668,7 +654,7 @@ export class MarketOrchestrator extends EventEmitter {
 
       this.trackMarketFromDb(market);
 
-      await this.recordOpportunity(market, "traded", "trade_opened", raw, top, depthAtLimit, expectedNetProfit);
+      await this.recordOpportunity(market, "traded", "trade_opened", top, depthAtLimit, expectedNetProfit);
       await db.update(schema.deadlineMarkets).set({ classificationStatus: "traded", updatedAt: new Date() }).where(eq(schema.deadlineMarkets.id, market.id));
       await logAudit("info", "TRADE_OPENED", `Opened simulated NO trade for ${market.question}`, {
         tradeId: trade.id,
@@ -692,13 +678,13 @@ export class MarketOrchestrator extends EventEmitter {
     market: typeof schema.deadlineMarkets.$inferSelect,
     status: string,
     reason: string,
-    raw?: unknown,
     top?: { bestBid: number | null; bestAsk: number | null; spread: number | null },
     depthAtLimit?: number,
     expectedNetProfit?: number,
   ) {
     const db = getDb();
     const days = (new Date(market.deadline).getTime() - Date.now()) / (24 * 60 * 60 * 1000);
+    
     await db.insert(schema.opportunities).values({
       marketId: market.id,
       eventId: market.eventId,
@@ -713,20 +699,23 @@ export class MarketOrchestrator extends EventEmitter {
       spread: top?.spread?.toString() ?? null,
       depthAtLimit: depthAtLimit?.toString() ?? null,
       expectedNetProfit: expectedNetProfit?.toString() ?? null,
-      raw: raw as any,
-    });
-    if (raw && top) {
-      await db.insert(schema.orderbookSnapshots).values({
-        marketId: market.id,
-        tokenId: market.noTokenId,
-        side: "NO",
-        bestBid: top.bestBid?.toString() ?? null,
-        bestAsk: top.bestAsk?.toString() ?? null,
-        spread: top.spread?.toString() ?? null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    }).onConflictDoUpdate({
+      target: schema.opportunities.marketId,
+      set: {
+        status,
+        reason,
+        daysToDeadline: days.toFixed(8),
+        noPrice: market.noPrice,
+        noBestBid: top?.bestBid?.toString() ?? null,
+        noBestAsk: top?.bestAsk?.toString() ?? null,
+        spread: top?.spread?.toString() ?? null,
         depthAtLimit: depthAtLimit?.toString() ?? null,
-        raw: raw as any,
-      });
-    }
+        expectedNetProfit: expectedNetProfit?.toString() ?? null,
+        updatedAt: new Date(),
+      }
+    });
   }
 
   private getMarketLifecycle(state: TrackedMarket): MarketLifecycle {

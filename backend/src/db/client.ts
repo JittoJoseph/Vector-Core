@@ -97,7 +97,6 @@ export async function updateCashBalance(newBalance: string) {
 export async function wipeAndResetPortfolio(startingCapital: number) {
   const database = getDb();
   await database.delete(schema.simulatedTrades);
-  await database.delete(schema.orderbookSnapshots);
   await database.delete(schema.opportunities);
   await database.delete(schema.deadlineMarkets);
   await database.delete(schema.eventFamilies);
@@ -152,7 +151,6 @@ export async function createSimulatedTrade(data: {
   noBestAskAtEntry?: string;
   depthAtLimit?: string;
   orderbookSnapshot?: unknown;
-  raw?: unknown;
 }) {
   const database = getDb();
   const result = await database
@@ -179,7 +177,6 @@ export async function createSimulatedTrade(data: {
       noBestAskAtEntry: data.noBestAskAtEntry ?? null,
       depthAtLimit: data.depthAtLimit ?? null,
       orderbookSnapshot: data.orderbookSnapshot as any,
-      raw: data.raw as any,
       status: "OPEN",
     })
     .returning();

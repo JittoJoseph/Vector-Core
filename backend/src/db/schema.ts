@@ -24,7 +24,6 @@ export const eventFamilies = pgTable(
     closed: boolean("closed").default(false).notNull(),
     liquidity: decimal("liquidity", { precision: 18, scale: 8 }).default("0"),
     volume24h: decimal("volume_24h", { precision: 18, scale: 8 }).default("0"),
-    raw: jsonb("raw"),
     lastFetchedAt: timestamp("last_fetched_at").defaultNow().notNull(),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
@@ -75,7 +74,6 @@ export const deadlineMarkets = pgTable(
     resolutionRules: text("resolution_rules"),
     resolutionSource: text("resolution_source"),
     umaResolutionStatus: text("uma_resolution_status"),
-    raw: jsonb("raw"),
     lastFetchedAt: timestamp("last_fetched_at").defaultNow().notNull(),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
@@ -93,10 +91,7 @@ export const deadlineMarkets = pgTable(
 export const opportunities = pgTable(
   "opportunities",
   {
-    id: text("id")
-      .primaryKey()
-      .$defaultFn(() => crypto.randomUUID()),
-    marketId: text("market_id").notNull(),
+    marketId: text("market_id").primaryKey(),
     eventId: text("event_id").notNull(),
     noTokenId: text("no_token_id").notNull(),
     status: text("status").notNull(),
@@ -112,37 +107,11 @@ export const opportunities = pgTable(
       precision: 18,
       scale: 8,
     }),
-    raw: jsonb("raw"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
   },
   (table) => ({
-    marketIdx: index("opportunities_market_idx").on(table.marketId),
     statusIdx: index("opportunities_status_idx").on(table.status),
-    createdAtIdx: index("opportunities_created_at_idx").on(table.createdAt),
-  }),
-);
-
-export const orderbookSnapshots = pgTable(
-  "orderbook_snapshots",
-  {
-    id: text("id")
-      .primaryKey()
-      .$defaultFn(() => crypto.randomUUID()),
-    marketId: text("market_id").notNull(),
-    tokenId: text("token_id").notNull(),
-    side: text("side").notNull().default("NO"),
-    bestBid: decimal("best_bid", { precision: 18, scale: 8 }),
-    bestAsk: decimal("best_ask", { precision: 18, scale: 8 }),
-    spread: decimal("spread", { precision: 18, scale: 8 }),
-    depthAtLimit: decimal("depth_at_limit", { precision: 18, scale: 8 }),
-    raw: jsonb("raw"),
-    createdAt: timestamp("created_at").defaultNow().notNull(),
-  },
-  (table) => ({
-    tokenIdx: index("orderbook_snapshots_token_idx").on(table.tokenId),
-    createdAtIdx: index("orderbook_snapshots_created_at_idx").on(
-      table.createdAt,
-    ),
   }),
 );
 
@@ -205,7 +174,6 @@ export const simulatedTrades = pgTable(
     realizedPnl: decimal("realized_pnl", { precision: 18, scale: 8 }),
     status: text("status").default("OPEN").notNull(),
     orderbookSnapshot: jsonb("orderbook_snapshot"),
-    raw: jsonb("raw"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
   },
