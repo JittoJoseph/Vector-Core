@@ -371,6 +371,17 @@ export class MarketOrchestrator extends EventEmitter {
     for (const marketId of toUntrack) {
       this.untrackMarket(marketId);
     }
+
+    const mem = process.memoryUsage();
+    logger.info(
+      {
+        heapUsedMb: Math.round(mem.heapUsed / 1024 / 1024),
+        heapTotalMb: Math.round(mem.heapTotal / 1024 / 1024),
+        trackedMarkets: this.trackedMarkets.size,
+        openPositions: this.openPositions.size,
+      },
+      "Memory & State Audit",
+    );
   }
 
   private untrackMarket(marketId: string): void {

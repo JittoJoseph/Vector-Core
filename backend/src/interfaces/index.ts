@@ -10,7 +10,6 @@ export type {
   PriceUpdateEvent,
   BestBidAskEvent,
   MarketResolvedEvent,
-  OrderbookUpdateEvent,
   TickSizeChangeEvent,
   MarketSubscriptionMessage,
   SubscriptionUpdateMessage,

@@ -9,10 +9,6 @@ export interface ClobWsMessage {
   asset_id?: string;
   market?: string;
   timestamp?: number | string;
-  // book event
-  bids?: Array<{ price: string; size: string }>;
-  asks?: Array<{ price: string; size: string }>;
-  hash?: string;
   // price_change event
   price_changes?: Array<{
     asset_id: string;
@@ -70,15 +66,6 @@ export interface MarketResolvedEvent {
   conditionId: string;
   winningAssetId: string;
   winningOutcome: string;
-  timestamp: number;
-}
-
-/** Emitted orderbook update */
-export interface OrderbookUpdateEvent {
-  tokenId: string;
-  bids: Array<{ price: string; size: string }>;
-  asks: Array<{ price: string; size: string }>;
-  hash: string;
   timestamp: number;
 }
 

@@ -5,7 +5,6 @@ import { POLY_URLS } from "../types/index.js";
 import type {
   ClobWsMessage,
   PriceUpdateEvent,
-  OrderbookUpdateEvent,
   BestBidAskEvent,
   MarketResolvedEvent,
   TickSizeChangeEvent,
@@ -19,14 +18,13 @@ const logger = createModuleLogger("market-ws-watcher");
 /**
  * Real-time market data via Polymarket CLOB WebSocket.
  * Subscribes with custom_feature_enabled=true to receive:
- *   - book: full orderbook on subscribe + on trades
  *   - price_change: new/cancelled orders with best_bid/best_ask
  *   - best_bid_ask: top-of-book changes (custom feature)
  *   - last_trade_price: matched trades
  *   - tick_size_change: when price >0.96 or <0.04
  *   - market_resolved: market resolution (custom feature)
  *
- * Emits: "priceUpdate", "orderbookUpdate", "bestBidAskUpdate",
+ * Emits: "priceUpdate", "bestBidAskUpdate",
  *        "marketResolved", "tickSizeChange", "connected", "disconnected"
  */
 export class MarketWebSocketWatcher extends EventEmitter {
@@ -187,6 +185,9 @@ export class MarketWebSocketWatcher extends EventEmitter {
           // Handle text responses (PONG, errors)
           if (text === "PONG" || text.startsWith("INVALID")) return;
 
+          // Drop massive unconsumed payloads before parsing to prevent OOM
+          if (text.includes('"event_type":"book"')) return;
+
           const msg: ClobWsMessage = JSON.parse(text);
           this.handleMessage(msg);
         } catch {
@@ -232,15 +233,7 @@ export class MarketWebSocketWatcher extends EventEmitter {
 
     switch (msg.event_type) {
       case "book":
-        if (msg.asset_id && msg.bids && msg.asks) {
-          this.emit("orderbookUpdate", {
-            tokenId: msg.asset_id,
-            bids: msg.bids,
-            asks: msg.asks,
-            hash: msg.hash ?? "",
-            timestamp: ts,
-          } satisfies OrderbookUpdateEvent);
-        }
+        // Safely ignored prior to parse, but kept here for logical completeness
         break;
 
       case "price_change":
