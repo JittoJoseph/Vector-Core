@@ -1,6 +1,6 @@
 # Vector-Core
 
-[![Live Demo](https://img.shields.io/badge/Live_Demo-vector--core.vercel.app-007acc)](https://vector-core-dev.vercel.app/)
+[![Live Demo](https://img.shields.io/badge/Live_Demo-vector.jittojoseph.xyz-007acc)](https://vector.jittojoseph.xyz)
 
 [![Backend Build](https://img.shields.io/github/checks-status/JittoJoseph/Vector-Core/main?label=backend)](https://github.com/JittoJoseph/Vector-Core/deployments)
 [![Frontend Build](https://img.shields.io/github/checks-status/JittoJoseph/Vector-Core/main?label=frontend)](https://github.com/JittoJoseph/Vector-Core/deployments)
