@@ -1,5 +1,5 @@
 {
-  "id": "2bc31d6b-1dc8-47c9-8ee0-30fcd36cb728",
+  "id": "8c92391b-1dd1-4a6f-a257-6969a078e016",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -100,14 +100,32 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.markets": {
-      "name": "markets",
+    "public.deadline_markets": {
+      "name": "deadline_markets",
       "schema": "",
       "columns": {
         "id": {
           "name": "id",
           "type": "text",
           "primaryKey": true,
+          "notNull": true
+        },
+        "event_id": {
+          "name": "event_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "event_slug": {
+          "name": "event_slug",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "event_title": {
+          "name": "event_title",
+          "type": "text",
+          "primaryKey": false,
           "notNull": true
         },
         "condition_id": {
@@ -126,41 +144,41 @@
           "name": "question",
           "type": "text",
           "primaryKey": false,
-          "notNull": false
+          "notNull": true
         },
-        "clob_token_ids": {
-          "name": "clob_token_ids",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "outcomes": {
-          "name": "outcomes",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "window_type": {
-          "name": "window_type",
+        "underlying_key": {
+          "name": "underlying_key",
           "type": "text",
           "primaryKey": false,
           "notNull": true
         },
-        "category": {
-          "name": "category",
+        "deadline": {
+          "name": "deadline",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "deadline_date": {
+          "name": "deadline_date",
           "type": "text",
           "primaryKey": false,
           "notNull": true
         },
-        "end_date": {
-          "name": "end_date",
+        "family_kind": {
+          "name": "family_kind",
           "type": "text",
           "primaryKey": false,
-          "notNull": false
+          "notNull": true
         },
-        "target_price": {
-          "name": "target_price",
-          "type": "numeric(18, 2)",
+        "classification_status": {
+          "name": "classification_status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "rejection_reason": {
+          "name": "rejection_reason",
+          "type": "text",
           "primaryKey": false,
           "notNull": false
         },
@@ -171,9 +189,141 @@
           "notNull": true,
           "default": true
         },
-        "metadata": {
-          "name": "metadata",
+        "closed": {
+          "name": "closed",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "accepting_orders": {
+          "name": "accepting_orders",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "enable_order_book": {
+          "name": "enable_order_book",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "neg_risk": {
+          "name": "neg_risk",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "neg_risk_other": {
+          "name": "neg_risk_other",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "frozen_prices": {
+          "name": "frozen_prices",
           "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "outcomes": {
+          "name": "outcomes",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "clob_token_ids": {
+          "name": "clob_token_ids",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "yes_token_id": {
+          "name": "yes_token_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "no_token_id": {
+          "name": "no_token_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "yes_price": {
+          "name": "yes_price",
+          "type": "numeric(18, 8)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "no_price": {
+          "name": "no_price",
+          "type": "numeric(18, 8)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "spread": {
+          "name": "spread",
+          "type": "numeric(18, 8)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "liquidity_num": {
+          "name": "liquidity_num",
+          "type": "numeric(18, 8)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "volume_24h": {
+          "name": "volume_24h",
+          "type": "numeric(18, 8)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "order_min_size": {
+          "name": "order_min_size",
+          "type": "numeric(18, 8)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "order_tick_size": {
+          "name": "order_tick_size",
+          "type": "numeric(18, 8)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "fees_enabled": {
+          "name": "fees_enabled",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "fee_schedule": {
+          "name": "fee_schedule",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "resolution_rules": {
+          "name": "resolution_rules",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "resolution_source": {
+          "name": "resolution_source",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "uma_resolution_status": {
+          "name": "uma_resolution_status",
+          "type": "text",
           "primaryKey": false,
           "notNull": false
         },
@@ -200,8 +350,169 @@
         }
       },
       "indexes": {
-        "markets_slug_idx": {
-          "name": "markets_slug_idx",
+        "deadline_markets_event_idx": {
+          "name": "deadline_markets_event_idx",
+          "columns": [
+            {
+              "expression": "event_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "deadline_markets_deadline_idx": {
+          "name": "deadline_markets_deadline_idx",
+          "columns": [
+            {
+              "expression": "deadline",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "deadline_markets_status_idx": {
+          "name": "deadline_markets_status_idx",
+          "columns": [
+            {
+              "expression": "classification_status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "deadline_markets_no_token_idx": {
+          "name": "deadline_markets_no_token_idx",
+          "columns": [
+            {
+              "expression": "no_token_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.event_families": {
+      "name": "event_families",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "slug": {
+          "name": "slug",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "title": {
+          "name": "title",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "normalized_key": {
+          "name": "normalized_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "family_kind": {
+          "name": "family_kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'single_deadline'"
+        },
+        "explicit_date_count": {
+          "name": "explicit_date_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "active": {
+          "name": "active",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        },
+        "closed": {
+          "name": "closed",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "liquidity": {
+          "name": "liquidity",
+          "type": "numeric(18, 8)",
+          "primaryKey": false,
+          "notNull": false,
+          "default": "'0'"
+        },
+        "volume_24h": {
+          "name": "volume_24h",
+          "type": "numeric(18, 8)",
+          "primaryKey": false,
+          "notNull": false,
+          "default": "'0'"
+        },
+        "last_fetched_at": {
+          "name": "last_fetched_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "event_families_slug_idx": {
+          "name": "event_families_slug_idx",
           "columns": [
             {
               "expression": "slug",
@@ -210,16 +521,16 @@
               "nulls": "last"
             }
           ],
-          "isUnique": false,
+          "isUnique": true,
           "concurrently": false,
           "method": "btree",
           "with": {}
         },
-        "markets_active_idx": {
-          "name": "markets_active_idx",
+        "event_families_kind_idx": {
+          "name": "event_families_kind_idx",
           "columns": [
             {
-              "expression": "active",
+              "expression": "family_kind",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -230,11 +541,11 @@
           "method": "btree",
           "with": {}
         },
-        "markets_end_date_idx": {
-          "name": "markets_end_date_idx",
+        "event_families_updated_at_idx": {
+          "name": "event_families_updated_at_idx",
           "columns": [
             {
-              "expression": "end_date",
+              "expression": "updated_at",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -244,12 +555,118 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.opportunities": {
+      "name": "opportunities",
+      "schema": "",
+      "columns": {
+        "market_id": {
+          "name": "market_id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
         },
-        "markets_window_type_idx": {
-          "name": "markets_window_type_idx",
+        "event_id": {
+          "name": "event_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "no_token_id": {
+          "name": "no_token_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "reason": {
+          "name": "reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "deadline": {
+          "name": "deadline",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "days_to_deadline": {
+          "name": "days_to_deadline",
+          "type": "numeric(18, 8)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "no_price": {
+          "name": "no_price",
+          "type": "numeric(18, 8)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "no_best_bid": {
+          "name": "no_best_bid",
+          "type": "numeric(18, 8)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "no_best_ask": {
+          "name": "no_best_ask",
+          "type": "numeric(18, 8)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "spread": {
+          "name": "spread",
+          "type": "numeric(18, 8)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "depth_at_limit": {
+          "name": "depth_at_limit",
+          "type": "numeric(18, 8)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "expected_net_profit": {
+          "name": "expected_net_profit",
+          "type": "numeric(18, 8)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "opportunities_status_idx": {
+          "name": "opportunities_status_idx",
           "columns": [
             {
-              "expression": "window_type",
+              "expression": "status",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -324,8 +741,50 @@
           "primaryKey": true,
           "notNull": true
         },
+        "event_id": {
+          "name": "event_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "event_slug": {
+          "name": "event_slug",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "event_title": {
+          "name": "event_title",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "market_id": {
           "name": "market_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "market_slug": {
+          "name": "market_slug",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "market_question": {
+          "name": "market_question",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "deadline": {
+          "name": "deadline",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "deadline_date": {
+          "name": "deadline_date",
           "type": "text",
           "primaryKey": false,
           "notNull": false
@@ -336,17 +795,12 @@
           "primaryKey": false,
           "notNull": false
         },
-        "market_category": {
-          "name": "market_category",
+        "outcome_label": {
+          "name": "outcome_label",
           "type": "text",
           "primaryKey": false,
-          "notNull": false
-        },
-        "window_type": {
-          "name": "window_type",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
+          "notNull": true,
+          "default": "'No'"
         },
         "side": {
           "name": "side",
@@ -355,18 +809,12 @@
           "notNull": true,
           "default": "'BUY'"
         },
-        "outcome_label": {
-          "name": "outcome_label",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "order_type": {
           "name": "order_type",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
-          "default": "'LIMIT_GTC'"
+          "default": "'FAK'"
         },
         "entry_ts": {
           "name": "entry_ts",
@@ -412,33 +860,27 @@
           "notNull": false,
           "default": "'FULL'"
         },
-        "btc_price_at_entry": {
-          "name": "btc_price_at_entry",
-          "type": "numeric(18, 2)",
+        "expected_net_profit": {
+          "name": "expected_net_profit",
+          "type": "numeric(18, 8)",
           "primaryKey": false,
           "notNull": false
         },
-        "btc_target_price": {
-          "name": "btc_target_price",
-          "type": "numeric(18, 2)",
+        "no_best_bid_at_entry": {
+          "name": "no_best_bid_at_entry",
+          "type": "numeric(18, 8)",
           "primaryKey": false,
           "notNull": false
         },
-        "btc_distance_usd": {
-          "name": "btc_distance_usd",
-          "type": "numeric(10, 4)",
+        "no_best_ask_at_entry": {
+          "name": "no_best_ask_at_entry",
+          "type": "numeric(18, 8)",
           "primaryKey": false,
           "notNull": false
         },
-        "momentum_direction": {
-          "name": "momentum_direction",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "momentum_change_usd": {
-          "name": "momentum_change_usd",
-          "type": "numeric(10, 4)",
+        "depth_at_limit": {
+          "name": "depth_at_limit",
+          "type": "numeric(18, 8)",
           "primaryKey": false,
           "notNull": false
         },
@@ -460,6 +902,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "exit_reason": {
+          "name": "exit_reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "realized_pnl": {
           "name": "realized_pnl",
           "type": "numeric(18, 8)",
@@ -475,12 +923,6 @@
         },
         "orderbook_snapshot": {
           "name": "orderbook_snapshot",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "raw": {
-          "name": "raw",
           "type": "jsonb",
           "primaryKey": false,
           "notNull": false
@@ -546,8 +988,8 @@
           "method": "btree",
           "with": {}
         },
-        "uq_open_trade_per_market_token": {
-          "name": "uq_open_trade_per_market_token",
+        "uq_open_trade_per_deadline_token": {
+          "name": "uq_open_trade_per_deadline_token",
           "columns": [
             {
               "expression": "market_id",

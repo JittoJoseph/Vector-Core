@@ -5,50 +5,8 @@
     {
       "idx": 0,
       "version": "7",
-      "when": 1772364554964,
-      "tag": "0000_third_hex",
-      "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "7",
-      "when": 1772442436122,
-      "tag": "0001_gigantic_skreet",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "7",
-      "when": 1773423146321,
-      "tag": "0002_sweet_darkhawk",
-      "breakpoints": true
-    },
-    {
-      "idx": 3,
-      "version": "7",
-      "when": 1774237811435,
-      "tag": "0003_moaning_wiccan",
-      "breakpoints": true
-    },
-    {
-      "idx": 4,
-      "version": "7",
-      "when": 1780453470000,
-      "tag": "0004_explicit_deadline_engine",
-      "breakpoints": true
-    },
-    {
-      "idx": 5,
-      "version": "7",
-      "when": 1780457600000,
-      "tag": "0005_relax_deadline_no_token_index",
-      "breakpoints": true
-    },
-    {
-      "idx": 6,
-      "version": "7",
-      "when": 1780460500000,
-      "tag": "0006_prune_non_ladder_data",
+      "when": 1780731081494,
+      "tag": "0000_heavy_micromacro",
       "breakpoints": true
     }
   ]
