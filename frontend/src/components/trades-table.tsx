@@ -102,6 +102,9 @@ export function TradesTable({
                   COST BASIS
                 </th>
                 <th className="text-right py-2.5 px-3 font-medium text-muted-foreground tracking-wider text-[10px]">
+                  PRICE DRIFT
+                </th>
+                <th className="text-right py-2.5 px-3 font-medium text-muted-foreground tracking-wider text-[10px]">
                   OUTCOME
                 </th>
                 <th className="text-right py-2.5 px-3 font-medium text-muted-foreground tracking-wider text-[10px]">
@@ -320,6 +323,25 @@ export function TradesTable({
                     <span className="text-foreground font-medium tabular-nums">
                       ${actualCost.toFixed(2)}
                     </span>
+                  </td>
+
+                  {/* PRICE DRIFT */}
+                  <td className="py-3 px-3 text-right">
+                    <div className="flex items-center justify-end gap-1.5 tabular-nums">
+                      <span className="text-muted-foreground">
+                        {entryCents}¢
+                      </span>
+                      <span className="text-muted-foreground/40">→</span>
+                      {trade.exitPrice !== null && trade.exitPrice !== undefined ? (
+                        <span
+                          className={`font-semibold ${Math.round(parseFloat(trade.exitPrice.toString()) * 100) >= entryCents ? "text-emerald-400" : "text-red-400"}`}
+                        >
+                          {Math.round(parseFloat(trade.exitPrice.toString()) * 100)}¢
+                        </span>
+                      ) : (
+                        <span className="text-muted-foreground/40">—</span>
+                      )}
+                    </div>
                   </td>
 
                   {/* OUTCOME */}
