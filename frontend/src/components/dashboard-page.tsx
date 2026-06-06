@@ -203,6 +203,9 @@ export function DashboardPage() {
   const livePortfolioValue =
     cashBalance + openPositionsValue + liveUnrealizedPnl;
 
+  const animatedPortfolioValue = useAnimatedNumber(livePortfolioValue, 300);
+  const animatedLiveUnrealizedPnl = useAnimatedNumber(liveUnrealizedPnl, 300);
+
   const evaluatedCount =
     stats?.orchestrator.scanner.evaluatedOpportunities || 0;
   const discoveredLaddersCount =
@@ -293,7 +296,7 @@ export function DashboardPage() {
                 </div>
                 <div className="text-xl font-bold tracking-tight leading-none text-foreground">
                   $
-                  {livePortfolioValue.toLocaleString(undefined, {
+                  {animatedPortfolioValue.toLocaleString(undefined, {
                     minimumFractionDigits: 2,
                     maximumFractionDigits: 2,
                   })}
@@ -314,7 +317,7 @@ export function DashboardPage() {
                 <div
                   className={`text-xl font-bold tracking-tight leading-none ${pnlColor(liveUnrealizedPnl)}`}
                 >
-                  {formatPnl(liveUnrealizedPnl)}
+                  {formatPnl(animatedLiveUnrealizedPnl)}
                 </div>
                 <div
                   className={`text-[10px] mt-1.5 font-bold ${pnlColor(netPnl, "80")}`}
