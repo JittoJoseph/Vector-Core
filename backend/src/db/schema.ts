@@ -58,6 +58,7 @@ export const deadlineMarkets = pgTable(
     enableOrderBook: boolean("enable_order_book").default(false).notNull(),
     negRisk: boolean("neg_risk").default(false).notNull(),
     negRiskOther: boolean("neg_risk_other").default(false).notNull(),
+    frozenPrices: jsonb("frozen_prices"),
     outcomes: jsonb("outcomes").notNull(),
     clobTokenIds: jsonb("clob_token_ids").notNull(),
     yesTokenId: text("yes_token_id").notNull(),

@@ -117,7 +117,7 @@ export function DashboardPage() {
   const livePricesMap = useMemo<Record<string, LiveMarketPrice>>(() => {
     const map: Record<string, LiveMarketPrice> = {};
     for (const m of liveMarkets) {
-      for (const [tokenId, price] of Object.entries(m.prices)) {
+      for (const [tokenId, price] of Object.entries(m.markPrice)) {
         map[tokenId] = price;
       }
     }

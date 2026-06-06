@@ -159,9 +159,9 @@ export function useLiveMarkets(): LiveMarketInfo[] {
         incoming.map((m) => {
           // Preserve last-known prices when the WS update has none yet
           // (happens briefly right after a market is first registered)
-          if (Object.keys(m.prices).length === 0) {
+          if (Object.keys(m.markPrice).length === 0) {
             const existing = prev.find((p) => p.marketId === m.marketId);
-            return existing ? { ...m, prices: existing.prices } : m;
+            return existing ? { ...m, markPrice: existing.markPrice } : m;
           }
           return m;
         }),
@@ -447,7 +447,7 @@ export function useUnrealizedPnL(
     // Build a tokenId → current price map from live markets
     const priceMap: Record<string, number> = {};
     for (const market of liveMarkets) {
-      for (const [tokenId, priceData] of Object.entries(market.prices)) {
+      for (const [tokenId, priceData] of Object.entries(market.markPrice)) {
         priceMap[tokenId] = priceData.mid;
       }
     }

@@ -40,8 +40,11 @@ interface TrackedMarket {
   feeSchedule: FeeSchedule | null;
   resolutionRules: string | null;
   lastPrices: Record<string, { bid: number; ask: number; mid: number }>;
+  frozenPrices: Record<string, { bid: number; ask: number; mid: number }> | null;
   resolved: boolean;
 }
+
+export type MarketLifecycle = "OPEN" | "AWAITING_RESOLUTION" | "RESOLVED";
 
 interface OpenPosition {
   tradeId: string;
@@ -61,6 +64,7 @@ export class MarketOrchestrator extends EventEmitter {
 
   private scanTimer: ReturnType<typeof setInterval> | null = null;
   private settlementTimer: ReturnType<typeof setInterval> | null = null;
+  private lifecycleTimer: ReturnType<typeof setInterval> | null = null;
   private trackedMarkets = new Map<string, TrackedMarket>();
   private tokenToMarket = new Map<string, string>();
   private conditionIdToMarket = new Map<string, string>();
@@ -97,6 +101,9 @@ export class MarketOrchestrator extends EventEmitter {
         logger.error({ error }, "Settlement polling failed"),
       );
     }, 60_000);
+    this.lifecycleTimer = setInterval(() => {
+      this.checkLifecycleTransitions();
+    }, 1000);
     logger.info("Explicit-date deadline market orchestrator started");
   }
 
@@ -104,9 +111,11 @@ export class MarketOrchestrator extends EventEmitter {
     this.running = false;
     if (this.scanTimer) clearInterval(this.scanTimer);
     if (this.settlementTimer) clearInterval(this.settlementTimer);
+    if (this.lifecycleTimer) clearInterval(this.lifecycleTimer);
     if (this.riskAutoResumeTimer) clearTimeout(this.riskAutoResumeTimer);
     this.scanTimer = null;
     this.settlementTimer = null;
+    this.lifecycleTimer = null;
     this.wsWatcher.stop();
     logger.info("Deadline market orchestrator stopped");
   }
@@ -120,6 +129,10 @@ export class MarketOrchestrator extends EventEmitter {
     if (this.settlementTimer) {
       clearInterval(this.settlementTimer);
       this.settlementTimer = null;
+    }
+    if (this.lifecycleTimer) {
+      clearInterval(this.lifecycleTimer);
+      this.lifecycleTimer = null;
     }
     this.wsWatcher.stop();
     logger.warn("System paused — discovery, settlement polling, and WS stopped");
@@ -150,6 +163,11 @@ export class MarketOrchestrator extends EventEmitter {
           logger.error({ error }, "Settlement polling failed"),
         );
       }, 60_000);
+    }
+    if (!this.lifecycleTimer) {
+      this.lifecycleTimer = setInterval(() => {
+        this.checkLifecycleTransitions();
+      }, 1000);
     }
     logger.info("System resumed");
   }
@@ -225,12 +243,8 @@ export class MarketOrchestrator extends EventEmitter {
         yesTokenId: m.yesTokenId,
         noTokenId: m.noTokenId,
         noPrice: m.noPrice,
-        prices: { ...m.lastPrices },
-        status: m.resolved
-          ? "RESOLVED"
-          : new Date(m.deadline).getTime() <= now
-            ? "PAST_DEADLINE"
-            : "ACTIVE",
+        markPrice: m.frozenPrices ?? { ...m.lastPrices }, // unified mark price
+        status: this.getMarketLifecycle(m),
         hasPosition: Array.from(this.openPositions.values()).some(
           (p) => p.marketId === m.marketId,
         ),
@@ -715,17 +729,56 @@ export class MarketOrchestrator extends EventEmitter {
     }
   }
 
+  private getMarketLifecycle(state: TrackedMarket): MarketLifecycle {
+    if (state.resolved) return "RESOLVED";
+    if (Date.now() >= new Date(state.deadline).getTime()) return "AWAITING_RESOLUTION";
+    return "OPEN";
+  }
+
+  private checkLifecycleTransitions(): void {
+    for (const state of this.trackedMarkets.values()) {
+      if (this.getMarketLifecycle(state) === "AWAITING_RESOLUTION" && !state.frozenPrices) {
+        state.frozenPrices = { ...state.lastPrices };
+        this.persistFrozenPrices(state.marketId, state.frozenPrices).catch(err => 
+          logger.error({ err }, "Failed to persist frozen prices on timer")
+        );
+      }
+    }
+  }
+
   private onTokenPriceUpdate(tokenId: string, bestBid: number, bestAsk: number): void {
     const marketId = this.tokenToMarket.get(tokenId);
     if (!marketId) return;
     const state = this.trackedMarkets.get(marketId);
     if (!state) return;
+    
+    const lifecycle = this.getMarketLifecycle(state);
+    
+    // Freeze prices at transition
+    if (lifecycle !== "OPEN") {
+      if (!state.frozenPrices) {
+        state.frozenPrices = { ...state.lastPrices };
+        this.persistFrozenPrices(state.marketId, state.frozenPrices).catch(err => 
+          logger.error({ err }, "Failed to persist frozen prices")
+        );
+      }
+      return; // Ignore incoming WS price updates
+    }
+
     if (!Number.isFinite(bestBid) || !Number.isFinite(bestAsk)) return;
     state.lastPrices[tokenId] = {
       bid: bestBid,
       ask: bestAsk,
       mid: (bestBid + bestAsk) / 2,
     };
+  }
+
+  private async persistFrozenPrices(marketId: string, frozenPrices: any): Promise<void> {
+    const db = getDb();
+    await db
+      .update(schema.deadlineMarkets)
+      .set({ frozenPrices, updatedAt: new Date() })
+      .where(eq(schema.deadlineMarkets.id, marketId));
   }
 
   private async onMarketResolved(ev: MarketResolvedEvent): Promise<void> {
@@ -839,6 +892,7 @@ export class MarketOrchestrator extends EventEmitter {
       feeSchedule: (market.feeSchedule as FeeSchedule | null) ?? null,
       resolutionRules: market.resolutionRules,
       lastPrices: {},
+      frozenPrices: (market.frozenPrices as any) ?? null,
       resolved: false,
     };
     this.trackedMarkets.set(market.id, item);

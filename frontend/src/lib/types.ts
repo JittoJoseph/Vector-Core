@@ -101,8 +101,8 @@ export interface LiveMarketInfo {
   yesTokenId: string;
   noTokenId: string;
   noPrice: number | null;
-  prices: Record<string, LiveMarketPrice>;
-  status: "ACTIVE" | "PAST_DEADLINE" | "RESOLVED" | "ENDED" | "UPCOMING";
+  markPrice: Record<string, { bid: number; ask: number; mid: number }>;
+  status: "OPEN" | "AWAITING_RESOLUTION" | "RESOLVED";
   hasPosition: boolean;
   // legacy aliases
   endDate?: string;
