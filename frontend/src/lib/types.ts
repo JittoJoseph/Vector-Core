@@ -1,42 +1,22 @@
-export interface EventFamily {
+export interface DistributionCampaign {
   id: string;
   slug: string;
   title: string;
-  normalizedKey: string;
-  familyKind: "deadline_ladder" | "same_deadline_group" | "single_deadline";
-  explicitDateCount: number;
+  seriesSlug: string | null;
+  startDate: string | null;
+  endDate: string | null;
   active: boolean;
   closed: boolean;
-  liquidity: string | null;
-  volume24h: string | null;
-  raw: unknown;
   lastFetchedAt: string;
   createdAt: string;
   updatedAt: string;
 }
 
-export interface DiscoveredMarket {
+export interface DistributionBucket {
   id: string;
-  eventId: string;
-  eventSlug: string;
-  eventTitle: string;
+  campaignId: string;
   conditionId: string | null;
-  slug: string | null;
-  question: string;
-  underlyingKey: string;
-  deadline: string;
-  deadlineDate: string;
-  familyKind: string;
-  classificationStatus: string;
-  rejectionReason: string | null;
-  active: boolean;
-  closed: boolean;
-  acceptingOrders: boolean;
-  enableOrderBook: boolean;
-  negRisk: boolean;
-  negRiskOther: boolean;
-  outcomes: unknown;
-  clobTokenIds: unknown;
+  groupItemTitle: string;
   yesTokenId: string;
   noTokenId: string;
   yesPrice: string | null;
@@ -44,24 +24,9 @@ export interface DiscoveredMarket {
   spread: string | null;
   liquidityNum: string | null;
   volume24h: string | null;
-  orderMinSize: string | null;
-  orderTickSize: string | null;
-  feesEnabled: boolean;
-  feeSchedule: unknown;
-  resolutionRules: string | null;
-  resolutionSource: string | null;
-  umaResolutionStatus: string | null;
-  raw: unknown;
   lastFetchedAt: string;
   createdAt: string;
   updatedAt: string;
-  // legacy optional fields retained for old components still in src
-  windowType?: string;
-  category?: string;
-  endDate?: string | null;
-  targetPrice?: string | null;
-  metadata?: { crossovers?: Array<{ side: "UP" | "DOWN"; ts: number }> };
-  computedStatus?: "ACTIVE" | "ENDED";
 }
 
 export interface Opportunity {
