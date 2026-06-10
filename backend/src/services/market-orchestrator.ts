@@ -388,6 +388,8 @@ export class MarketOrchestrator extends EventEmitter {
           // Trade Eligibility: STRICTLY bounded by min and max
           if (noPrice >= config.strategy.minNoEntryPrice && noPrice <= config.strategy.maxNoEntryPrice) {
             
+            const bucketHasPosition = Array.from(this.openPositions.values()).some(p => p.bucketId === bucket.id);
+            if (bucketHasPosition) continue;
             
             if (this.inFlightTokens.has(bucket.noTokenId)) continue;
             
