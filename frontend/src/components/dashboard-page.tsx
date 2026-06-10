@@ -298,10 +298,10 @@ export function DashboardPage() {
                   />
                 </div>
                 <div
-                  className={`text-[10px] mt-1.5 font-bold ${pnlColor(netPnl, "80")}`}
+                  className={`text-[10px] mt-1.5 font-bold ${pnlColor(parseFloat(performance?.totalPnl || "0"), "80")}`}
                 >
                   <NumberFlow
-                    value={netPnl}
+                    value={parseFloat(performance?.totalPnl || "0")}
                     format={{ style: "currency", currency: "USD", signDisplay: "always", minimumFractionDigits: 4, maximumFractionDigits: 4 }}
                   /> (Realized)
                 </div>

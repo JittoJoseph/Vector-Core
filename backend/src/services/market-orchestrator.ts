@@ -436,28 +436,34 @@ export class MarketOrchestrator extends EventEmitter {
         const deducted = await this.portfolioManager.deductCash(cand.fill.netCost);
         if (!deducted) continue;
         
-        const trade = await createSimulatedTrade({
-          campaignId: cand.bucket.campaignId,
-          campaignSlug: cand.campaign.slug,
-          campaignTitle: cand.campaign.title,
-          bucketId: cand.bucket.id,
-          bucketSlug: cand.bucket.slug,
-          bucketGroupTitle: cand.bucket.groupItemTitle,
-          tokenId: cand.bucket.noTokenId,
-          entryTs: new Date(),
-          entryPrice: cand.fill.averagePrice.toFixed(8),
-          entryShares: cand.fill.totalShares.toFixed(8),
-          positionBudget: cand.budget.toFixed(8),
-          actualCost: cand.fill.netCost.toFixed(8),
-          entryFees: cand.fill.fees.toFixed(8),
-          fillStatus: cand.fill.isPartialFill ? "PARTIAL" : "FULL",
-          expectedNetProfit: cand.expectedNetProfit.toFixed(8),
-          expectedReturnPercent: cand.expectedReturnPercent.toFixed(8),
-          noBestBidAtEntry: cand.top.bestBid?.toFixed(8),
-          noBestAskAtEntry: cand.top.bestAsk?.toFixed(8),
-          depthAtLimit: cand.depthAtLimit.toFixed(8),
-          orderbookSnapshot: cand.fill.orderbookSnapshot,
-        });
+        let trade;
+        try {
+          trade = await createSimulatedTrade({
+            campaignId: cand.bucket.campaignId,
+            campaignSlug: cand.campaign.slug,
+            campaignTitle: cand.campaign.title,
+            bucketId: cand.bucket.id,
+            bucketSlug: cand.bucket.slug,
+            bucketGroupTitle: cand.bucket.groupItemTitle,
+            tokenId: cand.bucket.noTokenId,
+            entryTs: new Date(),
+            entryPrice: cand.fill.averagePrice.toFixed(8),
+            entryShares: cand.fill.totalShares.toFixed(8),
+            positionBudget: cand.budget.toFixed(8),
+            actualCost: cand.fill.netCost.toFixed(8),
+            entryFees: cand.fill.fees.toFixed(8),
+            fillStatus: cand.fill.isPartialFill ? "PARTIAL" : "FULL",
+            expectedNetProfit: cand.expectedNetProfit.toFixed(8),
+            expectedReturnPercent: cand.expectedReturnPercent.toFixed(8),
+            noBestBidAtEntry: cand.top.bestBid?.toFixed(8),
+            noBestAskAtEntry: cand.top.bestAsk?.toFixed(8),
+            depthAtLimit: cand.depthAtLimit.toFixed(8),
+            orderbookSnapshot: cand.fill.orderbookSnapshot,
+          });
+        } catch (err) {
+          await this.portfolioManager.addCash(cand.fill.netCost);
+          throw err;
+        }
         
         if (trade) {
           this.openPositions.set(trade.id, {
