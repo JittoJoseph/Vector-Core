@@ -227,6 +227,10 @@ export class MarketOrchestrator extends EventEmitter {
   private async persistCampaign(event: GammaEvent): Promise<void> {
     const db = getDb();
     const eventId = String(event.id);
+
+    if (!/^Elon Musk # tweets [A-Za-z]+ \d+ - [A-Za-z]+ \d+, \d{4}\?$/.test(event.title ?? "")) {
+      return;
+    }
     
     await db.insert(schema.distributionCampaigns).values({
       id: eventId,
@@ -249,6 +253,13 @@ export class MarketOrchestrator extends EventEmitter {
         updatedAt: new Date(),
       }
     });
+
+    if (!event.markets || event.markets.length === 0) {
+      const fullEvent = await this.client.getEventBySlug(event.slug ?? eventId);
+      if (fullEvent?.markets) {
+        event.markets = fullEvent.markets;
+      }
+    }
 
     if (event.markets && Array.isArray(event.markets)) {
       for (const market of event.markets) {
@@ -304,7 +315,6 @@ export class MarketOrchestrator extends EventEmitter {
     });
     this.tokenToBucket.set(noTokenId, market.id);
     if (market.conditionId) this.conditionIdToBucket.set(market.conditionId, market.id);
-    this.wsWatcher.subscribe([noTokenId]);
   }
 
   private async evaluateOpportunities(): Promise<void> {
@@ -324,6 +334,15 @@ export class MarketOrchestrator extends EventEmitter {
     }
     
     let allCandidates: Candidate[] = [];
+    const requiredTokens = new Set<string>();
+
+    for (const p of this.openPositions.values()) {
+      const b = this.trackedBuckets.get(p.bucketId);
+      if (b) {
+        requiredTokens.add(b.noTokenId);
+        requiredTokens.add(b.yesTokenId);
+      }
+    }
     
     for (const campaign of campaigns) {
       const buckets = await db.select().from(schema.distributionBuckets).where(eq(schema.distributionBuckets.campaignId, campaign.id));
@@ -344,6 +363,11 @@ export class MarketOrchestrator extends EventEmitter {
         // Eligible if strictly below modal bucket
         if (bMax < modalMin) {
           const noPrice = parseFloat(bucket.noPrice?.toString() ?? "0");
+          
+          if (noPrice < 0.99 || Number.isNaN(noPrice)) {
+             requiredTokens.add(bucket.noTokenId);
+          }
+
           if (noPrice >= config.strategy.minNoEntryPrice && noPrice <= config.strategy.maxNoEntryPrice) {
             
             const campaignHasPosition = Array.from(this.openPositions.values()).some(p => {
@@ -369,13 +393,20 @@ export class MarketOrchestrator extends EventEmitter {
             const expectedNetProfit = calculateExpectedNetProfit(fill);
             if (expectedNetProfit < config.strategy.minExpectedNetProfit) continue;
             
-            const expectedReturnPercent = expectedNetProfit / fill.netCost;
+            const expectedReturnPercent = expectedNetProfit / fill.totalCost;
             
             allCandidates.push({ bucket, expectedNetProfit, expectedReturnPercent, fill, top, depthAtLimit, budget });
           }
         }
       }
     }
+    
+    const currentlySubscribed = this.wsWatcher.getSubscribedTokens();
+    const tokensToSubscribe = Array.from(requiredTokens).filter(t => !currentlySubscribed.has(t));
+    const tokensToUnsubscribe = Array.from(currentlySubscribed).filter(t => !requiredTokens.has(t));
+    
+    if (tokensToSubscribe.length > 0) this.wsWatcher.subscribe(tokensToSubscribe);
+    if (tokensToUnsubscribe.length > 0) this.wsWatcher.unsubscribe(tokensToUnsubscribe);
     
     allCandidates.sort((a, b) => {
       if (b.expectedReturnPercent !== a.expectedReturnPercent) return b.expectedReturnPercent - a.expectedReturnPercent;

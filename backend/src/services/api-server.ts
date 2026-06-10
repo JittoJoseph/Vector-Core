@@ -167,7 +167,7 @@ export class ApiServer {
     this.app.get("/api/buckets", async (req, res) => {
       try {
         const db = getDb();
-        const limit = Math.min(parseInt(req.query.limit as string) || 50, 200);
+        const limit = Math.min(parseInt(req.query.limit as string) || 1000, 2000);
         const offset = Math.max(parseInt(req.query.offset as string) || 0, 0);
         const rows = await db
           .select()
@@ -203,16 +203,28 @@ export class ApiServer {
         const limit = Math.min(parseInt(req.query.limit as string) || 25, 200);
         const offset = Math.max(parseInt(req.query.offset as string) || 0, 0);
         const status = req.query.status as string | undefined;
+        
         const base = db
-          .select()
+          .select({
+             trade: schema.simulatedTrades,
+             campaign: schema.distributionCampaigns
+          })
           .from(schema.simulatedTrades)
+          .leftJoin(schema.distributionCampaigns, eq(schema.simulatedTrades.campaignId, schema.distributionCampaigns.id))
           .orderBy(desc(schema.simulatedTrades.entryTs))
           .limit(limit)
           .offset(offset);
-        const rows =
+          
+        const rawRows =
           status === "OPEN" || status === "SETTLED"
             ? await base.where(eq(schema.simulatedTrades.status, status))
             : await base;
+            
+        const rows = rawRows.map(r => ({
+           ...r.trade,
+           campaignEndDate: r.campaign?.endDate
+        }));
+        
         res.json(rows);
       } catch (error) {
         logger.error({ error }, "Trades error");

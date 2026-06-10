@@ -135,6 +135,10 @@ export class MarketWebSocketWatcher extends EventEmitter {
     return this.ws?.readyState === WebSocket.OPEN;
   }
 
+  getSubscribedTokens(): Set<string> {
+    return new Set(this.subscribedTokens);
+  }
+
   getStats() {
     return {
       connected: this.isConnected(),
