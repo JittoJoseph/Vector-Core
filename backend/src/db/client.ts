@@ -98,8 +98,8 @@ export async function wipeAndResetPortfolio(startingCapital: number) {
   const database = getDb();
   await database.delete(schema.simulatedTrades);
   await database.delete(schema.opportunities);
-  await database.delete(schema.deadlineMarkets);
-  await database.delete(schema.eventFamilies);
+  await database.delete(schema.distributionBuckets);
+  await database.delete(schema.distributionCampaigns);
   await database.delete(schema.auditLogs);
   await database.delete(schema.portfolio);
 
@@ -114,30 +114,27 @@ export async function wipeAndResetPortfolio(startingCapital: number) {
   return result[0];
 }
 
-export async function loadOpenTradesWithMarkets() {
+export async function loadOpenTradesWithBuckets() {
   const database = getDb();
   return database
     .select({
       trade: schema.simulatedTrades,
-      market: schema.deadlineMarkets,
+      bucket: schema.distributionBuckets,
     })
     .from(schema.simulatedTrades)
     .leftJoin(
-      schema.deadlineMarkets,
-      eq(schema.simulatedTrades.marketId, schema.deadlineMarkets.id),
+      schema.distributionBuckets,
+      eq(schema.simulatedTrades.bucketId, schema.distributionBuckets.id),
     )
     .where(eq(schema.simulatedTrades.status, "OPEN"));
 }
 
 export async function createSimulatedTrade(data: {
-  eventId?: string | null;
-  eventSlug?: string | null;
-  eventTitle?: string | null;
-  marketId?: string | null;
-  marketSlug?: string | null;
-  marketQuestion?: string | null;
-  deadline?: Date | null;
-  deadlineDate?: string | null;
+  campaignId?: string | null;
+  campaignSlug?: string | null;
+  campaignTitle?: string | null;
+  bucketId?: string | null;
+  bucketGroupTitle?: string | null;
   tokenId: string;
   entryTs: Date;
   entryPrice: string;
@@ -147,6 +144,7 @@ export async function createSimulatedTrade(data: {
   entryFees?: string;
   fillStatus?: string;
   expectedNetProfit?: string;
+  expectedReturnPercent?: string;
   noBestBidAtEntry?: string;
   noBestAskAtEntry?: string;
   depthAtLimit?: string;
@@ -156,14 +154,11 @@ export async function createSimulatedTrade(data: {
   const result = await database
     .insert(schema.simulatedTrades)
     .values({
-      eventId: data.eventId ?? null,
-      eventSlug: data.eventSlug ?? null,
-      eventTitle: data.eventTitle ?? null,
-      marketId: data.marketId ?? null,
-      marketSlug: data.marketSlug ?? null,
-      marketQuestion: data.marketQuestion ?? null,
-      deadline: data.deadline ?? null,
-      deadlineDate: data.deadlineDate ?? null,
+      campaignId: data.campaignId ?? null,
+      campaignSlug: data.campaignSlug ?? null,
+      campaignTitle: data.campaignTitle ?? null,
+      bucketId: data.bucketId ?? null,
+      bucketGroupTitle: data.bucketGroupTitle ?? null,
       tokenId: data.tokenId,
       entryTs: data.entryTs,
       entryPrice: data.entryPrice,
@@ -173,6 +168,7 @@ export async function createSimulatedTrade(data: {
       entryFees: data.entryFees ?? "0",
       fillStatus: data.fillStatus ?? "FULL",
       expectedNetProfit: data.expectedNetProfit ?? null,
+      expectedReturnPercent: data.expectedReturnPercent ?? null,
       noBestBidAtEntry: data.noBestBidAtEntry ?? null,
       noBestAskAtEntry: data.noBestAskAtEntry ?? null,
       depthAtLimit: data.depthAtLimit ?? null,

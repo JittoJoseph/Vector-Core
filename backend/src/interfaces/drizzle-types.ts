@@ -1,14 +1,16 @@
 import type { InferSelectModel } from "drizzle-orm";
 import type {
   simulatedTrades,
-  deadlineMarkets,
-  eventFamilies,
+  distributionBuckets,
+  distributionCampaigns,
   auditLogs,
   portfolio,
+  opportunities,
 } from "../db/schema.js";
 
 export type SimulatedTrade = InferSelectModel<typeof simulatedTrades>;
-export type Market = InferSelectModel<typeof deadlineMarkets>;
-export type EventFamily = InferSelectModel<typeof eventFamilies>;
+export type DistributionBucket = InferSelectModel<typeof distributionBuckets>;
+export type DistributionCampaign = InferSelectModel<typeof distributionCampaigns>;
 export type AuditLog = InferSelectModel<typeof auditLogs>;
 export type Portfolio = InferSelectModel<typeof portfolio>;
+export type Opportunity = InferSelectModel<typeof opportunities>;

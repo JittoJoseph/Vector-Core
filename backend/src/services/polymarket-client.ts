@@ -71,6 +71,7 @@ export class PolymarketClient {
     ascending?: boolean;
     active?: boolean;
     closed?: boolean;
+    tag_id?: string;
   }): Promise<{ events: GammaEvent[]; nextCursor: string | null }> {
     return withRetry(
       async () => {
@@ -82,6 +83,9 @@ export class PolymarketClient {
         params.set("ascending", String(options.ascending ?? false));
         if (options.after_cursor) {
           params.set("after_cursor", options.after_cursor);
+        }
+        if (options.tag_id) {
+          params.set("tag_id", options.tag_id);
         }
 
         const response = await this.gammaApi.get("/events/keyset", { params });

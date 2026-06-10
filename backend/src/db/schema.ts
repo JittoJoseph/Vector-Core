@@ -11,55 +11,35 @@ import {
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
-export const eventFamilies = pgTable(
-  "event_families",
+export const distributionCampaigns = pgTable(
+  "distribution_campaigns",
   {
-    id: text("id").primaryKey(),
+    id: text("id").primaryKey(), // Polymarket event ID
     slug: text("slug").notNull(),
     title: text("title").notNull(),
-    normalizedKey: text("normalized_key").notNull(),
-    familyKind: text("family_kind").notNull().default("single_deadline"),
-    explicitDateCount: integer("explicit_date_count").default(0).notNull(),
+    seriesSlug: text("series_slug"), // e.g. "elon-tweets"
+    startDate: timestamp("start_date"),
+    endDate: timestamp("end_date"),
     active: boolean("active").default(true).notNull(),
     closed: boolean("closed").default(false).notNull(),
-    liquidity: decimal("liquidity", { precision: 18, scale: 8 }).default("0"),
-    volume24h: decimal("volume_24h", { precision: 18, scale: 8 }).default("0"),
     lastFetchedAt: timestamp("last_fetched_at").defaultNow().notNull(),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
   },
   (table) => ({
-    slugIdx: uniqueIndex("event_families_slug_idx").on(table.slug),
-    kindIdx: index("event_families_kind_idx").on(table.familyKind),
-    updatedAtIdx: index("event_families_updated_at_idx").on(table.updatedAt),
+    slugIdx: uniqueIndex("dc_slug_idx").on(table.slug),
+    seriesIdx: index("dc_series_idx").on(table.seriesSlug),
+    updatedAtIdx: index("dc_updated_at_idx").on(table.updatedAt),
   }),
 );
 
-export const deadlineMarkets = pgTable(
-  "deadline_markets",
+export const distributionBuckets = pgTable(
+  "distribution_buckets",
   {
-    id: text("id").primaryKey(),
-    eventId: text("event_id").notNull(),
-    eventSlug: text("event_slug").notNull(),
-    eventTitle: text("event_title").notNull(),
+    id: text("id").primaryKey(), // Polymarket market ID
+    campaignId: text("campaign_id").notNull(),
     conditionId: text("condition_id"),
-    slug: text("slug"),
-    question: text("question").notNull(),
-    underlyingKey: text("underlying_key").notNull(),
-    deadline: timestamp("deadline").notNull(),
-    deadlineDate: text("deadline_date").notNull(),
-    familyKind: text("family_kind").notNull(),
-    classificationStatus: text("classification_status").notNull(),
-    rejectionReason: text("rejection_reason"),
-    active: boolean("active").default(true).notNull(),
-    closed: boolean("closed").default(false).notNull(),
-    acceptingOrders: boolean("accepting_orders").default(false).notNull(),
-    enableOrderBook: boolean("enable_order_book").default(false).notNull(),
-    negRisk: boolean("neg_risk").default(false).notNull(),
-    negRiskOther: boolean("neg_risk_other").default(false).notNull(),
-    frozenPrices: jsonb("frozen_prices"),
-    outcomes: jsonb("outcomes").notNull(),
-    clobTokenIds: jsonb("clob_token_ids").notNull(),
+    groupItemTitle: text("group_item_title").notNull(), // e.g., "180-199"
     yesTokenId: text("yes_token_id").notNull(),
     noTokenId: text("no_token_id").notNull(),
     yesPrice: decimal("yes_price", { precision: 18, scale: 8 }),
@@ -67,43 +47,34 @@ export const deadlineMarkets = pgTable(
     spread: decimal("spread", { precision: 18, scale: 8 }),
     liquidityNum: decimal("liquidity_num", { precision: 18, scale: 8 }),
     volume24h: decimal("volume_24h", { precision: 18, scale: 8 }),
-    orderMinSize: decimal("order_min_size", { precision: 18, scale: 8 }),
-    orderTickSize: decimal("order_tick_size", { precision: 18, scale: 8 }),
-    feesEnabled: boolean("fees_enabled").default(false).notNull(),
-    feeSchedule: jsonb("fee_schedule"),
-    resolutionRules: text("resolution_rules"),
-    resolutionSource: text("resolution_source"),
-    umaResolutionStatus: text("uma_resolution_status"),
     lastFetchedAt: timestamp("last_fetched_at").defaultNow().notNull(),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
   },
   (table) => ({
-    eventIdx: index("deadline_markets_event_idx").on(table.eventId),
-    deadlineIdx: index("deadline_markets_deadline_idx").on(table.deadline),
-    statusIdx: index("deadline_markets_status_idx").on(
-      table.classificationStatus,
-    ),
-    noTokenIdx: index("deadline_markets_no_token_idx").on(table.noTokenId),
+    campaignIdx: index("db_campaign_idx").on(table.campaignId),
+    noTokenIdx: index("db_no_token_idx").on(table.noTokenId),
   }),
 );
 
 export const opportunities = pgTable(
   "opportunities",
   {
-    marketId: text("market_id").primaryKey(),
-    eventId: text("event_id").notNull(),
+    bucketId: text("bucket_id").primaryKey(),
+    campaignId: text("campaign_id").notNull(),
     noTokenId: text("no_token_id").notNull(),
     status: text("status").notNull(),
     reason: text("reason"),
-    deadline: timestamp("deadline").notNull(),
-    daysToDeadline: decimal("days_to_deadline", { precision: 18, scale: 8 }),
     noPrice: decimal("no_price", { precision: 18, scale: 8 }),
     noBestBid: decimal("no_best_bid", { precision: 18, scale: 8 }),
     noBestAsk: decimal("no_best_ask", { precision: 18, scale: 8 }),
     spread: decimal("spread", { precision: 18, scale: 8 }),
     depthAtLimit: decimal("depth_at_limit", { precision: 18, scale: 8 }),
     expectedNetProfit: decimal("expected_net_profit", {
+      precision: 18,
+      scale: 8,
+    }),
+    expectedReturnPercent: decimal("expected_return_percent", {
       precision: 18,
       scale: 8,
     }),
@@ -132,14 +103,11 @@ export const simulatedTrades = pgTable(
     id: text("id")
       .primaryKey()
       .$defaultFn(() => crypto.randomUUID()),
-    eventId: text("event_id"),
-    eventSlug: text("event_slug"),
-    eventTitle: text("event_title"),
-    marketId: text("market_id"),
-    marketSlug: text("market_slug"),
-    marketQuestion: text("market_question"),
-    deadline: timestamp("deadline"),
-    deadlineDate: text("deadline_date"),
+    campaignId: text("campaign_id"),
+    campaignSlug: text("campaign_slug"),
+    campaignTitle: text("campaign_title"),
+    bucketId: text("bucket_id"),
+    bucketGroupTitle: text("bucket_group_title"),
     tokenId: text("token_id"),
     outcomeLabel: text("outcome_label").default("No").notNull(),
     side: text("side").default("BUY").notNull(),
@@ -155,6 +123,10 @@ export const simulatedTrades = pgTable(
     entryFees: decimal("entry_fees", { precision: 18, scale: 8 }).default("0"),
     fillStatus: text("fill_status").default("FULL"),
     expectedNetProfit: decimal("expected_net_profit", {
+      precision: 18,
+      scale: 8,
+    }),
+    expectedReturnPercent: decimal("expected_return_percent", {
       precision: 18,
       scale: 8,
     }),
@@ -178,11 +150,11 @@ export const simulatedTrades = pgTable(
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
   },
   (table) => ({
-    marketIdIdx: index("st_market_id_idx").on(table.marketId),
+    bucketIdIdx: index("st_bucket_id_idx").on(table.bucketId),
     statusIdx: index("st_status_idx").on(table.status),
     entryTsIdx: index("st_entry_ts_idx").on(table.entryTs),
-    uqOpenTradePerToken: uniqueIndex("uq_open_trade_per_deadline_token")
-      .on(table.marketId, table.tokenId)
+    uqOpenTradePerToken: uniqueIndex("uq_open_trade_per_bucket_token")
+      .on(table.bucketId, table.tokenId)
       .where(sql`status = 'OPEN'`),
   }),
 );

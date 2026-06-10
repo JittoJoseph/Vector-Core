@@ -1,6 +1,7 @@
 export type {
   SimulatedTrade,
-  Market,
+  DistributionBucket,
+  DistributionCampaign,
   AuditLog,
   Portfolio,
 } from "./drizzle-types.js";

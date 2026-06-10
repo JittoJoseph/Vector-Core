@@ -1,11 +1,10 @@
 import { EventEmitter } from "events";
-import { and, desc, eq, gte, sql, inArray } from "drizzle-orm";
+import { and, desc, eq, sql, inArray } from "drizzle-orm";
 import { createModuleLogger } from "../utils/logger.js";
 import { getConfig } from "../utils/config.js";
-import { getDb, createSimulatedTrade, loadOpenTradesWithMarkets, logAudit, resolveTrade, wipeAndResetPortfolio } from "../db/client.js";
+import { getDb, createSimulatedTrade, loadOpenTradesWithBuckets, logAudit, resolveTrade, wipeAndResetPortfolio } from "../db/client.js";
 import * as schema from "../db/schema.js";
 import { getPolymarketClient, PolymarketClient } from "./polymarket-client.js";
-import { classifyEvent } from "./deadline-classifier.js";
 import { PortfolioManager } from "./portfolio-manager.js";
 import {
   calculateExpectedNetProfit,
@@ -19,43 +18,48 @@ import {
   getMarketWebSocketWatcher,
   MarketWebSocketWatcher,
 } from "./market-ws-watcher.js";
-import type { ClassifiedMarket, FeeSchedule, GammaEvent, GammaMarket } from "../types/index.js";
+import type { FeeSchedule, GammaEvent, GammaMarket } from "../types/index.js";
 import type { MarketResolvedEvent } from "../interfaces/websocket-types.js";
 
-const logger = createModuleLogger("market-orchestrator");
+const logger = createModuleLogger("distribution-orchestrator");
 
-interface TrackedMarket {
-  marketId: string;
-  eventId: string;
-  eventSlug: string;
-  eventTitle: string;
-  question: string;
-  slug: string | null;
-  conditionId: string | null;
-  deadline: Date;
-  deadlineDate: string;
+export function parseBucketMinMax(title: string): [number, number] {
+  if (title.includes("+")) {
+    const val = parseFloat(title.replace("+", ""));
+    return [val, Infinity];
+  }
+  if (title.includes("-")) {
+    const parts = title.split("-");
+    return [parseFloat(parts[0] ?? "0"), parseFloat(parts[1] ?? "0")];
+  }
+  const val = parseFloat(title);
+  return [val, val];
+}
+
+interface TrackedBucket {
+  bucketId: string;
+  campaignId: string;
+  groupItemTitle: string;
   noTokenId: string;
   yesTokenId: string;
   noPrice: number | null;
   feeSchedule: FeeSchedule | null;
-  resolutionRules: string | null;
   lastPrices: Record<string, { bid: number; ask: number; mid: number }>;
-  frozenPrices: Record<string, { bid: number; ask: number; mid: number }> | null;
   resolved: boolean;
+  endDate: Date | null;
 }
-
-export type MarketLifecycle = "OPEN" | "AWAITING_RESOLUTION" | "RESOLVED";
 
 interface OpenPosition {
   tradeId: string;
-  marketId: string;
+  bucketId: string;
   tokenId: string;
   entryPrice: number;
   entryShares: number;
   fees: number;
   actualCost: number;
-  deadline: Date | null;
 }
+
+export type MarketLifecycle = "OPEN" | "AWAITING_RESOLUTION" | "RESOLVED";
 
 export class MarketOrchestrator extends EventEmitter {
   private client = getPolymarketClient();
@@ -64,78 +68,58 @@ export class MarketOrchestrator extends EventEmitter {
 
   private scanTimer: ReturnType<typeof setInterval> | null = null;
   private settlementTimer: ReturnType<typeof setInterval> | null = null;
-  private lifecycleTimer: ReturnType<typeof setInterval> | null = null;
-  private trackedMarkets = new Map<string, TrackedMarket>();
-  private tokenToMarket = new Map<string, string>();
-  private conditionIdToMarket = new Map<string, string>();
+  
+  private trackedBuckets = new Map<string, TrackedBucket>();
+  private tokenToBucket = new Map<string, string>();
+  private conditionIdToBucket = new Map<string, string>();
   private openPositions = new Map<string, OpenPosition>();
   private inFlightTokens = new Set<string>();
+  
   private running = false;
   private paused = false;
   private cycleCount = 0;
-  private discoveredLadders = 0;
+  
+  private discoveredCampaigns = 0;
   private evaluatedOpportunities = 0;
   private consecutiveLossCount = 0;
   private pausedByRiskGuard = false;
   private riskPauseTriggeredAt: number | null = null;
   private riskAutoResumeTimer: ReturnType<typeof setTimeout> | null = null;
-  private evaluatedMarketIds = new Set<string>();
 
   async start(): Promise<void> {
     if (this.running) return;
     this.running = true;
     await this.portfolioManager.init();
-    await this.pruneNonLadderRows();
     await this.loadOpenPositions();
     this.wireEvents();
     this.wsWatcher.start();
     await this.scan();
     const config = getConfig();
     this.scanTimer = setInterval(() => {
-      this.scan().catch((error) =>
-        logger.error({ error }, "Deadline market scan failed"),
-      );
+      this.scan().catch((error) => logger.error({ error }, "Distribution scan failed"));
     }, config.strategy.scanIntervalMs);
     this.settlementTimer = setInterval(() => {
-      this.pollOpenPositionSettlements().catch((error) =>
-        logger.error({ error }, "Settlement polling failed"),
-      );
+      this.pollOpenPositionSettlements().catch((error) => logger.error({ error }, "Settlement polling failed"));
     }, 60_000);
-    this.lifecycleTimer = setInterval(() => {
-      this.checkLifecycleTransitions();
-    }, 1000);
-    logger.info("Explicit-date deadline market orchestrator started");
+    logger.info("Distribution market orchestrator started");
   }
 
   stop(): void {
     this.running = false;
     if (this.scanTimer) clearInterval(this.scanTimer);
     if (this.settlementTimer) clearInterval(this.settlementTimer);
-    if (this.lifecycleTimer) clearInterval(this.lifecycleTimer);
     if (this.riskAutoResumeTimer) clearTimeout(this.riskAutoResumeTimer);
     this.scanTimer = null;
     this.settlementTimer = null;
-    this.lifecycleTimer = null;
     this.wsWatcher.stop();
-    logger.info("Deadline market orchestrator stopped");
+    logger.info("Distribution market orchestrator stopped");
   }
 
   pause(): void {
     this.paused = true;
-    if (this.scanTimer) {
-      clearInterval(this.scanTimer);
-      this.scanTimer = null;
-    }
-    if (this.settlementTimer) {
-      clearInterval(this.settlementTimer);
-      this.settlementTimer = null;
-    }
-    if (this.lifecycleTimer) {
-      clearInterval(this.lifecycleTimer);
-      this.lifecycleTimer = null;
-    }
+    if (this.scanTimer) { clearInterval(this.scanTimer); this.scanTimer = null; }
+    if (this.settlementTimer) { clearInterval(this.settlementTimer); this.settlementTimer = null; }
     this.wsWatcher.stop();
-    logger.warn("System paused — discovery, settlement polling, and WS stopped");
   }
 
   async resume(): Promise<void> {
@@ -144,111 +128,58 @@ export class MarketOrchestrator extends EventEmitter {
     this.pausedByRiskGuard = false;
     this.riskPauseTriggeredAt = null;
     this.consecutiveLossCount = 0;
-    
     this.wsWatcher.start();
     await this.portfolioManager.reload();
     await this.scan();
-    
     const config = getConfig();
-    if (!this.scanTimer) {
-      this.scanTimer = setInterval(() => {
-        this.scan().catch((error) =>
-          logger.error({ error }, "Deadline market scan failed"),
-        );
-      }, config.strategy.scanIntervalMs);
-    }
-    if (!this.settlementTimer) {
-      this.settlementTimer = setInterval(() => {
-        this.pollOpenPositionSettlements().catch((error) =>
-          logger.error({ error }, "Settlement polling failed"),
-        );
-      }, 60_000);
-    }
-    if (!this.lifecycleTimer) {
-      this.lifecycleTimer = setInterval(() => {
-        this.checkLifecycleTransitions();
-      }, 1000);
-    }
-    logger.info("System resumed");
+    if (!this.scanTimer) this.scanTimer = setInterval(() => this.scan().catch(console.error), config.strategy.scanIntervalMs);
+    if (!this.settlementTimer) this.settlementTimer = setInterval(() => this.pollOpenPositionSettlements().catch(console.error), 60_000);
   }
 
   async wipe(): Promise<void> {
     this.pause();
-    
     const config = getConfig();
     await wipeAndResetPortfolio(config.portfolio.startingCapital);
-    
-    this.trackedMarkets.clear();
-    this.tokenToMarket.clear();
-    this.conditionIdToMarket.clear();
+    this.trackedBuckets.clear();
+    this.tokenToBucket.clear();
+    this.conditionIdToBucket.clear();
     this.openPositions.clear();
     this.inFlightTokens.clear();
-    this.evaluatedMarketIds.clear();
     this.wsWatcher.clear();
-
     this.cycleCount = 0;
-    this.discoveredLadders = 0;
+    this.discoveredCampaigns = 0;
     this.evaluatedOpportunities = 0;
     this.consecutiveLossCount = 0;
     this.pausedByRiskGuard = false;
     this.riskPauseTriggeredAt = null;
-
-    logger.warn("System wiped, portfolio reset, and engine paused.");
   }
 
-  isPaused(): boolean {
-    return this.paused;
-  }
+  isPaused(): boolean { return this.paused; }
 
   getStats() {
-    const config = getConfig();
     return {
       running: this.running,
       paused: this.paused,
-      activeMarkets: this.trackedMarkets.size,
+      activeBuckets: this.trackedBuckets.size,
       openPositions: this.openPositions.size,
       cycleCount: this.cycleCount,
-      scanner: {
-        discoveredLadders: this.discoveredLadders,
-        evaluatedOpportunities: this.evaluatedOpportunities,
-      },
+      scanner: { discoveredCampaigns: this.discoveredCampaigns, evaluatedOpportunities: this.evaluatedOpportunities },
       ws: this.wsWatcher.getStats(),
-      strategy: {
-        watchedTokens: this.tokenToMarket.size,
-        triggersCount: this.cycleCount,
-        evaluatedTokens: this.evaluatedMarketIds.size,
-      },
-      risk: {
-        consecutiveLossCount: this.consecutiveLossCount,
-        consecutiveLossPauseLimit: config.strategy.consecutiveLossPauseLimit,
-        pausedByRiskGuard: this.pausedByRiskGuard,
-        riskPauseTriggeredAt: this.riskPauseTriggeredAt,
-      },
+      risk: { consecutiveLossCount: this.consecutiveLossCount, pausedByRiskGuard: this.pausedByRiskGuard },
     };
   }
 
   getLiveMarkets() {
-    const now = Date.now();
-    return Array.from(this.trackedMarkets.values())
-      .sort((a, b) => new Date(a.deadline).getTime() - new Date(b.deadline).getTime())
-      .map((m) => ({
-        marketId: m.marketId,
-        eventId: m.eventId,
-        eventSlug: m.eventSlug,
-        eventTitle: m.eventTitle,
-        question: m.question,
-        slug: m.slug,
-        deadline: new Date(m.deadline).toISOString(),
-        deadlineDate: m.deadlineDate,
-        yesTokenId: m.yesTokenId,
-        noTokenId: m.noTokenId,
-        noPrice: m.noPrice,
-        markPrice: m.frozenPrices ?? { ...m.lastPrices }, // unified mark price
-        status: this.getMarketLifecycle(m),
-        hasPosition: Array.from(this.openPositions.values()).some(
-          (p) => p.marketId === m.marketId,
-        ),
-      }));
+    return Array.from(this.trackedBuckets.values()).map((b) => ({
+      marketId: b.bucketId,
+      eventId: b.campaignId,
+      question: b.groupItemTitle,
+      noTokenId: b.noTokenId,
+      yesTokenId: b.yesTokenId,
+      noPrice: b.noPrice,
+      markPrice: b.lastPrices,
+      status: b.resolved ? "RESOLVED" : "OPEN",
+    }));
   }
 
   computeOpenPositionsValue(): number {
@@ -258,556 +189,283 @@ export class MarketOrchestrator extends EventEmitter {
   }
 
   private wireEvents(): void {
-    this.wsWatcher.on("priceUpdate", (ev) =>
-      this.onTokenPriceUpdate(ev.tokenId, parseFloat(ev.bestBid), parseFloat(ev.bestAsk)),
-    );
-    this.wsWatcher.on("bestBidAskUpdate", (ev) =>
-      this.onTokenPriceUpdate(ev.tokenId, parseFloat(ev.bestBid), parseFloat(ev.bestAsk)),
-    );
-    this.wsWatcher.on("marketResolved", (ev: MarketResolvedEvent) =>
-      this.onMarketResolved(ev).catch((error) =>
-        logger.error({ error }, "WS resolution handling failed"),
-      ),
-    );
-  }
-
-  private async pruneNonLadderRows(): Promise<void> {
-    const db = getDb();
-    await db.execute(sql`
-      DELETE FROM ${schema.opportunities}
-      WHERE market_id IN (
-        SELECT id FROM ${schema.deadlineMarkets}
-        WHERE classification_status NOT IN ('candidate', 'traded')
-           OR family_kind <> 'deadline_ladder'
-      )
-    `);
-    await db.execute(sql`
-      DELETE FROM ${schema.deadlineMarkets}
-      WHERE classification_status NOT IN ('candidate', 'traded')
-         OR family_kind <> 'deadline_ladder'
-    `);
-    await db.execute(sql`
-      DELETE FROM ${schema.eventFamilies}
-      WHERE family_kind <> 'deadline_ladder'
-    `);
+    this.wsWatcher.on("priceUpdate", (ev) => this.onTokenPriceUpdate(ev.tokenId, parseFloat(ev.bestBid), parseFloat(ev.bestAsk)));
+    this.wsWatcher.on("bestBidAskUpdate", (ev) => this.onTokenPriceUpdate(ev.tokenId, parseFloat(ev.bestBid), parseFloat(ev.bestAsk)));
+    this.wsWatcher.on("marketResolved", (ev: MarketResolvedEvent) => this.onMarketResolved(ev).catch(console.error));
   }
 
   async scan(): Promise<void> {
     if (this.paused) return;
-    const config = getConfig();
     this.cycleCount++;
-    let cursor: string | null = null;
-    for (let page = 0; page < config.strategy.discoveryPages; page++) {
+    
+    // Tag 972 = Tweet Markets
+    const result = await this.client.listEventsKeyset({
+      limit: 100,
+      active: true,
+      closed: false,
+      tag_id: "972",
+    });
+    
+    const db = getDb();
+    
+    for (const event of result.events) {
       if (this.paused) break;
-      const result = await this.client.listEventsKeyset({
-        limit: 100,
-        after_cursor: cursor ?? undefined,
-        active: true,
-        closed: false,
-        order: "volume24hr",
-        ascending: false,
-      });
-      
-      const pageEvents = result.events;
-      if (pageEvents.length > 0) {
-        const db = getDb();
-        const eventIds = pageEvents.map((e) => String(e.id));
-        
-        // Pre-fetch the latest updated_at from DB for all discovered events in one query
-        const existing = await db
-          .select({
-            id: schema.eventFamilies.id,
-            updatedAt: schema.eventFamilies.updatedAt,
-          })
-          .from(schema.eventFamilies)
-          .where(inArray(schema.eventFamilies.id, eventIds));
-          
-        const existingUpdates = new Map(existing.map((row) => [row.id, row.updatedAt]));
-        
-        // Filter out events that haven't changed since last scan
-        const changedEvents = pageEvents.filter((e) => {
-          const currentUpdatedAt = e.updatedAt ? new Date(e.updatedAt).getTime() : 0;
-          const dbUpdatedAt = existingUpdates.get(String(e.id))?.getTime() ?? 0;
-          return dbUpdatedAt !== currentUpdatedAt;
-        });
-
-        for (const event of changedEvents) {
-          if (this.paused) break;
-          await this.persistClassifiedEvent(event);
-        }
-      }
-
-      cursor = result.nextCursor;
-      if (!cursor) break;
+      if (!event.negRisk) continue; // Must be a multi-outcome campaign
+      await this.persistCampaign(event);
     }
-
+    
     if (this.paused) return;
 
-    // Update real metrics from DB
+    const campaignsCount = await db.select({ count: sql<number>`count(*)` }).from(schema.distributionCampaigns);
+    const bucketsCount = await db.select({ count: sql<number>`count(*)` }).from(schema.distributionBuckets);
+    this.discoveredCampaigns = campaignsCount[0]?.count ?? 0;
+    this.evaluatedOpportunities = bucketsCount[0]?.count ?? 0;
+
+    await this.evaluateOpportunities();
+  }
+
+  private async persistCampaign(event: GammaEvent): Promise<void> {
     const db = getDb();
-    const familiesCount = await db.select({ count: sql<number>`count(*)` }).from(schema.eventFamilies);
-    const marketsCount = await db
-      .select({ count: sql<number>`count(*)` })
-      .from(schema.deadlineMarkets)
-      .where(eq(schema.deadlineMarkets.classificationStatus, "candidate"));
-
-    this.discoveredLadders = familiesCount[0]?.count ?? 0;
-    this.evaluatedOpportunities = marketsCount[0]?.count ?? 0;
-
-    await this.evaluateTradeCandidates();
-    this.cleanupTrackedMarkets();
-  }
-
-  private cleanupTrackedMarkets(): void {
-    const toUntrack: string[] = [];
-
-    for (const [marketId, state] of this.trackedMarkets.entries()) {
-      const hasPosition = Array.from(this.openPositions.values()).some((p) => p.marketId === marketId);
-      if (!hasPosition) {
-        toUntrack.push(marketId);
-      }
-    }
-
-    for (const marketId of toUntrack) {
-      this.untrackMarket(marketId);
-    }
-
-    const mem = process.memoryUsage();
-    logger.info(
-      {
-        heapUsedMb: Math.round(mem.heapUsed / 1024 / 1024),
-        heapTotalMb: Math.round(mem.heapTotal / 1024 / 1024),
-        trackedMarkets: this.trackedMarkets.size,
-        openPositions: this.openPositions.size,
-      },
-      "Memory & State Audit",
-    );
-  }
-
-  private untrackMarket(marketId: string): void {
-    const state = this.trackedMarkets.get(marketId);
-    if (!state) return;
-    
-    this.wsWatcher.unsubscribe([state.noTokenId]);
-    this.tokenToMarket.delete(state.noTokenId);
-    if (state.conditionId) this.conditionIdToMarket.delete(state.conditionId);
-    this.trackedMarkets.delete(marketId);
-    logger.info({ marketId, question: state.question }, "Untracked market (no longer eligible)");
-  }
-
-  private async persistClassifiedEvent(event: GammaEvent): Promise<void> {
-    const db = getDb();
-    const classified = classifyEvent(event);
-    if (classified.length === 0) return;
-
-    const uniqueDates = new Set(classified.map((m) => m.deadlineDate));
-    const familyKind = "deadline_ladder";
     const eventId = String(event.id);
-    const eventSlug = event.slug ?? eventId;
-    const eventTitle = event.title ?? eventSlug;
-    const normalizedKey = eventTitle.toLowerCase().replace(/\s+/g, " ").trim();
-    const eventSummary = {
+    
+    await db.insert(schema.distributionCampaigns).values({
       id: eventId,
-      slug: eventSlug,
-      title: eventTitle,
+      slug: event.slug ?? eventId,
+      title: event.title ?? eventId,
+      seriesSlug: (event as any).seriesSlug ?? null,
+      startDate: event.startDate ? new Date(event.startDate) : null,
+      endDate: event.endDate ? new Date(event.endDate) : null,
       active: event.active ?? true,
       closed: event.closed ?? false,
-      liquidity: event.liquidityClob ?? event.liquidity ?? 0,
-      volume24hr: event.volume24hr ?? 0,
-      updatedAt: event.updatedAt ?? null,
-    };
-
-    await db
-      .insert(schema.eventFamilies)
-      .values({
-        id: eventId,
-        slug: eventSlug,
-        title: eventTitle,
-        normalizedKey,
-        familyKind,
-        explicitDateCount: uniqueDates.size,
-        active: event.active ?? true,
-        closed: event.closed ?? false,
-        liquidity: String(event.liquidityClob ?? event.liquidity ?? 0),
-        volume24h: String(event.volume24hr ?? 0),
-        lastFetchedAt: new Date(),
-        updatedAt: event.updatedAt ? new Date(event.updatedAt) : new Date(),
-      })
-      .onConflictDoUpdate({
-        target: schema.eventFamilies.id,
-        set: {
-          title: eventTitle,
-          familyKind,
-          explicitDateCount: uniqueDates.size,
-          active: event.active ?? true,
-          closed: event.closed ?? false,
-          liquidity: String(event.liquidityClob ?? event.liquidity ?? 0),
-          volume24h: String(event.volume24hr ?? 0),
-          lastFetchedAt: new Date(),
-          updatedAt: event.updatedAt ? new Date(event.updatedAt) : new Date(),
-        },
-      });
-
-    for (const item of classified) {
-      await this.persistClassifiedMarket(item);
-    }
-  }
-
-  private async persistClassifiedMarket(item: ClassifiedMarket): Promise<void> {
-    const db = getDb();
-    const m = item.market;
-    const classificationStatus = "candidate";
-
-    await db
-      .insert(schema.deadlineMarkets)
-      .values({
-        id: m.id,
-        eventId: item.eventId,
-        eventSlug: item.eventSlug,
-        eventTitle: item.eventTitle,
-        conditionId: m.conditionId ?? null,
-        slug: m.slug ?? null,
-        question: m.question ?? "",
-        underlyingKey: item.underlyingKey,
-        deadline: item.deadline,
-        deadlineDate: item.deadlineDate,
-        familyKind: item.familyKind,
-        classificationStatus,
-        rejectionReason: item.rejectionReason,
-        active: m.active ?? true,
-        closed: m.closed ?? false,
-        acceptingOrders: m.acceptingOrders ?? false,
-        enableOrderBook: m.enableOrderBook ?? false,
-        negRisk: m.negRisk ?? false,
-        negRiskOther: m.negRiskOther ?? false,
-        outcomes: item.outcomes as any,
-        clobTokenIds: [item.yesTokenId, item.noTokenId] as any,
-        yesTokenId: item.yesTokenId,
-        noTokenId: item.noTokenId,
-        yesPrice: item.outcomePrices[0]?.toString() ?? null,
-        noPrice: item.noPrice?.toString() ?? null,
-        spread: m.spread?.toString() ?? null,
-        liquidityNum: (m.liquidityNum ?? 0).toString(),
-        volume24h: (m.volume24hr ?? 0).toString(),
-        orderMinSize: m.orderMinSize?.toString() ?? null,
-        orderTickSize: m.orderPriceMinTickSize?.toString() ?? null,
-        feesEnabled: m.feesEnabled ?? false,
-        feeSchedule: (m.feeSchedule ?? null) as any,
-        resolutionRules: m.description ?? null,
-        resolutionSource: m.resolutionSource ?? null,
-        umaResolutionStatus: m.umaResolutionStatus ?? null,
-        lastFetchedAt: new Date(),
-        updatedAt: new Date(),
-      })
-      .onConflictDoUpdate({
-        target: schema.deadlineMarkets.id,
-        set: {
-          eventTitle: item.eventTitle,
-          deadline: item.deadline,
-          deadlineDate: item.deadlineDate,
-          familyKind: item.familyKind,
-          classificationStatus,
-          rejectionReason: item.rejectionReason,
-          active: m.active ?? true,
-          closed: m.closed ?? false,
-          acceptingOrders: m.acceptingOrders ?? false,
-          enableOrderBook: m.enableOrderBook ?? false,
-          noPrice: item.noPrice?.toString() ?? null,
-          spread: m.spread?.toString() ?? null,
-          liquidityNum: (m.liquidityNum ?? 0).toString(),
-          volume24h: (m.volume24hr ?? 0).toString(),
-          feeSchedule: (m.feeSchedule ?? null) as any,
-          lastFetchedAt: new Date(),
-          updatedAt: new Date(),
-        },
-      });
-  }
-
-  private async evaluateTradeCandidates(): Promise<void> {
-    const config = getConfig();
-    const db = getDb();
-    const now = new Date();
-    const maxDeadline = new Date(
-      now.getTime() + config.strategy.deadlineLookaheadDays * 24 * 60 * 60 * 1000,
-    );
-    const rows = await db
-      .select()
-      .from(schema.deadlineMarkets)
-      .where(
-        and(
-          eq(schema.deadlineMarkets.classificationStatus, "candidate"),
-          eq(schema.deadlineMarkets.closed, false),
-          eq(schema.deadlineMarkets.acceptingOrders, true),
-          gte(schema.deadlineMarkets.deadline, config.strategy.allowPostDeadlineEntries ? new Date(0) : now),
-        ),
-      )
-      .orderBy(schema.deadlineMarkets.deadline)
-      .limit(100);
-
-    this.evaluatedMarketIds.clear();
-
-    for (const market of rows) {
-      if (this.paused) break;
-      if (new Date(market.deadline).getTime() > maxDeadline.getTime()) continue;
-      
-      this.evaluatedMarketIds.add(market.id);
-
-      const hasMaxPositions = this.openPositions.size >= config.strategy.maxSimultaneousPositions;
-      if (!config.portfolio.allowNegativeBalance && hasMaxPositions) continue;
-      if (this.inFlightTokens.has(market.noTokenId)) continue;
-      if ([...this.openPositions.values()].some((p) => p.marketId === market.id)) continue;
-      await this.evaluateCandidate(market);
-    }
-  }
-
-  private async evaluateCandidate(market: typeof schema.deadlineMarkets.$inferSelect): Promise<void> {
-    const config = getConfig();
-    this.inFlightTokens.add(market.noTokenId);
-    try {
-      const db = getDb();
-      const noPrice = market.noPrice ? parseFloat(market.noPrice) : null;
-      if (noPrice == null || noPrice < config.strategy.minNoEntryPrice || noPrice > config.strategy.maxNoEntryPrice) {
-        await this.recordOpportunity(market, "rejected", "no_price_outside_entry_band");
-        return;
-      }
-      if (parseFloat(market.liquidityNum ?? "0") < config.strategy.minLiquidityNum) {
-        await this.recordOpportunity(market, "rejected", "insufficient_gamma_liquidity");
-        return;
-      }
-      if (parseFloat(market.volume24h ?? "0") < config.strategy.minVolume24h) {
-        await this.recordOpportunity(market, "rejected", "insufficient_24h_volume");
-        return;
-      }
-
-      const { data: book } = await this.client.getOrderbook(market.noTokenId);
-      const top = getTopOfBook(book);
-      if (top.bestBid == null || top.bestAsk == null || top.spread == null) {
-        await this.recordOpportunity(market, "rejected", "empty_no_orderbook");
-        return;
-      }
-      if (top.bestAsk < config.strategy.minNoEntryPrice || top.bestAsk > config.strategy.maxNoEntryPrice) {
-        await this.recordOpportunity(market, "rejected", "no_best_ask_outside_entry_band", top);
-        return;
-      }
-      if (top.spread > config.strategy.maxSpread) {
-        await this.recordOpportunity(market, "rejected", "spread_too_wide", top);
-        return;
-      }
-
-      const depthAtLimit = estimateDepthAtOrBelow(book, config.strategy.maxNoEntryPrice);
-      const budget = this.portfolioManager.computePositionBudget(this.computeOpenPositionsValue());
-      if (budget <= 0) {
-        await this.recordOpportunity(market, "rejected", "insufficient_cash", top, depthAtLimit);
-        return;
-      }
-
-      const feeSchedule = (market.feeSchedule as FeeSchedule | null) ?? null;
-      const fill = simulateLimitBuy(book, budget, config.strategy.maxNoEntryPrice, feeSchedule);
-      if (fill.totalShares <= 0 || fill.belowMinimumOrderSize) {
-        await this.recordOpportunity(market, "rejected", "insufficient_fill_size", top, depthAtLimit);
-        return;
-      }
-
-      const expectedNetProfit = calculateExpectedNetProfit(fill);
-      if (expectedNetProfit < config.strategy.minExpectedNetProfit) {
-        await this.recordOpportunity(
-          market,
-          "rejected",
-          "expected_profit_below_threshold",
-          top,
-          depthAtLimit,
-          expectedNetProfit,
-        );
-        return;
-      }
-
-      const deducted = await this.portfolioManager.deductCash(fill.netCost);
-      if (!deducted) {
-        await this.recordOpportunity(market, "rejected", "cash_deduction_failed", top, depthAtLimit);
-        return;
-      }
-
-      const trade = await createSimulatedTrade({
-        eventId: market.eventId,
-        eventSlug: market.eventSlug,
-        eventTitle: market.eventTitle,
-        marketId: market.id,
-        marketSlug: market.slug,
-        marketQuestion: market.question,
-        deadline: market.deadline,
-        deadlineDate: market.deadlineDate,
-        tokenId: market.noTokenId,
-        entryTs: new Date(),
-        entryPrice: fill.averagePrice.toFixed(8),
-        entryShares: fill.totalShares.toFixed(8),
-        positionBudget: budget.toFixed(8),
-        actualCost: fill.netCost.toFixed(8),
-        entryFees: fill.fees.toFixed(8),
-        fillStatus: fill.isPartialFill ? "PARTIAL" : "FULL",
-        expectedNetProfit: expectedNetProfit.toFixed(8),
-        noBestBidAtEntry: top.bestBid.toFixed(8),
-        noBestAskAtEntry: top.bestAsk.toFixed(8),
-        depthAtLimit: depthAtLimit.toFixed(8),
-        orderbookSnapshot: fill.orderbookSnapshot,
-      });
-      if (!trade) throw new Error("Trade insert did not return a row");
-
-      this.openPositions.set(trade.id, {
-        tradeId: trade.id,
-        marketId: market.id,
-        tokenId: market.noTokenId,
-        entryPrice: fill.averagePrice,
-        entryShares: fill.totalShares,
-        fees: fill.fees,
-        actualCost: fill.netCost,
-        deadline: market.deadline,
-      });
-
-      this.trackMarketFromDb(market);
-
-      await this.recordOpportunity(market, "traded", "trade_opened", top, depthAtLimit, expectedNetProfit);
-      await db.update(schema.deadlineMarkets).set({ classificationStatus: "traded", updatedAt: new Date() }).where(eq(schema.deadlineMarkets.id, market.id));
-      await logAudit("info", "TRADE_OPENED", `Opened simulated NO trade for ${market.question}`, {
-        tradeId: trade.id,
-        marketId: market.id,
-        expectedNetProfit,
-        entryPrice: fill.averagePrice,
-        shares: fill.totalShares,
-      });
-      this.emit("tradeOpened", { trade });
-    } catch (error) {
-      logger.error({ error, marketId: market.id }, "Candidate evaluation failed");
-      await logAudit("error", "OPPORTUNITY_ERROR", `Candidate evaluation failed for ${market.id}`, {
-        error: error instanceof Error ? error.message : String(error),
-      });
-    } finally {
-      this.inFlightTokens.delete(market.noTokenId);
-    }
-  }
-
-  private async recordOpportunity(
-    market: typeof schema.deadlineMarkets.$inferSelect,
-    status: string,
-    reason: string,
-    top?: { bestBid: number | null; bestAsk: number | null; spread: number | null },
-    depthAtLimit?: number,
-    expectedNetProfit?: number,
-  ) {
-    const db = getDb();
-    const days = (new Date(market.deadline).getTime() - Date.now()) / (24 * 60 * 60 * 1000);
-    
-    await db.insert(schema.opportunities).values({
-      marketId: market.id,
-      eventId: market.eventId,
-      noTokenId: market.noTokenId,
-      status,
-      reason,
-      deadline: market.deadline,
-      daysToDeadline: days.toFixed(8),
-      noPrice: market.noPrice,
-      noBestBid: top?.bestBid?.toString() ?? null,
-      noBestAsk: top?.bestAsk?.toString() ?? null,
-      spread: top?.spread?.toString() ?? null,
-      depthAtLimit: depthAtLimit?.toString() ?? null,
-      expectedNetProfit: expectedNetProfit?.toString() ?? null,
-      createdAt: new Date(),
+      lastFetchedAt: new Date(),
       updatedAt: new Date(),
     }).onConflictDoUpdate({
-      target: schema.opportunities.marketId,
+      target: schema.distributionCampaigns.id,
       set: {
-        status,
-        reason,
-        daysToDeadline: days.toFixed(8),
-        noPrice: market.noPrice,
-        noBestBid: top?.bestBid?.toString() ?? null,
-        noBestAsk: top?.bestAsk?.toString() ?? null,
-        spread: top?.spread?.toString() ?? null,
-        depthAtLimit: depthAtLimit?.toString() ?? null,
-        expectedNetProfit: expectedNetProfit?.toString() ?? null,
+        title: event.title ?? eventId,
+        active: event.active ?? true,
+        closed: event.closed ?? false,
+        lastFetchedAt: new Date(),
         updatedAt: new Date(),
       }
     });
+
+    if (event.markets && Array.isArray(event.markets)) {
+      for (const market of event.markets) {
+        if (!market.groupItemTitle) continue;
+        const clobTokenIds = PolymarketClient.parseClobTokenIds(market);
+        if (clobTokenIds.length < 2) continue; // Need Yes and No tokens
+        
+        await db.insert(schema.distributionBuckets).values({
+          id: market.id,
+          campaignId: eventId,
+          conditionId: market.conditionId ?? null,
+          groupItemTitle: market.groupItemTitle,
+          yesTokenId: clobTokenIds[0]!,
+          noTokenId: clobTokenIds[1]!,
+          yesPrice: market.outcomePrices ? JSON.parse(market.outcomePrices)[0] : null,
+          noPrice: market.outcomePrices ? JSON.parse(market.outcomePrices)[1] : null,
+          spread: market.spread?.toString() ?? null,
+          liquidityNum: (market.liquidityNum ?? 0).toString(),
+          volume24h: (market.volumeNum ?? 0).toString(),
+          lastFetchedAt: new Date(),
+          updatedAt: new Date(),
+        }).onConflictDoUpdate({
+          target: schema.distributionBuckets.id,
+          set: {
+            yesPrice: market.outcomePrices ? JSON.parse(market.outcomePrices)[0] : null,
+            noPrice: market.outcomePrices ? JSON.parse(market.outcomePrices)[1] : null,
+            spread: market.spread?.toString() ?? null,
+            liquidityNum: (market.liquidityNum ?? 0).toString(),
+            volume24h: (market.volumeNum ?? 0).toString(),
+            lastFetchedAt: new Date(),
+            updatedAt: new Date(),
+          }
+        });
+        
+        this.trackBucket(market, eventId, clobTokenIds[1]!, clobTokenIds[0]!);
+      }
+    }
   }
 
-  private getMarketLifecycle(state: TrackedMarket): MarketLifecycle {
-    if (state.resolved) return "RESOLVED";
-    if (Date.now() >= new Date(state.deadline).getTime()) return "AWAITING_RESOLUTION";
-    return "OPEN";
+  private trackBucket(market: GammaMarket, campaignId: string, noTokenId: string, yesTokenId: string): void {
+    if (this.trackedBuckets.has(market.id)) return;
+    this.trackedBuckets.set(market.id, {
+      bucketId: market.id,
+      campaignId,
+      groupItemTitle: market.groupItemTitle ?? "",
+      noTokenId,
+      yesTokenId,
+      noPrice: market.outcomePrices ? parseFloat(JSON.parse(market.outcomePrices)[1]) : null,
+      feeSchedule: (market.feeSchedule as FeeSchedule | null) ?? null,
+      lastPrices: {},
+      resolved: false,
+      endDate: market.endDate ? new Date(market.endDate) : null,
+    });
+    this.tokenToBucket.set(noTokenId, market.id);
+    if (market.conditionId) this.conditionIdToBucket.set(market.conditionId, market.id);
+    this.wsWatcher.subscribe([noTokenId]);
   }
 
-  private checkLifecycleTransitions(): void {
-    for (const state of this.trackedMarkets.values()) {
-      if (this.getMarketLifecycle(state) === "AWAITING_RESOLUTION" && !state.frozenPrices) {
-        state.frozenPrices = { ...state.lastPrices };
-        this.persistFrozenPrices(state.marketId, state.frozenPrices).catch(err => 
-          logger.error({ err }, "Failed to persist frozen prices on timer")
-        );
+  private async evaluateOpportunities(): Promise<void> {
+    const config = getConfig();
+    const db = getDb();
+    
+    const campaigns = await db.select().from(schema.distributionCampaigns).where(eq(schema.distributionCampaigns.active, true));
+    
+    interface Candidate {
+      bucket: typeof schema.distributionBuckets.$inferSelect;
+      expectedNetProfit: number;
+      expectedReturnPercent: number;
+      fill: any;
+      top: any;
+      depthAtLimit: number;
+      budget: number;
+    }
+    
+    let allCandidates: Candidate[] = [];
+    
+    for (const campaign of campaigns) {
+      const buckets = await db.select().from(schema.distributionBuckets).where(eq(schema.distributionBuckets.campaignId, campaign.id));
+      if (buckets.length === 0) continue;
+      
+      let modalBucket = buckets[0];
+      let maxYes = parseFloat(buckets[0]?.yesPrice?.toString() ?? "0");
+      for (const b of buckets) {
+        const y = parseFloat(b.yesPrice?.toString() ?? "0");
+        if (y > maxYes) { maxYes = y; modalBucket = b; }
+      }
+      if (!modalBucket) continue;
+      
+      const [modalMin] = parseBucketMinMax(modalBucket.groupItemTitle);
+      
+      for (const bucket of buckets) {
+        const [, bMax] = parseBucketMinMax(bucket.groupItemTitle);
+        // Eligible if strictly below modal bucket
+        if (bMax < modalMin) {
+          const noPrice = parseFloat(bucket.noPrice?.toString() ?? "0");
+          if (noPrice >= config.strategy.minNoEntryPrice && noPrice <= config.strategy.maxNoEntryPrice) {
+            
+            const campaignHasPosition = Array.from(this.openPositions.values()).some(p => {
+               const b = this.trackedBuckets.get(p.bucketId);
+               return b?.campaignId === campaign.id;
+            });
+            if (campaignHasPosition) continue;
+            
+            if (this.inFlightTokens.has(bucket.noTokenId)) continue;
+            
+            const { data: book } = await this.client.getOrderbook(bucket.noTokenId);
+            const top = getTopOfBook(book);
+            if (top.bestAsk == null || top.bestAsk < config.strategy.minNoEntryPrice || top.bestAsk > config.strategy.maxNoEntryPrice) continue;
+            
+            const depthAtLimit = estimateDepthAtOrBelow(book, config.strategy.maxNoEntryPrice);
+            const budget = this.portfolioManager.computePositionBudget(this.computeOpenPositionsValue());
+            if (budget <= 0) continue;
+            
+            const tracked = this.trackedBuckets.get(bucket.id);
+            const fill = simulateLimitBuy(book, budget, config.strategy.maxNoEntryPrice, tracked?.feeSchedule);
+            if (fill.totalShares <= 0 || fill.belowMinimumOrderSize) continue;
+            
+            const expectedNetProfit = calculateExpectedNetProfit(fill);
+            if (expectedNetProfit < config.strategy.minExpectedNetProfit) continue;
+            
+            const expectedReturnPercent = expectedNetProfit / fill.netCost;
+            
+            allCandidates.push({ bucket, expectedNetProfit, expectedReturnPercent, fill, top, depthAtLimit, budget });
+          }
+        }
+      }
+    }
+    
+    allCandidates.sort((a, b) => {
+      if (b.expectedReturnPercent !== a.expectedReturnPercent) return b.expectedReturnPercent - a.expectedReturnPercent;
+      return parseFloat(b.bucket.volume24h ?? "0") - parseFloat(a.bucket.volume24h ?? "0");
+    });
+    
+    const executedCampaigns = new Set<string>();
+    
+    for (const cand of allCandidates) {
+      if (this.openPositions.size >= config.strategy.maxSimultaneousPositions && !config.portfolio.allowNegativeBalance) break;
+      if (executedCampaigns.has(cand.bucket.campaignId)) continue;
+      
+      this.inFlightTokens.add(cand.bucket.noTokenId);
+      try {
+        const deducted = await this.portfolioManager.deductCash(cand.fill.netCost);
+        if (!deducted) continue;
+        
+        const trade = await createSimulatedTrade({
+          campaignId: cand.bucket.campaignId,
+          bucketId: cand.bucket.id,
+          bucketGroupTitle: cand.bucket.groupItemTitle,
+          tokenId: cand.bucket.noTokenId,
+          entryTs: new Date(),
+          entryPrice: cand.fill.averagePrice.toFixed(8),
+          entryShares: cand.fill.totalShares.toFixed(8),
+          positionBudget: cand.budget.toFixed(8),
+          actualCost: cand.fill.netCost.toFixed(8),
+          entryFees: cand.fill.fees.toFixed(8),
+          fillStatus: cand.fill.isPartialFill ? "PARTIAL" : "FULL",
+          expectedNetProfit: cand.expectedNetProfit.toFixed(8),
+          expectedReturnPercent: cand.expectedReturnPercent.toFixed(8),
+          noBestBidAtEntry: cand.top.bestBid?.toFixed(8),
+          noBestAskAtEntry: cand.top.bestAsk?.toFixed(8),
+          depthAtLimit: cand.depthAtLimit.toFixed(8),
+          orderbookSnapshot: cand.fill.orderbookSnapshot,
+        });
+        
+        if (trade) {
+          this.openPositions.set(trade.id, {
+            tradeId: trade.id,
+            bucketId: cand.bucket.id,
+            tokenId: cand.bucket.noTokenId,
+            entryPrice: cand.fill.averagePrice,
+            entryShares: cand.fill.totalShares,
+            fees: cand.fill.fees,
+            actualCost: cand.fill.netCost,
+          });
+          executedCampaigns.add(cand.bucket.campaignId);
+          await logAudit("info", "TRADE_OPENED", `Opened simulated NO trade for ${cand.bucket.groupItemTitle}`, { tradeId: trade.id });
+        }
+      } catch (err) {
+        logger.error({ err }, "Trade execution failed");
+      } finally {
+        this.inFlightTokens.delete(cand.bucket.noTokenId);
       }
     }
   }
 
   private onTokenPriceUpdate(tokenId: string, bestBid: number, bestAsk: number): void {
-    const marketId = this.tokenToMarket.get(tokenId);
-    if (!marketId) return;
-    const state = this.trackedMarkets.get(marketId);
+    const bucketId = this.tokenToBucket.get(tokenId);
+    if (!bucketId) return;
+    const state = this.trackedBuckets.get(bucketId);
     if (!state) return;
-    
-    const lifecycle = this.getMarketLifecycle(state);
-    
-    // Freeze prices at transition
-    if (lifecycle !== "OPEN") {
-      if (!state.frozenPrices) {
-        state.frozenPrices = { ...state.lastPrices };
-        this.persistFrozenPrices(state.marketId, state.frozenPrices).catch(err => 
-          logger.error({ err }, "Failed to persist frozen prices")
-        );
-      }
-      return; // Ignore incoming WS price updates
-    }
-
-    if (!Number.isFinite(bestBid) || !Number.isFinite(bestAsk)) return;
-    state.lastPrices[tokenId] = {
-      bid: bestBid,
-      ask: bestAsk,
-      mid: (bestBid + bestAsk) / 2,
-    };
-  }
-
-  private async persistFrozenPrices(marketId: string, frozenPrices: any): Promise<void> {
-    const db = getDb();
-    await db
-      .update(schema.deadlineMarkets)
-      .set({ frozenPrices, updatedAt: new Date() })
-      .where(eq(schema.deadlineMarkets.id, marketId));
+    if (state.resolved) return;
+    state.lastPrices[tokenId] = { bid: bestBid, ask: bestAsk, mid: (bestBid + bestAsk) / 2 };
   }
 
   private async onMarketResolved(ev: MarketResolvedEvent): Promise<void> {
-    const marketId = this.conditionIdToMarket.get(ev.conditionId);
-    if (!marketId) return;
-    await this.resolvePositionsForMarket(marketId, ev.winningAssetId, ev.winningOutcome);
+    const bucketId = this.conditionIdToBucket.get(ev.conditionId);
+    if (!bucketId) return;
+    await this.resolvePositionsForBucket(bucketId, ev.winningAssetId, ev.winningOutcome);
   }
 
   private async pollOpenPositionSettlements(): Promise<void> {
-    const marketIds = new Set([...this.openPositions.values()].map((p) => p.marketId));
-    for (const marketId of marketIds) {
-      const market = await this.client.getMarketById(marketId);
+    const bucketIds = new Set([...this.openPositions.values()].map((p) => p.bucketId));
+    for (const bucketId of bucketIds) {
+      const market = await this.client.getMarketById(bucketId);
       if (!market?.closed) continue;
       const outcomes = PolymarketClient.parseOutcomes(market);
       const tokens = PolymarketClient.parseClobTokenIds(market);
       const prices = PolymarketClient.parseOutcomePrices(market);
       const winnerIndex = prices.findIndex((p) => p >= 0.99);
       if (winnerIndex < 0 || !tokens[winnerIndex]) continue;
-      await this.resolvePositionsForMarket(marketId, tokens[winnerIndex]!, outcomes[winnerIndex] ?? "Unknown");
+      await this.resolvePositionsForBucket(bucketId, tokens[winnerIndex]!, outcomes[winnerIndex] ?? "Unknown");
     }
   }
 
-  private async resolvePositionsForMarket(
-    marketId: string,
-    winningTokenId: string,
-    winningOutcome: string,
-  ): Promise<void> {
-    const positions = [...this.openPositions.values()].filter((p) => p.marketId === marketId);
-    const state = this.trackedMarkets.get(marketId);
+  private async resolvePositionsForBucket(bucketId: string, winningTokenId: string, winningOutcome: string): Promise<void> {
+    const positions = [...this.openPositions.values()].filter((p) => p.bucketId === bucketId);
+    const state = this.trackedBuckets.get(bucketId);
     if (state) state.resolved = true;
 
     for (const pos of positions) {
@@ -817,88 +475,40 @@ export class MarketOrchestrator extends EventEmitter {
         : calculateLossAmount(pos.entryPrice, pos.entryShares, pos.fees);
       const cashReturn = pos.actualCost + pnl;
       if (cashReturn > 0) await this.portfolioManager.addCash(cashReturn);
-      const trade = await resolveTrade(
-        pos.tradeId,
-        isWin ? "WIN" : "LOSS",
-        pnl.toFixed(8),
-        isWin ? "1" : "0",
-        { exitReason: "RESOLUTION" },
-      );
+      const trade = await resolveTrade(pos.tradeId, isWin ? "WIN" : "LOSS", pnl.toFixed(8), isWin ? "1" : "0", { exitReason: "RESOLUTION" });
       this.openPositions.delete(pos.tradeId);
       this.updateConsecutiveLossState(isWin);
-      await logAudit("info", "TRADE_RESOLVED", `Trade ${pos.tradeId} resolved ${isWin ? "WIN" : "LOSS"}`, {
-        marketId,
-        winningOutcome,
-        pnl,
-      });
-      this.emit("tradeResolved", { tradeId: pos.tradeId, isWin, pnl, exitPrice: isWin ? 1 : 0, trade });
+      await logAudit("info", "TRADE_RESOLVED", `Trade ${pos.tradeId} resolved ${isWin ? "WIN" : "LOSS"}`, { bucketId, pnl });
+      this.emit("tradeResolved", { tradeId: pos.tradeId, isWin, pnl, trade });
     }
   }
 
   private updateConsecutiveLossState(isWin: boolean): void {
     const config = getConfig();
-    const limit = config.strategy.consecutiveLossPauseLimit;
-    if (limit <= 0) return;
-    if (isWin) {
-      this.consecutiveLossCount = 0;
-      return;
-    }
+    if (config.strategy.consecutiveLossPauseLimit <= 0) return;
+    if (isWin) { this.consecutiveLossCount = 0; return; }
     this.consecutiveLossCount++;
-    if (this.consecutiveLossCount < limit || this.paused) return;
+    if (this.consecutiveLossCount < config.strategy.consecutiveLossPauseLimit || this.paused) return;
     this.pausedByRiskGuard = true;
-    this.riskPauseTriggeredAt = Date.now();
     this.pause();
     if (config.strategy.riskAutoResumeEnabled) {
-      this.riskAutoResumeTimer = setTimeout(() => {
-        this.resume().catch((error) => logger.error({ error }, "Auto-resume failed"));
-      }, config.strategy.riskAutoResumeCooldownMs);
+      this.riskAutoResumeTimer = setTimeout(() => this.resume().catch(console.error), config.strategy.riskAutoResumeCooldownMs);
     }
   }
 
   private async loadOpenPositions(): Promise<void> {
-    const rows = await loadOpenTradesWithMarkets();
-    for (const { trade, market } of rows) {
+    const rows = await loadOpenTradesWithBuckets();
+    for (const { trade, bucket } of rows) {
       this.openPositions.set(trade.id, {
         tradeId: trade.id,
-        marketId: trade.marketId ?? "",
+        bucketId: trade.bucketId ?? "",
         tokenId: trade.tokenId ?? "",
         entryPrice: parseFloat(trade.entryPrice),
         entryShares: parseFloat(trade.entryShares),
         fees: parseFloat(trade.entryFees ?? "0"),
         actualCost: parseFloat(trade.actualCost),
-        deadline: trade.deadline,
       });
-      if (market) {
-        this.trackMarketFromDb(market);
-      }
     }
-  }
-
-  private trackMarketFromDb(market: typeof schema.deadlineMarkets.$inferSelect): void {
-    if (this.trackedMarkets.has(market.id)) return;
-    const item: TrackedMarket = {
-      marketId: market.id,
-      eventId: market.eventId,
-      eventSlug: market.eventSlug,
-      eventTitle: market.eventTitle,
-      question: market.question,
-      slug: market.slug,
-      conditionId: market.conditionId,
-      deadline: market.deadline,
-      deadlineDate: market.deadlineDate,
-      noTokenId: market.noTokenId,
-      yesTokenId: market.yesTokenId,
-      noPrice: market.noPrice ? parseFloat(market.noPrice) : null,
-      feeSchedule: (market.feeSchedule as FeeSchedule | null) ?? null,
-      resolutionRules: market.resolutionRules,
-      lastPrices: {},
-      frozenPrices: (market.frozenPrices as any) ?? null,
-      resolved: false,
-    };
-    this.trackedMarkets.set(market.id, item);
-    this.tokenToMarket.set(market.noTokenId, market.id);
-    if (market.conditionId) this.conditionIdToMarket.set(market.conditionId, market.id);
-    this.wsWatcher.subscribe([market.noTokenId]);
   }
 }
 

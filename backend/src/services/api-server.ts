@@ -148,37 +148,36 @@ export class ApiServer {
       res.json(getMarketOrchestrator().getLiveMarkets());
     });
 
-    this.app.get("/api/families", async (req, res) => {
+    this.app.get("/api/campaigns", async (req, res) => {
       try {
         const db = getDb();
         const limit = Math.min(parseInt(req.query.limit as string) || 50, 200);
         const rows = await db
           .select()
-          .from(schema.eventFamilies)
-          .orderBy(desc(schema.eventFamilies.updatedAt))
+          .from(schema.distributionCampaigns)
+          .orderBy(desc(schema.distributionCampaigns.updatedAt))
           .limit(limit);
         res.json(rows);
       } catch (error) {
-        logger.error({ error }, "Families list error");
-        res.status(500).json({ error: "Failed to get families" });
+        logger.error({ error }, "Campaigns list error");
+        res.status(500).json({ error: "Failed to get campaigns" });
       }
     });
 
-    this.app.get("/api/markets", async (req, res) => {
+    this.app.get("/api/buckets", async (req, res) => {
       try {
         const db = getDb();
         const limit = Math.min(parseInt(req.query.limit as string) || 50, 200);
         const offset = Math.max(parseInt(req.query.offset as string) || 0, 0);
         const rows = await db
           .select()
-          .from(schema.deadlineMarkets)
-          .orderBy(schema.deadlineMarkets.deadline)
+          .from(schema.distributionBuckets)
           .limit(limit)
           .offset(offset);
         res.json(rows);
       } catch (error) {
-        logger.error({ error }, "Markets list error");
-        res.status(500).json({ error: "Failed to get markets" });
+        logger.error({ error }, "Buckets list error");
+        res.status(500).json({ error: "Failed to get buckets" });
       }
     });
 
