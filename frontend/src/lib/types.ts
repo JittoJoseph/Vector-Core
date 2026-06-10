@@ -10,6 +10,13 @@ export interface DistributionCampaign {
   lastFetchedAt: string;
   createdAt: string;
   updatedAt: string;
+
+  // Computed API fields
+  modalBucketTitle?: string;
+  candidateCount?: number;
+  trackedCount?: number;
+  positionCount?: number;
+  relevantBuckets?: DistributionBucket[];
 }
 
 export interface DistributionBucket {

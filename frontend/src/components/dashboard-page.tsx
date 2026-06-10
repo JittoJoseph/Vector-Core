@@ -12,7 +12,7 @@ import { pnlColor, formatPnl } from "@/lib/utils";
 import {
   useTrades,
   useSystemStats,
-  useBuckets,
+  useCampaigns,
   useLiveMarkets,
   usePerformanceRealtime,
   useActivityLog,
@@ -55,13 +55,10 @@ export function DashboardPage() {
   } = useTrades();
 
   const {
-    buckets: candidateBucketsRaw,
-    loading: bucketsLoading,
-    loadMore: loadMoreBuckets,
-    hasMore: hasMoreBuckets,
-    loadingMore: loadingMoreBuckets,
-    refetch: refetchBuckets,
-  } = useBuckets();
+    campaigns,
+    loading: campaignsLoading,
+    refetch: refetchCampaigns,
+  } = useCampaigns();
 
   const { activities, loading: activitiesLoading } = useActivityLog();
   const { performance } = usePerformanceRealtime("ALL");
@@ -90,10 +87,10 @@ export function DashboardPage() {
     await Promise.all([
       refetchStats().catch(() => {}),
       refetchTrades().catch(() => {}),
-      refetchBuckets().catch(() => {}),
+      refetchCampaigns().catch(() => {}),
       fetchExtraData().catch(() => {}),
     ]);
-  }, [refetchStats, refetchTrades, refetchBuckets, fetchExtraData]);
+  }, [refetchStats, refetchTrades, refetchCampaigns, fetchExtraData]);
 
   // Derived datasets
   const openTrades = useMemo(
@@ -103,10 +100,6 @@ export function DashboardPage() {
   const settledTrades = useMemo(
     () => trades.filter((t) => t.status === "SETTLED"),
     [trades],
-  );
-  const candidateBuckets = useMemo(
-    () => candidateBucketsRaw,
-    [candidateBucketsRaw],
   );
 
   // Live prices map for Open Positions
@@ -120,14 +113,11 @@ export function DashboardPage() {
     return map;
   }, [liveMarkets]);
 
-  // Market deadlines map
   const marketEndDates = useMemo<Record<string, string>>(() => {
     const map: Record<string, string> = {};
     for (const m of liveMarkets) map[m.marketId] = m.deadline;
-    for (const m of candidateBucketsRaw)
-      if (m.id && m.updatedAt) map[m.id] = m.updatedAt; // Just a placeholder, buckets don't have deadline natively yet
     return map;
-  }, [liveMarkets, candidateBucketsRaw]);
+  }, [liveMarkets]);
 
   // Financial Stats
   const initialCapital = parseFloat(performance?.initialCapital || "0");

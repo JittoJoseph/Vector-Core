@@ -77,18 +77,6 @@ export class ApiClient {
     return response.json();
   }
 
-  async getBuckets(params?: {
-    limit?: number;
-    offset?: number;
-  }): Promise<DistributionBucket[]> {
-    const searchParams = new URLSearchParams();
-    if (params?.limit) searchParams.set("limit", String(params.limit));
-    if (params?.offset) searchParams.set("offset", String(params.offset));
-
-    const qs = searchParams.toString();
-    return fetchWithRetry(`${this.baseUrl}/api/buckets${qs ? `?${qs}` : ""}`);
-  }
-
   async getCampaigns(params?: { limit?: number }): Promise<DistributionCampaign[]> {
     const searchParams = new URLSearchParams();
     if (params?.limit) searchParams.set("limit", String(params.limit));

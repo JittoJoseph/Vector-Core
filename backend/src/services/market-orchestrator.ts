@@ -28,6 +28,10 @@ export function parseBucketMinMax(title: string): [number, number] {
     const val = parseFloat(title.replace("+", ""));
     return [val, Infinity];
   }
+  if (title.includes("<")) {
+    const val = parseFloat(title.replace("<", ""));
+    return [-Infinity, val - 0.0001];
+  }
   if (title.includes("-")) {
     const parts = title.split("-");
     return [parseFloat(parts[0] ?? "0"), parseFloat(parts[1] ?? "0")];
@@ -155,6 +159,10 @@ export class MarketOrchestrator extends EventEmitter {
   }
 
   isPaused(): boolean { return this.paused; }
+
+  public getOpenPositions(): OpenPosition[] {
+    return Array.from(this.openPositions.values());
+  }
 
   getStats() {
     return {
@@ -358,16 +366,25 @@ export class MarketOrchestrator extends EventEmitter {
       
       const [modalMin] = parseBucketMinMax(modalBucket.groupItemTitle);
       
+      // Relevance Rule 1: Modal bucket is always relevant context
+      requiredTokens.add(modalBucket.noTokenId);
+      requiredTokens.add(modalBucket.yesTokenId);
+      
       for (const bucket of buckets) {
         const [, bMax] = parseBucketMinMax(bucket.groupItemTitle);
-        // Eligible if strictly below modal bucket
-        if (bMax < modalMin) {
-          const noPrice = parseFloat(bucket.noPrice?.toString() ?? "0");
+        const isCandidate = bMax < modalMin;
+        
+        if (isCandidate) {
+          const noPrice = parseFloat(bucket.noPrice?.toString() ?? "1");
           
-          if (noPrice < 0.99 || Number.isNaN(noPrice)) {
+          // Relevance Rule 2: Candidate bucket reasonably close to entry range
+          const isPricedForTracking = noPrice <= config.strategy.maxNoEntryPrice + 0.10 || Number.isNaN(noPrice);
+          if (isPricedForTracking) {
              requiredTokens.add(bucket.noTokenId);
+             requiredTokens.add(bucket.yesTokenId);
           }
 
+          // Trade Eligibility: STRICTLY bounded by min and max
           if (noPrice >= config.strategy.minNoEntryPrice && noPrice <= config.strategy.maxNoEntryPrice) {
             
             const campaignHasPosition = Array.from(this.openPositions.values()).some(p => {

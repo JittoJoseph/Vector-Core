@@ -10,7 +10,7 @@ import { createModuleLogger } from "../utils/logger.js";
 import { getConfig } from "../utils/config.js";
 import { getDb, getPortfolio, wipeAndResetPortfolio } from "../db/client.js";
 import * as schema from "../db/schema.js";
-import { getMarketOrchestrator } from "./market-orchestrator.js";
+import { getMarketOrchestrator, parseBucketMinMax } from "./market-orchestrator.js";
 import {
   calculatePortfolioPerformance,
   type TimePeriod,
@@ -151,33 +151,71 @@ export class ApiServer {
     this.app.get("/api/campaigns", async (req, res) => {
       try {
         const db = getDb();
+        const config = getConfig();
+        const orchestrator = getMarketOrchestrator();
         const limit = Math.min(parseInt(req.query.limit as string) || 50, 200);
-        const rows = await db
+        
+        const campaigns = await db
           .select()
           .from(schema.distributionCampaigns)
           .orderBy(desc(schema.distributionCampaigns.updatedAt))
           .limit(limit);
-        res.json(rows);
+
+        const allBuckets = await db.select().from(schema.distributionBuckets);
+        const openPositions = orchestrator.getOpenPositions();
+        
+        const results = [];
+
+        for (const c of campaigns) {
+           const buckets = allBuckets.filter(b => b.campaignId === c.id);
+           
+           let modalBucket = buckets[0];
+           let maxYes = parseFloat(buckets[0]?.yesPrice?.toString() ?? "0");
+           for (const b of buckets) {
+             const y = parseFloat(b.yesPrice?.toString() ?? "0");
+             if (y > maxYes) { maxYes = y; modalBucket = b; }
+           }
+           
+           let candidateCount = 0;
+           let positionCount = 0;
+           let trackedCount = 0;
+           const relevantBuckets = [];
+           
+           if (modalBucket) {
+              const [modalMin] = parseBucketMinMax(modalBucket.groupItemTitle);
+              
+              for (const b of buckets) {
+                 const [, bMax] = parseBucketMinMax(b.groupItemTitle);
+                 const isCandidate = bMax < modalMin;
+                 const noPrice = parseFloat(b.noPrice?.toString() ?? "1");
+                 const isModal = b.id === modalBucket.id;
+                 const hasOpenPosition = openPositions.some(p => p.tokenId === b.yesTokenId || p.tokenId === b.noTokenId);
+                 
+                 if (isCandidate) candidateCount++;
+                 if (hasOpenPosition) positionCount++;
+                 
+                 const isRelevant = hasOpenPosition || isModal || (isCandidate && (noPrice <= config.strategy.maxNoEntryPrice + 0.10 || Number.isNaN(noPrice)));
+                 if (isRelevant) {
+                    trackedCount++;
+                    relevantBuckets.push(b);
+                 }
+              }
+           }
+           
+           results.push({
+              ...c,
+              modalBucketTitle: modalBucket?.groupItemTitle ?? "N/A",
+              candidateCount,
+              trackedCount,
+              positionCount,
+              relevantBuckets
+           });
+        }
+
+        res.json(results);
       } catch (error) {
         logger.error({ error }, "Campaigns list error");
         res.status(500).json({ error: "Failed to get campaigns" });
-      }
-    });
-
-    this.app.get("/api/buckets", async (req, res) => {
-      try {
-        const db = getDb();
-        const limit = Math.min(parseInt(req.query.limit as string) || 1000, 2000);
-        const offset = Math.max(parseInt(req.query.offset as string) || 0, 0);
-        const rows = await db
-          .select()
-          .from(schema.distributionBuckets)
-          .limit(limit)
-          .offset(offset);
-        res.json(rows);
-      } catch (error) {
-        logger.error({ error }, "Buckets list error");
-        res.status(500).json({ error: "Failed to get buckets" });
       }
     });
 
