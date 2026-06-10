@@ -6,8 +6,8 @@ import type {
   SimulatedTrade,
   SystemStats,
   LiveMarketInfo,
-  DiscoveredMarket,
-  EventFamily,
+  DistributionBucket,
+  DistributionCampaign,
   Opportunity,
   PerformanceMetrics,
   PortfolioState,
@@ -77,23 +77,23 @@ export class ApiClient {
     return response.json();
   }
 
-  async getMarkets(params?: {
+  async getBuckets(params?: {
     limit?: number;
     offset?: number;
-  }): Promise<DiscoveredMarket[]> {
+  }): Promise<DistributionBucket[]> {
     const searchParams = new URLSearchParams();
     if (params?.limit) searchParams.set("limit", String(params.limit));
     if (params?.offset) searchParams.set("offset", String(params.offset));
 
     const qs = searchParams.toString();
-    return fetchWithRetry(`${this.baseUrl}/api/markets${qs ? `?${qs}` : ""}`);
+    return fetchWithRetry(`${this.baseUrl}/api/buckets${qs ? `?${qs}` : ""}`);
   }
 
-  async getFamilies(params?: { limit?: number }): Promise<EventFamily[]> {
+  async getCampaigns(params?: { limit?: number }): Promise<DistributionCampaign[]> {
     const searchParams = new URLSearchParams();
     if (params?.limit) searchParams.set("limit", String(params.limit));
     const qs = searchParams.toString();
-    return fetchWithRetry(`${this.baseUrl}/api/families${qs ? `?${qs}` : ""}`);
+    return fetchWithRetry(`${this.baseUrl}/api/campaigns${qs ? `?${qs}` : ""}`);
   }
 
   async getOpportunities(params?: { limit?: number }): Promise<Opportunity[]> {
