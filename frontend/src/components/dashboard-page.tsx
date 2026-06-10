@@ -349,7 +349,7 @@ export function DashboardPage() {
                   },
                   {
                     id: "history",
-                    label: `TRADE HISTORY (${settledTrades.length})`,
+                    label: `HISTORY`,
                   },
                   { id: "campaigns", label: "CAMPAIGNS" },
                   { id: "diagnostics", label: "DIAGNOSTICS" },
