@@ -83,8 +83,10 @@ export interface SimulatedTrade {
   marketId: string | null;
   marketSlug: string | null;
   marketQuestion: string | null;
-  deadline: string | null;
-  deadlineDate: string | null;
+  campaignId?: string | null;
+  campaignTitle?: string | null;
+  bucketGroupTitle?: string | null;
+  campaignEndDate: string | null;
   tokenId: string | null;
   outcomeLabel: string | null;
   side: string;

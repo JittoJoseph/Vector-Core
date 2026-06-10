@@ -57,9 +57,9 @@ export function TradesTable({
   if (type === "OPEN") {
     sortedTrades.sort((a, b) => {
       const aEnd =
-        a.marketEndDate ?? (a.marketId ? marketEndDates[a.marketId] : null);
+        a.campaignEndDate ?? (a.marketId ? marketEndDates[a.marketId] : null);
       const bEnd =
-        b.marketEndDate ?? (b.marketId ? marketEndDates[b.marketId] : null);
+        b.campaignEndDate ?? (b.marketId ? marketEndDates[b.marketId] : null);
       if (!aEnd && !bEnd) return 0;
       if (!aEnd) return 1;
       if (!bEnd) return -1;
@@ -126,7 +126,7 @@ export function TradesTable({
             const isOpen = trade.status === "OPEN";
 
             const endDateStr =
-              trade.marketEndDate ??
+              trade.campaignEndDate ??
               (trade.marketId ? marketEndDates[trade.marketId] : null);
 
             if (type === "OPEN") {
@@ -180,11 +180,11 @@ export function TradesTable({
                         target="_blank"
                         rel="noopener noreferrer"
                         className="font-medium text-[11px] text-foreground hover:text-blue-400 truncate inline-flex items-center gap-1.5"
-                        title={trade.marketQuestion || "Unknown Market"}
+                        title={trade.campaignTitle ? `${trade.campaignTitle} - ${trade.bucketGroupTitle}` : "Unknown Market"}
                         onClick={(e) => e.stopPropagation()}
                       >
                         <span className="truncate">
-                          {trade.marketQuestion || "Unknown Market"}
+                          {trade.campaignTitle ? `${trade.campaignTitle} - ${trade.bucketGroupTitle}` : "Unknown Market"}
                         </span>
                         <ExternalLink
                           size={10}
@@ -282,11 +282,11 @@ export function TradesTable({
                         target="_blank"
                         rel="noopener noreferrer"
                         className="font-medium text-[11px] text-foreground hover:text-blue-400 truncate inline-flex items-center gap-1.5"
-                        title={trade.marketQuestion || "Unknown Market"}
+                        title={trade.campaignTitle ? `${trade.campaignTitle} - ${trade.bucketGroupTitle}` : "Unknown Market"}
                         onClick={(e) => e.stopPropagation()}
                       >
                         <span className="truncate">
-                          {trade.marketQuestion || "Unknown Market"}
+                          {trade.campaignTitle ? `${trade.campaignTitle} - ${trade.bucketGroupTitle}` : "Unknown Market"}
                         </span>
                         <ExternalLink
                           size={10}
