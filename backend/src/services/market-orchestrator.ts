@@ -277,6 +277,7 @@ export class MarketOrchestrator extends EventEmitter {
           id: market.id,
           campaignId: eventId,
           conditionId: market.conditionId ?? null,
+          slug: market.slug ?? null,
           groupItemTitle: market.groupItemTitle,
           yesTokenId: clobTokenIds[0]!,
           noTokenId: clobTokenIds[1]!,
@@ -290,6 +291,7 @@ export class MarketOrchestrator extends EventEmitter {
         }).onConflictDoUpdate({
           target: schema.distributionBuckets.id,
           set: {
+            slug: market.slug ?? null,
             yesPrice: market.outcomePrices ? JSON.parse(market.outcomePrices)[0] : null,
             noPrice: market.outcomePrices ? JSON.parse(market.outcomePrices)[1] : null,
             spread: market.spread?.toString() ?? null,
@@ -445,6 +447,7 @@ export class MarketOrchestrator extends EventEmitter {
           campaignSlug: cand.campaign.slug,
           campaignTitle: cand.campaign.title,
           bucketId: cand.bucket.id,
+          bucketSlug: cand.bucket.slug,
           bucketGroupTitle: cand.bucket.groupItemTitle,
           tokenId: cand.bucket.noTokenId,
           entryTs: new Date(),

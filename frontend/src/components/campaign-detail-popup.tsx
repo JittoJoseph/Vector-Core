@@ -1,6 +1,7 @@
 import React, { useEffect } from "react";
 import { X, ExternalLink } from "lucide-react";
 import type { DistributionCampaign } from "@/lib/types";
+import { polymarketMarketUrl } from "@/lib/utils";
 
 export interface CampaignDetailPopupProps {
   campaign: DistributionCampaign;
@@ -72,7 +73,7 @@ export function CampaignDetailPopup({ campaign, onClose }: CampaignDetailPopupPr
                     <td className="py-3 px-4">
                       <div className="flex items-center gap-2">
                         <a
-                          href={b.conditionId ? `https://polymarket.com/event/${campaign.slug}?tid=${b.conditionId}` : `https://polymarket.com/event/${campaign.slug}`}
+                          href={polymarketMarketUrl({ eventSlug: campaign.slug, marketSlug: b.slug })}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="font-medium text-foreground hover:text-blue-400 flex items-center gap-1.5"

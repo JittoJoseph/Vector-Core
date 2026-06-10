@@ -134,6 +134,7 @@ export async function createSimulatedTrade(data: {
   campaignSlug?: string | null;
   campaignTitle?: string | null;
   bucketId?: string | null;
+  bucketSlug?: string | null;
   bucketGroupTitle?: string | null;
   tokenId: string;
   entryTs: Date;
@@ -158,6 +159,7 @@ export async function createSimulatedTrade(data: {
       campaignSlug: data.campaignSlug ?? null,
       campaignTitle: data.campaignTitle ?? null,
       bucketId: data.bucketId ?? null,
+      bucketSlug: data.bucketSlug ?? null,
       bucketGroupTitle: data.bucketGroupTitle ?? null,
       tokenId: data.tokenId,
       entryTs: data.entryTs,

@@ -147,7 +147,7 @@ export function TradesTable({
 
               const polyUrl = polymarketMarketUrl({
                 eventSlug: trade.campaignSlug,
-                marketId: trade.bucketId,
+                marketSlug: trade.bucketSlug,
               });
 
               return (
@@ -269,7 +269,7 @@ export function TradesTable({
 
               const polyUrl = polymarketMarketUrl({
                 eventSlug: trade.campaignSlug,
-                marketId: trade.bucketId,
+                marketSlug: trade.bucketSlug,
               });
 
               return (

@@ -23,6 +23,7 @@ export interface DistributionBucket {
   id: string;
   campaignId: string;
   conditionId: string | null;
+  slug: string | null;
   groupItemTitle: string;
   yesTokenId: string;
   noTokenId: string;
@@ -75,6 +76,7 @@ export interface SimulatedTrade {
   campaignSlug?: string | null;
   campaignTitle?: string | null;
   bucketId?: string | null;
+  bucketSlug: string | null;
   bucketGroupTitle?: string | null;
   campaignEndDate: string | null;
   tokenId: string | null;

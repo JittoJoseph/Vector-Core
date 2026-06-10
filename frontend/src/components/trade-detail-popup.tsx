@@ -34,7 +34,7 @@ export function TradeDetailPopup({
 
   const polyUrl = polymarketMarketUrl({
     eventSlug: trade.campaignSlug,
-    marketId: trade.bucketId,
+    marketSlug: trade.bucketSlug,
   });
 
   const resolvedQuestion = trade.campaignTitle ? `${trade.campaignTitle} - ${trade.bucketGroupTitle}` : null;

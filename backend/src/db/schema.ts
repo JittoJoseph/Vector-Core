@@ -39,6 +39,7 @@ export const distributionBuckets = pgTable(
     id: text("id").primaryKey(), // Polymarket market ID
     campaignId: text("campaign_id").notNull(),
     conditionId: text("condition_id"),
+    slug: text("slug"),
     groupItemTitle: text("group_item_title").notNull(), // e.g., "180-199"
     yesTokenId: text("yes_token_id").notNull(),
     noTokenId: text("no_token_id").notNull(),
@@ -107,6 +108,7 @@ export const simulatedTrades = pgTable(
     campaignSlug: text("campaign_slug"),
     campaignTitle: text("campaign_title"),
     bucketId: text("bucket_id"),
+    bucketSlug: text("bucket_slug"),
     bucketGroupTitle: text("bucket_group_title"),
     tokenId: text("token_id"),
     outcomeLabel: text("outcome_label").default("No").notNull(),
