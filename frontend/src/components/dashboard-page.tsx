@@ -5,13 +5,14 @@ import { Header } from "./header";
 import { TradesTable, MarketCountdown } from "./trades-table";
 import { TradeDetailPopup } from "./trade-detail-popup";
 import { ActivityPanel } from "./activity-panel";
+import { CampaignsTable } from "./campaigns-table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { getApiClient } from "@/lib/api-client";
 import { pnlColor, formatPnl } from "@/lib/utils";
 import {
   useTrades,
   useSystemStats,
-  useActiveMarkets,
+  useBuckets,
   useLiveMarkets,
   usePerformanceRealtime,
   useActivityLog,
@@ -54,13 +55,13 @@ export function DashboardPage() {
   } = useTrades();
 
   const {
-    markets: candidateMarketsRaw,
-    loading: marketsLoading,
-    loadMore: loadMoreMarkets,
-    hasMore: hasMoreMarkets,
-    loadingMore: loadingMoreMarkets,
-    refetch: refetchMarkets,
-  } = useActiveMarkets();
+    buckets: candidateBucketsRaw,
+    loading: bucketsLoading,
+    loadMore: loadMoreBuckets,
+    hasMore: hasMoreBuckets,
+    loadingMore: loadingMoreBuckets,
+    refetch: refetchBuckets,
+  } = useBuckets();
 
   const { activities, loading: activitiesLoading } = useActivityLog();
   const { performance } = usePerformanceRealtime("ALL");
@@ -89,10 +90,10 @@ export function DashboardPage() {
     await Promise.all([
       refetchStats().catch(() => {}),
       refetchTrades().catch(() => {}),
-      refetchMarkets().catch(() => {}),
+      refetchBuckets().catch(() => {}),
       fetchExtraData().catch(() => {}),
     ]);
-  }, [refetchStats, refetchTrades, refetchMarkets, fetchExtraData]);
+  }, [refetchStats, refetchTrades, refetchBuckets, fetchExtraData]);
 
   // Derived datasets
   const openTrades = useMemo(
@@ -103,14 +104,9 @@ export function DashboardPage() {
     () => trades.filter((t) => t.status === "SETTLED"),
     [trades],
   );
-  const candidateMarkets = useMemo(
-    () =>
-      candidateMarketsRaw.filter(
-        (m) =>
-          m.classificationStatus === "candidate" ||
-          m.classificationStatus === "traded",
-      ),
-    [candidateMarketsRaw],
+  const candidateBuckets = useMemo(
+    () => candidateBucketsRaw,
+    [candidateBucketsRaw],
   );
 
   // Live prices map for Open Positions
@@ -128,10 +124,10 @@ export function DashboardPage() {
   const marketEndDates = useMemo<Record<string, string>>(() => {
     const map: Record<string, string> = {};
     for (const m of liveMarkets) map[m.marketId] = m.deadline;
-    for (const m of candidateMarketsRaw)
-      if (m.id && m.deadline) map[m.id] = m.deadline;
+    for (const m of candidateBucketsRaw)
+      if (m.id && m.updatedAt) map[m.id] = m.updatedAt; // Just a placeholder, buckets don't have deadline natively yet
     return map;
-  }, [liveMarkets, candidateMarketsRaw]);
+  }, [liveMarkets, candidateBucketsRaw]);
 
   // Financial Stats
   const initialCapital = parseFloat(performance?.initialCapital || "0");
@@ -370,7 +366,7 @@ export function DashboardPage() {
                     id: "history",
                     label: `TRADE HISTORY (${settledTrades.length})`,
                   },
-                  { id: "pipeline", label: "PIPELINE" },
+                  { id: "campaigns", label: "CAMPAIGNS" },
                   { id: "diagnostics", label: "DIAGNOSTICS" },
                 ].map((tab) => (
                   <button
@@ -450,158 +446,12 @@ export function DashboardPage() {
                 />
               </TabsContent>
 
-              {/* MARKET PIPELINE TAB */}
+              {/* CAMPAIGNS TAB */}
               <TabsContent
-                value="pipeline"
+                value="campaigns"
                 className="mt-0 flex-1 p-0 flex flex-col h-full"
               >
-                {/* PIPELINE FUNNEL & REJECTIONS */}
-                <div className="bg-card/50 border-b border-border/20 p-6 flex flex-col md:flex-row gap-8">
-                  <div className="flex-1">
-                    <div className="text-[10px] tracking-[0.15em] text-muted-foreground uppercase font-bold mb-4">
-                      Dominant Rejection Reason
-                    </div>
-                    {rejectionStats.length > 0 ? (
-                      <div className="flex flex-col gap-2">
-                        <div className="text-xl font-bold text-red-400">
-                          {rejectionStats[0].reason}
-                        </div>
-                        <div className="text-sm text-muted-foreground">
-                          Accounted for {rejectionStats[0].pct.toFixed(1)}% of
-                          all rejected opportunities.
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="text-sm text-muted-foreground">
-                        No significant rejections yet.
-                      </div>
-                    )}
-                  </div>
-                  <div className="flex-1">
-                    <div className="text-[10px] tracking-[0.15em] text-muted-foreground uppercase font-bold mb-4">
-                      Rejection Funnel Breakdown
-                    </div>
-                    {rejectionStats.length > 0 ? (
-                      <div className="flex flex-col gap-3">
-                        {rejectionStats.slice(0, 5).map((stat) => (
-                          <div
-                            key={stat.reason}
-                            className="flex flex-col gap-1.5"
-                          >
-                            <div className="flex justify-between text-[11px]">
-                              <span className="text-foreground/80">
-                                {stat.reason}
-                              </span>
-                              <span className="text-muted-foreground font-bold">
-                                {stat.pct.toFixed(1)}%
-                              </span>
-                            </div>
-                            <div className="w-full bg-muted/20 h-1.5 rounded-full overflow-hidden">
-                              <div
-                                className="bg-amber-500/50 h-full rounded-full"
-                                style={{ width: `${stat.pct}%` }}
-                              />
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <div className="text-[11px] text-muted-foreground">
-                        Not enough recent rejections to analyze.
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                {/* WAITING CANDIDATES TABLE */}
-                <div className="p-4 border-b border-border/20 bg-muted/5 flex items-center justify-between">
-                  <div className="text-[10px] tracking-[0.15em] text-muted-foreground uppercase font-bold">
-                    Waiting Candidates
-                  </div>
-                  <div className="text-xs font-bold text-foreground">
-                    {candidateMarkets.length}
-                  </div>
-                </div>
-                <div className="overflow-x-auto flex-1">
-                  <table className="w-full text-xs font-mono">
-                    <thead>
-                      <tr className="border-b border-border/30">
-                        <th className="text-left py-2.5 px-4 font-medium text-muted-foreground tracking-wider text-[10px]">
-                          CANDIDATE QUESTION
-                        </th>
-                        <th className="text-right py-2.5 px-4 font-medium text-muted-foreground tracking-wider text-[10px]">
-                          CLOSES
-                        </th>
-                        <th className="text-right py-2.5 px-4 font-medium text-muted-foreground tracking-wider text-[10px]">
-                          24H VOL
-                        </th>
-                        <th className="text-right py-2.5 px-4 font-medium text-muted-foreground tracking-wider text-[10px]">
-                          STATUS
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {candidateMarkets.map((m) => (
-                        <tr
-                          key={m.id}
-                          className="border-b border-border/5 hover:bg-muted/15"
-                        >
-                          <td className="py-3 px-4 min-w-[300px]">
-                            <div className="flex flex-col gap-0.5">
-                              <a
-                                href={
-                                  m.slug
-                                    ? `https://polymarket.com/event/${m.slug}`
-                                    : `https://polymarket.com/market/${m.id}`
-                                }
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="font-medium text-foreground hover:text-blue-400 inline-flex items-center gap-1 truncate max-w-[400px]"
-                                title={m.question}
-                              >
-                                <span className="truncate">{m.question}</span>
-                                <ExternalLink
-                                  size={10}
-                                  className="text-muted-foreground/40 shrink-0"
-                                />
-                              </a>
-                            </div>
-                          </td>
-                          <td className="py-3 px-4 text-right">
-                            {new Date(m.deadline).toLocaleDateString("en-US", {
-                              month: "short",
-                              day: "numeric",
-                            })}
-                          </td>
-                          <td className="py-3 px-4 text-right">
-                            $
-                            {m.volume24h
-                              ? parseFloat(m.volume24h).toLocaleString(
-                                  undefined,
-                                  { maximumFractionDigits: 0 },
-                                )
-                              : "0"}
-                          </td>
-                          <td className="py-3 px-4 text-right">
-                            <span className="inline-flex items-center text-[9px] font-bold tracking-wider px-2 py-0.5 rounded border border-blue-500/25 bg-blue-500/5 text-blue-400">
-                              WAITING FOR DRIFT
-                            </span>
-                          </td>
-                        </tr>
-                      ))}
-                      {candidateMarkets.length === 0 && (
-                        <tr>
-                          <td
-                            colSpan={4}
-                            className="py-12 text-center text-muted-foreground"
-                          >
-                            No candidate markets available.
-                          </td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
+                <CampaignsTable />
               </TabsContent>
 
               {/* DIAGNOSTICS TAB */}
