@@ -269,8 +269,6 @@ export class ApiServer {
             
         const rows = rawRows.map(r => ({
            ...r.trade,
-           campaignTitle: r.trade.campaignTitle || r.campaign?.title,
-           campaignSlug: r.trade.campaignSlug || r.campaign?.slug,
            campaignEndDate: r.campaign?.endDate
         }));
         

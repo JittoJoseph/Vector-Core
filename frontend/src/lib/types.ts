@@ -38,22 +38,20 @@ export interface DistributionBucket {
 }
 
 export interface Opportunity {
-  id: string;
-  marketId: string;
-  eventId: string;
+  bucketId: string;
+  campaignId: string;
   noTokenId: string;
   status: string;
   reason: string | null;
-  deadline: string;
-  daysToDeadline: string | null;
   noPrice: string | null;
   noBestBid: string | null;
   noBestAsk: string | null;
   spread: string | null;
   depthAtLimit: string | null;
   expectedNetProfit: string | null;
-  raw: unknown;
+  expectedReturnPercent: string | null;
   createdAt: string;
+  updatedAt: string;
 }
 
 export interface LiveMarketPrice {
@@ -77,23 +75,14 @@ export interface LiveMarketInfo {
   markPrice: Record<string, { bid: number; ask: number; mid: number }>;
   status: "OPEN" | "AWAITING_RESOLUTION" | "RESOLVED";
   hasPosition: boolean;
-  // legacy aliases
-  endDate?: string;
-  windowStart?: string;
-  btcPriceAtWindowStart?: number | null;
 }
 
 export interface SimulatedTrade {
   id: string;
-  eventId: string | null;
-  eventSlug: string | null;
-  eventTitle: string | null;
-  marketId: string | null;
-  marketSlug: string | null;
-  marketQuestion: string | null;
   campaignId?: string | null;
   campaignSlug?: string | null;
   campaignTitle?: string | null;
+  bucketId?: string | null;
   bucketGroupTitle?: string | null;
   campaignEndDate: string | null;
   tokenId: string | null;
@@ -118,24 +107,8 @@ export interface SimulatedTrade {
   realizedPnl: string | null;
   status: string;
   orderbookSnapshot: unknown;
-  raw: unknown;
   createdAt: string;
   updatedAt: string;
-  // legacy optional fields retained for old components
-  marketCategory?: string | null;
-  windowType?: string | null;
-  btcPriceAtEntry?: string | null;
-  btcTargetPrice?: string | null;
-  btcDistanceUsd?: string | null;
-  momentumDirection?: string | null;
-  momentumChangeUsd?: string | null;
-  marketEndDate?: string | null;
-  minPriceDuringPosition?: string | null;
-  crossovers?: {
-    all: number;
-    last60s: number;
-    details: Array<{ side: "UP" | "DOWN"; ts: number }>;
-  };
 }
 
 export interface SystemStats {

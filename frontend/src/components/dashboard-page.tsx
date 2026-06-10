@@ -167,8 +167,7 @@ export function DashboardPage() {
       liveUnrealizedPnl += (liveMid - entryPrice) * shares - fees;
     }
 
-    const endStr =
-      t.campaignEndDate ?? t.marketEndDate ?? (t.marketId ? marketEndDates[t.marketId] : null);
+    const endStr = t.campaignEndDate ?? (t.bucketId ? marketEndDates[t.bucketId] : null);
     if (endStr) {
       const d = new Date(endStr);
       if (!closestExpiration || d < closestExpiration) {

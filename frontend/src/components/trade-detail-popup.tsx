@@ -9,16 +9,12 @@ interface TradeDetailPopupProps {
   trade: SimulatedTrade | null;
   open: boolean;
   onClose: () => void;
-  marketSlug?: string | null;
-  marketQuestion?: string | null;
 }
 
 export function TradeDetailPopup({
   trade,
   open,
   onClose,
-  marketSlug,
-  marketQuestion,
 }: TradeDetailPopupProps) {
   if (!trade) return null;
 
@@ -37,11 +33,11 @@ export function TradeDetailPopup({
   const isWin = outcome === "WIN";
 
   const polyUrl = polymarketMarketUrl({
-    eventSlug: trade.eventSlug,
-    marketSlug: marketSlug ?? trade.marketSlug,
+    eventSlug: trade.campaignSlug,
+    marketId: trade.bucketId,
   });
 
-  const resolvedQuestion = marketQuestion ?? trade.marketQuestion;
+  const resolvedQuestion = trade.campaignTitle ? `${trade.campaignTitle} - ${trade.bucketGroupTitle}` : null;
   const returnPct = actualCost > 0 ? (pnl / actualCost) * 100 : 0;
   const exitReason = trade.exitReason;
 
@@ -78,7 +74,7 @@ export function TradeDetailPopup({
             </div>
 
             <div className="flex items-center gap-0.5 shrink-0 -mr-1 -mt-0.5">
-              {trade.marketId && (
+              {trade.bucketId && (
                 <a
                   href={polyUrl}
                   target="_blank"
@@ -104,8 +100,8 @@ export function TradeDetailPopup({
           ) : (
             <DialogTitle className="sr-only">Trade Detail</DialogTitle>
           )}
-          {trade.eventTitle && (
-            <div className="mt-1 text-[11px] text-muted-foreground/60">{trade.eventTitle}</div>
+          {trade.campaignTitle && (
+            <div className="mt-1 text-[11px] text-muted-foreground/60">{trade.campaignTitle}</div>
           )}
         </div>
 
@@ -207,7 +203,7 @@ export function TradeDetailPopup({
           <Section title="TIMESTAMPS">
             <Row2>
               <Cell label="ENTERED" value={formatTs(trade.entryTs)} />
-              <Cell label="MARKET DEADLINE" value={trade.marketEndDate ? formatTs(trade.marketEndDate) : "—"} />
+              <Cell label="MARKET DEADLINE" value={trade.campaignEndDate ? formatTs(trade.campaignEndDate) : "—"} />
               <Cell label="CLOSED" value={trade.exitTs ? formatTs(trade.exitTs) : "—"} />
               <Cell label="HOLD DURATION" value={trade.exitTs ? formatDuration(trade.entryTs, trade.exitTs) : "—"} />
             </Row2>

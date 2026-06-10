@@ -57,9 +57,9 @@ export function TradesTable({
   if (type === "OPEN") {
     sortedTrades.sort((a, b) => {
       const aEnd =
-        a.campaignEndDate ?? (a.marketId ? marketEndDates[a.marketId] : null);
+        a.campaignEndDate ?? (a.bucketId ? marketEndDates[a.bucketId] : null);
       const bEnd =
-        b.campaignEndDate ?? (b.marketId ? marketEndDates[b.marketId] : null);
+        b.campaignEndDate ?? (b.bucketId ? marketEndDates[b.bucketId] : null);
       if (!aEnd && !bEnd) return 0;
       if (!aEnd) return 1;
       if (!bEnd) return -1;
@@ -133,7 +133,7 @@ export function TradesTable({
 
             const endDateStr =
               trade.campaignEndDate ??
-              (trade.marketId ? marketEndDates[trade.marketId] : null);
+              (trade.bucketId ? marketEndDates[trade.bucketId] : null);
 
             if (type === "OPEN") {
               const livePrice = trade.tokenId
@@ -153,8 +153,7 @@ export function TradesTable({
 
               const polyUrl = polymarketMarketUrl({
                 eventSlug: trade.campaignSlug,
-                marketSlug: trade.marketSlug,
-                marketId: trade.marketId,
+                marketId: trade.bucketId,
               });
 
               return (
@@ -276,8 +275,7 @@ export function TradesTable({
 
               const polyUrl = polymarketMarketUrl({
                 eventSlug: trade.campaignSlug,
-                marketSlug: trade.marketSlug,
-                marketId: trade.marketId,
+                marketId: trade.bucketId,
               });
 
               return (
