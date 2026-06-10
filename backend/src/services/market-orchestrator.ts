@@ -388,11 +388,6 @@ export class MarketOrchestrator extends EventEmitter {
           // Trade Eligibility: STRICTLY bounded by min and max
           if (noPrice >= config.strategy.minNoEntryPrice && noPrice <= config.strategy.maxNoEntryPrice) {
             
-            const campaignHasPosition = Array.from(this.openPositions.values()).some(p => {
-               const b = this.trackedBuckets.get(p.bucketId);
-               return b?.campaignId === campaign.id;
-            });
-            if (campaignHasPosition) continue;
             
             if (this.inFlightTokens.has(bucket.noTokenId)) continue;
             
@@ -431,11 +426,8 @@ export class MarketOrchestrator extends EventEmitter {
       return parseFloat(b.bucket.volume24h ?? "0") - parseFloat(a.bucket.volume24h ?? "0");
     });
     
-    const executedCampaigns = new Set<string>();
-    
     for (const cand of allCandidates) {
       if (this.openPositions.size >= config.strategy.maxSimultaneousPositions && !config.portfolio.allowNegativeBalance) break;
-      if (executedCampaigns.has(cand.bucket.campaignId)) continue;
       
       this.inFlightTokens.add(cand.bucket.noTokenId);
       try {
@@ -475,7 +467,6 @@ export class MarketOrchestrator extends EventEmitter {
             fees: cand.fill.fees,
             actualCost: cand.fill.netCost,
           });
-          executedCampaigns.add(cand.bucket.campaignId);
           await logAudit("info", "TRADE_OPENED", `Opened simulated NO trade for ${cand.bucket.groupItemTitle}`, { tradeId: trade.id });
         }
       } catch (err) {
