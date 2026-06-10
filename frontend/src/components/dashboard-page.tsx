@@ -9,6 +9,7 @@ import { CampaignsTable } from "./campaigns-table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { getApiClient } from "@/lib/api-client";
 import { pnlColor, formatPnl } from "@/lib/utils";
+import NumberFlow from "@number-flow/react";
 import {
   useTrades,
   useSystemStats,
@@ -16,7 +17,6 @@ import {
   useLiveMarkets,
   usePerformanceRealtime,
   useActivityLog,
-  useAnimatedNumber,
 } from "@/lib/hooks";
 import type { SimulatedTrade, Opportunity, LiveMarketPrice } from "@/lib/types";
 import {
@@ -123,8 +123,6 @@ export function DashboardPage() {
   const netPnl = portfolioValue - initialCapital;
   const roi = initialCapital > 0 ? (netPnl / initialCapital) * 100 : 0;
   const winRate = parseFloat(performance?.winRate || "0");
-
-  const animatedNetPnl = useAnimatedNumber(netPnl, 300);
   const isPaused = stats?.orchestrator.paused ?? false;
 
   // Diagnostics Aggregation
@@ -183,9 +181,6 @@ export function DashboardPage() {
 
   const livePortfolioValue =
     cashBalance + openPositionsValue + liveUnrealizedPnl;
-
-  const animatedPortfolioValue = useAnimatedNumber(livePortfolioValue, 300);
-  const animatedLiveUnrealizedPnl = useAnimatedNumber(liveUnrealizedPnl, 300);
 
   const evaluatedCount =
     stats?.orchestrator.scanner.evaluatedOpportunities || 0;
@@ -276,11 +271,10 @@ export function DashboardPage() {
                   Portfolio Value
                 </div>
                 <div className="text-xl font-bold tracking-tight leading-none text-foreground">
-                  $
-                  {animatedPortfolioValue.toLocaleString(undefined, {
-                    minimumFractionDigits: 2,
-                    maximumFractionDigits: 2,
-                  })}
+                  <NumberFlow
+                    value={livePortfolioValue}
+                    format={{ style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 2 }}
+                  />
                 </div>
                 <div className="text-[10px] mt-1.5 text-muted-foreground/80">
                   Cash: $
@@ -298,12 +292,18 @@ export function DashboardPage() {
                 <div
                   className={`text-xl font-bold tracking-tight leading-none ${pnlColor(liveUnrealizedPnl)}`}
                 >
-                  {formatPnl(animatedLiveUnrealizedPnl)}
+                  <NumberFlow
+                    value={liveUnrealizedPnl}
+                    format={{ style: "currency", currency: "USD", signDisplay: "always", minimumFractionDigits: 4, maximumFractionDigits: 4 }}
+                  />
                 </div>
                 <div
                   className={`text-[10px] mt-1.5 font-bold ${pnlColor(netPnl, "80")}`}
                 >
-                  {formatPnl(animatedNetPnl)} (Realized)
+                  <NumberFlow
+                    value={netPnl}
+                    format={{ style: "currency", currency: "USD", signDisplay: "always", minimumFractionDigits: 4, maximumFractionDigits: 4 }}
+                  /> (Realized)
                 </div>
               </div>
 

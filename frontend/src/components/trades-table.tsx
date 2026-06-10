@@ -1,7 +1,8 @@
 "use client";
 
 import type { SimulatedTrade, LiveMarketPrice } from "@/lib/types";
-import { pnlColor, formatPnl, polymarketMarketUrl } from "@/lib/utils";
+import { polymarketMarketUrl, formatPnl, pnlColor, shortCampaignTitle } from "@/lib/utils";
+import NumberFlow from "@number-flow/react";
 import { ExternalLink } from "lucide-react";
 
 interface TradesTableProps {
@@ -183,7 +184,7 @@ export function TradesTable({
                         onClick={(e) => e.stopPropagation()}
                       >
                         <span className="truncate">
-                          {trade.campaignTitle || "Unknown Campaign"}
+                          {shortCampaignTitle(trade.campaignTitle)}
                         </span>
                         <ExternalLink
                           size={10}
@@ -239,7 +240,10 @@ export function TradesTable({
                           <span
                             className={`tabular-nums font-semibold ${unrealizedPnl >= 0 ? "text-emerald-400" : "text-red-400"}`}
                           >
-                            {formatPnl(unrealizedPnl)}
+                            <NumberFlow
+                              value={unrealizedPnl}
+                              format={{ style: "currency", currency: "USD", signDisplay: "always", minimumFractionDigits: 4, maximumFractionDigits: 4 }}
+                            />
                           </span>
                           <span
                             className={`text-[10px] tabular-nums ${unrealizedPnlPct! >= 0 ? "text-emerald-400/60" : "text-red-400/60"}`}
@@ -292,7 +296,7 @@ export function TradesTable({
                         onClick={(e) => e.stopPropagation()}
                       >
                         <span className="truncate">
-                          {trade.campaignTitle || "Unknown Campaign"}
+                          {shortCampaignTitle(trade.campaignTitle)}
                         </span>
                         <ExternalLink
                           size={10}
@@ -378,7 +382,10 @@ export function TradesTable({
                       <span
                         className={`tabular-nums font-semibold ${pnlColor(realizedPnl)}`}
                       >
-                        {formatPnl(realizedPnl)}
+                        <NumberFlow
+                          value={realizedPnl}
+                          format={{ style: "currency", currency: "USD", signDisplay: "always", minimumFractionDigits: 4, maximumFractionDigits: 4 }}
+                        />
                       </span>
                       <span
                         className={`text-[10px] tabular-nums ${pnlColor(realizedPnl, "60")}`}

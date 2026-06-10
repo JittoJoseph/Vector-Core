@@ -33,3 +33,12 @@ export function polymarketMarketUrl({
   if (marketId) return `https://polymarket.com/market/${marketId}`;
   return "https://polymarket.com";
 }
+
+export function shortCampaignTitle(title: string | null | undefined): string {
+  if (!title) return "Unknown Campaign";
+  const match = title.match(/(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]* \d{1,2}\s*-\s*(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]* \d{1,2}/i);
+  if (match) {
+    return match[0];
+  }
+  return title;
+}
