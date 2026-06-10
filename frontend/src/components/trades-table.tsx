@@ -10,8 +10,7 @@ interface TradesTableProps {
   type: "OPEN" | "SETTLED";
   /** Real-time prices keyed by tokenId, refreshed from WS */
   livePrices?: Record<string, LiveMarketPrice>;
-  /** Market end dates keyed by marketId */
-  marketEndDates?: Record<string, string>;
+
   onTradeClick?: (trade: SimulatedTrade) => void;
   onLoadMore?: () => void;
   hasMore?: boolean;
@@ -23,7 +22,6 @@ export function TradesTable({
   loading,
   type,
   livePrices = {},
-  marketEndDates = {},
   onTradeClick,
   onLoadMore,
   hasMore = false,
@@ -56,10 +54,8 @@ export function TradesTable({
   const sortedTrades = [...trades];
   if (type === "OPEN") {
     sortedTrades.sort((a, b) => {
-      const aEnd =
-        a.campaignEndDate ?? (a.bucketId ? marketEndDates[a.bucketId] : null);
-      const bEnd =
-        b.campaignEndDate ?? (b.bucketId ? marketEndDates[b.bucketId] : null);
+      const aEnd = a.campaignEndDate;
+      const bEnd = b.campaignEndDate;
       if (!aEnd && !bEnd) return 0;
       if (!aEnd) return 1;
       if (!bEnd) return -1;
@@ -131,9 +127,7 @@ export function TradesTable({
             const isClosed = trade.status === "SETTLED";
             const isOpen = trade.status === "OPEN";
 
-            const endDateStr =
-              trade.campaignEndDate ??
-              (trade.bucketId ? marketEndDates[trade.bucketId] : null);
+            const endDateStr = trade.campaignEndDate;
 
             if (type === "OPEN") {
               const livePrice = trade.tokenId

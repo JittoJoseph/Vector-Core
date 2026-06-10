@@ -169,28 +169,7 @@ export type OrderbookLevel = z.infer<typeof OrderbookLevelSchema>;
 export const MidpointResponseSchema = z.object({ mid: z.string() });
 export type MidpointResponse = z.infer<typeof MidpointResponseSchema>;
 
-export interface DeadlineParseResult {
-  deadline: Date;
-  deadlineDate: string;
-  matchedText: string;
-}
 
-export interface ClassifiedMarket {
-  eventId: string;
-  eventSlug: string;
-  eventTitle: string;
-  market: GammaMarket;
-  underlyingKey: string;
-  deadline: Date;
-  deadlineDate: string;
-  yesTokenId: string;
-  noTokenId: string;
-  outcomes: string[];
-  outcomePrices: number[];
-  noPrice: number | null;
-  familyKind: "deadline_ladder" | "same_deadline_group" | "single_deadline";
-  rejectionReason: string | null;
-}
 
 export interface ApiResponse<T> {
   success: boolean;

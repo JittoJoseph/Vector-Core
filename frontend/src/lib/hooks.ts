@@ -128,14 +128,14 @@ export function useTrades(status?: string) {
 export function useLiveMarkets(): LiveMarketInfo[] {
   const [liveMarkets, setLiveMarkets] = useState<LiveMarketInfo[]>([]);
 
-  // Seed from REST on mount so top section isn't blank before first WS broadcast
+  // Seed from REST on mount
   useEffect(() => {
     let cancelled = false;
     getApiClient()
-      .getActiveMarket()
-      .then((market) => {
-        if (!cancelled && market) {
-          setLiveMarkets((prev) => (prev.length === 0 ? [market] : prev));
+      .getLiveMarkets()
+      .then((markets) => {
+        if (!cancelled && markets) {
+          setLiveMarkets(markets);
         }
       })
       .catch(() => {

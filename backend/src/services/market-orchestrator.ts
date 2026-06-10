@@ -180,8 +180,6 @@ export class MarketOrchestrator extends EventEmitter {
   getLiveMarkets() {
     return Array.from(this.trackedBuckets.values()).map((b) => ({
       marketId: b.bucketId,
-      eventId: b.campaignId,
-      question: b.groupItemTitle,
       noTokenId: b.noTokenId,
       yesTokenId: b.yesTokenId,
       noPrice: b.noPrice,

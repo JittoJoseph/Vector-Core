@@ -113,11 +113,7 @@ export function DashboardPage() {
     return map;
   }, [liveMarkets]);
 
-  const marketEndDates = useMemo<Record<string, string>>(() => {
-    const map: Record<string, string> = {};
-    for (const m of liveMarkets) map[m.marketId] = m.deadline;
-    return map;
-  }, [liveMarkets]);
+
 
   // Financial Stats
   const initialCapital = parseFloat(performance?.initialCapital || "0");
@@ -167,7 +163,7 @@ export function DashboardPage() {
       liveUnrealizedPnl += (liveMid - entryPrice) * shares - fees;
     }
 
-    const endStr = t.campaignEndDate ?? (t.bucketId ? marketEndDates[t.bucketId] : null);
+    const endStr = t.campaignEndDate;
     if (endStr) {
       const d = new Date(endStr);
       if (!closestExpiration || d < closestExpiration) {
@@ -380,7 +376,6 @@ export function DashboardPage() {
                   trades={openTrades}
                   loading={tradesLoading}
                   livePrices={livePricesMap}
-                  marketEndDates={marketEndDates}
                   onTradeClick={setSelectedTrade}
                   onLoadMore={loadMoreTrades}
                   hasMore={hasMoreTrades}
@@ -427,7 +422,6 @@ export function DashboardPage() {
                   type="SETTLED"
                   trades={settledTrades}
                   loading={tradesLoading}
-                  marketEndDates={marketEndDates}
                   onTradeClick={setSelectedTrade}
                   onLoadMore={loadMoreTrades}
                   hasMore={hasMoreTrades}

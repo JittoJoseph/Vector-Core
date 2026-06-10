@@ -70,13 +70,6 @@ export class ApiClient {
     return fetchWithRetry(`${this.baseUrl}/ping`);
   }
 
-  async getActiveMarket(): Promise<LiveMarketInfo | null> {
-    const response = await fetch(`${this.baseUrl}/api/active-market`);
-    if (response.status === 204) return null;
-    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-    return response.json();
-  }
-
   async getCampaigns(params?: { limit?: number }): Promise<DistributionCampaign[]> {
     const searchParams = new URLSearchParams();
     if (params?.limit) searchParams.set("limit", String(params.limit));

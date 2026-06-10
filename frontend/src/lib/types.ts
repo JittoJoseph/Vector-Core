@@ -62,19 +62,11 @@ export interface LiveMarketPrice {
 
 export interface LiveMarketInfo {
   marketId: string;
-  eventId: string;
-  eventSlug: string;
-  eventTitle: string;
-  question: string;
-  slug: string | null;
-  deadline: string;
-  deadlineDate: string;
   yesTokenId: string;
   noTokenId: string;
   noPrice: number | null;
   markPrice: Record<string, { bid: number; ask: number; mid: number }>;
   status: "OPEN" | "AWAITING_RESOLUTION" | "RESOLVED";
-  hasPosition: boolean;
 }
 
 export interface SimulatedTrade {
@@ -139,9 +131,6 @@ export interface SystemStats {
       pausedByRiskGuard: boolean;
       riskPauseTriggeredAt: number | null;
     };
-    btcConnected?: boolean;
-    btcPrice?: number | null;
-    momentum?: null;
   };
   config: {
     deadlineLookaheadDays: number;
@@ -153,12 +142,6 @@ export interface SystemStats {
     minExpectedNetProfit: number;
     startingCapital: number;
     maxPositions: number;
-    // legacy optional config
-    marketWindow?: string;
-    entryPriceThreshold?: number;
-    maxEntryPrice?: number;
-    tradeFromWindowSeconds?: number;
-    minBtcDistanceUsd?: number;
   };
 }
 

@@ -135,15 +135,6 @@ export class ApiServer {
       });
     });
 
-    this.app.get("/api/active-market", (_req, res) => {
-      const live = getMarketOrchestrator().getLiveMarkets();
-      if (live.length === 0) {
-        res.status(204).end();
-        return;
-      }
-      res.json(live[0]);
-    });
-
     this.app.get("/api/live-markets", (_req, res) => {
       res.json(getMarketOrchestrator().getLiveMarkets());
     });
