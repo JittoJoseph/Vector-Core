@@ -7,7 +7,8 @@ import type {
   SimulatedTrade,
   SystemStats,
   LiveMarketInfo,
-  DiscoveredMarket,
+  DistributionBucket,
+  DistributionCampaign,
   PerformanceMetrics,
   AuditLog,
   ActivityEntry,
@@ -205,8 +206,8 @@ export function useSystemStats() {
 /**
  * Hook to fetch active markets list with pagination (DB-backed, for the Markets tab table).
  */
-export function useActiveMarkets() {
-  const [markets, setMarkets] = useState<DiscoveredMarket[]>([]);
+export function useBuckets() {
+  const [buckets, setBuckets] = useState<DistributionBucket[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(false);
@@ -216,16 +217,16 @@ export function useActiveMarkets() {
 
   const PAGE_SIZE = 20;
 
-  const fetchMarkets = useCallback(async () => {
+  const fetchBuckets = useCallback(async () => {
     try {
       setLoading(true);
       dbFetchedRef.current = 0;
       const api = getApiClient();
-      const response = await api.getMarkets({
+      const response = await api.getBuckets({
         limit: PAGE_SIZE,
         offset: 0,
       });
-      setMarkets(response);
+      setBuckets(response);
       dbFetchedRef.current = response.length;
       setHasMore(response.length === PAGE_SIZE);
       setError(null);
@@ -241,36 +242,62 @@ export function useActiveMarkets() {
     try {
       setLoadingMore(true);
       const api = getApiClient();
-      const response = await api.getMarkets({
+      const response = await api.getBuckets({
         limit: PAGE_SIZE,
         offset: dbFetchedRef.current,
       });
       dbFetchedRef.current += response.length;
-      setMarkets((prev) => {
+      setBuckets((prev) => {
         const ids = new Set(prev.map((m) => m.id));
         return [...prev, ...response.filter((m) => !ids.has(m.id))];
       });
       setHasMore(response.length === PAGE_SIZE);
     } catch {
-      // silent — keep existing markets visible
+      // silent — keep existing buckets visible
     } finally {
       setLoadingMore(false);
     }
   }, [loadingMore]);
 
   useEffect(() => {
-    fetchMarkets();
-  }, [fetchMarkets]);
+    fetchBuckets();
+  }, [fetchBuckets]);
 
   return {
-    markets,
+    buckets,
     loading,
     loadingMore,
     hasMore,
     error,
-    refetch: fetchMarkets,
+    refetch: fetchBuckets,
     loadMore,
   };
+}
+
+export function useCampaigns() {
+  const [campaigns, setCampaigns] = useState<DistributionCampaign[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<Error | null>(null);
+
+  const fetchCampaigns = useCallback(async () => {
+    try {
+      setLoading(true);
+      const api = getApiClient();
+      const response = await api.getCampaigns({ limit: 100 });
+      setCampaigns(response);
+      setError(null);
+    } catch (err) {
+      setError(err as Error);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchCampaigns();
+  }, [fetchCampaigns]);
+
+  return { campaigns, loading, error, refetch: fetchCampaigns };
 }
 
 /**
