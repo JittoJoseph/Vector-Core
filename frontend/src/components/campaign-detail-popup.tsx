@@ -85,6 +85,11 @@ export function CampaignDetailPopup({ campaign, onClose }: CampaignDetailPopupPr
                              MODAL
                            </span>
                         )}
+                        {b.hasOpenPosition && (
+                           <span className="text-[9px] font-bold tracking-wider px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-500 border border-amber-500/30">
+                             POSITION
+                           </span>
+                        )}
                       </div>
                     </td>
                     <td className="py-3 px-4 text-right tabular-nums text-emerald-400 font-medium">

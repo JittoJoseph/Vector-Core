@@ -34,6 +34,7 @@ export interface DistributionBucket {
   lastFetchedAt: string;
   createdAt: string;
   updatedAt: string;
+  hasOpenPosition?: boolean;
 }
 
 export interface Opportunity {
@@ -91,6 +92,7 @@ export interface SimulatedTrade {
   marketSlug: string | null;
   marketQuestion: string | null;
   campaignId?: string | null;
+  campaignSlug?: string | null;
   campaignTitle?: string | null;
   bucketGroupTitle?: string | null;
   campaignEndDate: string | null;

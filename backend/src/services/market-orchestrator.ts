@@ -333,6 +333,7 @@ export class MarketOrchestrator extends EventEmitter {
     
     interface Candidate {
       bucket: typeof schema.distributionBuckets.$inferSelect;
+      campaign: typeof schema.distributionCampaigns.$inferSelect;
       expectedNetProfit: number;
       expectedReturnPercent: number;
       fill: any;
@@ -412,7 +413,7 @@ export class MarketOrchestrator extends EventEmitter {
             
             const expectedReturnPercent = expectedNetProfit / fill.totalCost;
             
-            allCandidates.push({ bucket, expectedNetProfit, expectedReturnPercent, fill, top, depthAtLimit, budget });
+            allCandidates.push({ bucket, campaign, expectedNetProfit, expectedReturnPercent, fill, top, depthAtLimit, budget });
           }
         }
       }
@@ -443,6 +444,8 @@ export class MarketOrchestrator extends EventEmitter {
         
         const trade = await createSimulatedTrade({
           campaignId: cand.bucket.campaignId,
+          campaignSlug: cand.campaign.slug,
+          campaignTitle: cand.campaign.title,
           bucketId: cand.bucket.id,
           bucketGroupTitle: cand.bucket.groupItemTitle,
           tokenId: cand.bucket.noTokenId,

@@ -197,9 +197,18 @@ export class ApiServer {
                  const isRelevant = hasOpenPosition || isModal || (isCandidate && (noPrice <= config.strategy.maxNoEntryPrice + 0.10 || Number.isNaN(noPrice)));
                  if (isRelevant) {
                     trackedCount++;
-                    relevantBuckets.push(b);
+                    relevantBuckets.push({
+                      ...b,
+                      hasOpenPosition
+                    });
                  }
               }
+
+              relevantBuckets.sort((a, b) => {
+                const [aMin] = parseBucketMinMax(a.groupItemTitle);
+                const [bMin] = parseBucketMinMax(b.groupItemTitle);
+                return aMin - bMin;
+              });
            }
            
            results.push({
@@ -260,6 +269,8 @@ export class ApiServer {
             
         const rows = rawRows.map(r => ({
            ...r.trade,
+           campaignTitle: r.trade.campaignTitle || r.campaign?.title,
+           campaignSlug: r.trade.campaignSlug || r.campaign?.slug,
            campaignEndDate: r.campaign?.endDate
         }));
         

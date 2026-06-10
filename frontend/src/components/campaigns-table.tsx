@@ -50,17 +50,9 @@ export function CampaignsTable() {
                 </td>
                 <td className="py-3 px-4 min-w-[300px]">
                   <div className="flex flex-col gap-0.5">
-                    <a
-                      href={`https://polymarket.com/event/${c.slug}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="font-medium text-foreground hover:text-blue-400 inline-flex items-center gap-1.5"
-                      title={c.title}
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      <span className="truncate max-w-[400px]">{c.title}</span>
-                      <ExternalLink size={10} className="text-muted-foreground/40 shrink-0" />
-                    </a>
+                    <span className="font-medium text-foreground truncate max-w-[400px]">
+                      {c.title}
+                    </span>
                   </div>
                 </td>
                 <td className="py-3 px-4 text-right text-muted-foreground">

@@ -168,7 +168,7 @@ export function DashboardPage() {
     }
 
     const endStr =
-      t.marketEndDate ?? (t.marketId ? marketEndDates[t.marketId] : null);
+      t.campaignEndDate ?? t.marketEndDate ?? (t.marketId ? marketEndDates[t.marketId] : null);
     if (endStr) {
       const d = new Date(endStr);
       if (!closestExpiration || d < closestExpiration) {
@@ -575,9 +575,9 @@ export function DashboardPage() {
                             >
                               <div
                                 className="text-[11px] font-medium text-foreground truncate"
-                                title={trade.marketQuestion || "Unknown"}
+                                title={trade.campaignTitle ? `${trade.campaignTitle} - ${trade.bucketGroupTitle}` : "Unknown"}
                               >
-                                {trade.marketQuestion}
+                                {trade.campaignTitle ? `${trade.campaignTitle} - ${trade.bucketGroupTitle}` : "Unknown"}
                               </div>
                               <div className="flex justify-between items-end">
                                 <div className="text-[10px] text-muted-foreground/60">

@@ -78,7 +78,10 @@ export function TradesTable({
                   TIME LEFT
                 </th>
                 <th className="text-left py-2.5 px-3 font-medium text-muted-foreground tracking-wider text-[10px]">
-                  MARKET QUESTION
+                  CAMPAIGN
+                </th>
+                <th className="text-left py-2.5 px-3 font-medium text-muted-foreground tracking-wider text-[10px]">
+                  COUNT
                 </th>
                 <th className="text-right py-2.5 px-3 font-medium text-muted-foreground tracking-wider text-[10px]">
                   COST BASIS
@@ -93,7 +96,10 @@ export function TradesTable({
             ) : (
               <>
                 <th className="text-left py-2.5 px-3 font-medium text-muted-foreground tracking-wider text-[10px]">
-                  MARKET QUESTION
+                  CAMPAIGN
+                </th>
+                <th className="text-left py-2.5 px-3 font-medium text-muted-foreground tracking-wider text-[10px]">
+                  COUNT
                 </th>
                 <th className="text-right py-2.5 px-3 font-medium text-muted-foreground tracking-wider text-[10px]">
                   RESOLUTION DATE
@@ -146,7 +152,7 @@ export function TradesTable({
                   : null;
 
               const polyUrl = polymarketMarketUrl({
-                eventSlug: trade.eventSlug,
+                eventSlug: trade.campaignSlug,
                 marketSlug: trade.marketSlug,
                 marketId: trade.marketId,
               });
@@ -172,19 +178,19 @@ export function TradesTable({
                     )}
                   </td>
 
-                  {/* MARKET QUESTION */}
-                  <td className="py-2.5 px-3 max-w-[240px]">
+                  {/* CAMPAIGN */}
+                  <td className="py-2.5 px-3 max-w-[200px]">
                     <div className="flex flex-col gap-1">
                       <a
                         href={polyUrl}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="font-medium text-[11px] text-foreground hover:text-blue-400 truncate inline-flex items-center gap-1.5"
-                        title={trade.campaignTitle ? `${trade.campaignTitle} - ${trade.bucketGroupTitle}` : "Unknown Market"}
+                        title={trade.campaignTitle || "Unknown Campaign"}
                         onClick={(e) => e.stopPropagation()}
                       >
                         <span className="truncate">
-                          {trade.campaignTitle ? `${trade.campaignTitle} - ${trade.bucketGroupTitle}` : "Unknown Market"}
+                          {trade.campaignTitle || "Unknown Campaign"}
                         </span>
                         <ExternalLink
                           size={10}
@@ -192,6 +198,13 @@ export function TradesTable({
                         />
                       </a>
                     </div>
+                  </td>
+
+                  {/* COUNT */}
+                  <td className="py-2.5 px-3 whitespace-nowrap">
+                    <span className="text-[11px] font-medium text-muted-foreground">
+                      {trade.bucketGroupTitle || "N/A"}
+                    </span>
                   </td>
 
                   {/* COST BASIS */}
@@ -262,7 +275,7 @@ export function TradesTable({
               const exitTs = trade.exitTs ? new Date(trade.exitTs) : null;
 
               const polyUrl = polymarketMarketUrl({
-                eventSlug: trade.eventSlug,
+                eventSlug: trade.campaignSlug,
                 marketSlug: trade.marketSlug,
                 marketId: trade.marketId,
               });
@@ -275,18 +288,19 @@ export function TradesTable({
                     idx % 2 === 0 ? "bg-transparent" : "bg-card/5"
                   }`}
                 >
-                  <td className="py-2.5 px-3 max-w-[240px]">
+                  {/* CAMPAIGN */}
+                  <td className="py-2.5 px-3 max-w-[200px]">
                     <div className="flex flex-col">
                       <a
                         href={polyUrl}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="font-medium text-[11px] text-foreground hover:text-blue-400 truncate inline-flex items-center gap-1.5"
-                        title={trade.campaignTitle ? `${trade.campaignTitle} - ${trade.bucketGroupTitle}` : "Unknown Market"}
+                        title={trade.campaignTitle || "Unknown Campaign"}
                         onClick={(e) => e.stopPropagation()}
                       >
                         <span className="truncate">
-                          {trade.campaignTitle ? `${trade.campaignTitle} - ${trade.bucketGroupTitle}` : "Unknown Market"}
+                          {trade.campaignTitle || "Unknown Campaign"}
                         </span>
                         <ExternalLink
                           size={10}
@@ -294,6 +308,13 @@ export function TradesTable({
                         />
                       </a>
                     </div>
+                  </td>
+
+                  {/* COUNT */}
+                  <td className="py-2.5 px-3 whitespace-nowrap">
+                    <span className="text-[11px] font-medium text-muted-foreground">
+                      {trade.bucketGroupTitle || "N/A"}
+                    </span>
                   </td>
 
                   {/* RESOLUTION DATE */}
