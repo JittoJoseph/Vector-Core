@@ -704,17 +704,12 @@ export function useActivityLog() {
       const price = trade.entryPrice
         ? `@${(parseFloat(trade.entryPrice) * 100).toFixed(1)}¢`
         : "";
-      const btc = trade.btcPriceAtEntry
-        ? ` BTC $${parseFloat(trade.btcPriceAtEntry).toLocaleString("en-US", { maximumFractionDigits: 0 })}`
-        : "";
-      const momentum = (trade as any).momentum;
-      const momStr = momentum ? ` mom:${momentum.direction}` : "";
 
       const entry: ActivityEntry = {
         id,
         kind: "TRADE_OPENED",
         title: "TRADE OPENED",
-        detail: `${outcome} ${price}${btc}${momStr} — $${trade.actualCost}`,
+        detail: `${outcome} ${price} — $${trade.actualCost}`,
         ts: Date.now(),
         trade,
       };
