@@ -349,9 +349,10 @@ export function DashboardPage() {
                   },
                   {
                     id: "history",
-                    label: `HISTORY`,
+                    label: `TRADE HISTORY`,
                   },
-                  { id: "campaigns", label: "CAMPAIGNS" },
+                  { id: "campaigns", label: "ACTIVE CAMPAIGNS" },
+                  { id: "campaign_history", label: "CAMPAIGN HISTORY" },
                   { id: "diagnostics", label: "DIAGNOSTICS" },
                 ].map((tab) => (
                   <button
@@ -434,7 +435,15 @@ export function DashboardPage() {
                 value="campaigns"
                 className="mt-0 flex-1 p-0 flex flex-col h-full"
               >
-                <CampaignsTable />
+                <CampaignsTable status="active" />
+              </TabsContent>
+
+              {/* CAMPAIGN HISTORY TAB */}
+              <TabsContent
+                value="campaign_history"
+                className="mt-0 flex-1 p-0 flex flex-col h-full"
+              >
+                <CampaignsTable status="history" />
               </TabsContent>
 
               {/* DIAGNOSTICS TAB */}

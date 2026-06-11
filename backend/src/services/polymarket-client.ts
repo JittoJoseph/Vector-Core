@@ -111,6 +111,18 @@ export class PolymarketClient {
     );
   }
 
+  async getEventById(id: string): Promise<GammaEvent | null> {
+    return withRetry(
+      async () => {
+        const response = await this.gammaApi.get(
+          `/events/${encodeURIComponent(id)}`,
+        );
+        return GammaEventSchema.parse(response.data);
+      },
+      { maxRetries: 3, retryOn: isRateLimitError },
+    );
+  }
+
   async getMarketById(marketId: string): Promise<GammaMarket | null> {
     return withRetry(
       async () => {

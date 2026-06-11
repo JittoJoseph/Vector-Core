@@ -145,14 +145,23 @@ export class ApiServer {
         const config = getConfig();
         const orchestrator = getMarketOrchestrator();
         const limit = Math.min(parseInt(req.query.limit as string) || 50, 200);
+        const status = req.query.status as string || 'active';
         
-        const campaigns = await db
-          .select()
-          .from(schema.distributionCampaigns)
-          .orderBy(desc(schema.distributionCampaigns.updatedAt))
-          .limit(limit);
+        let campaigns;
+        if (status === 'history') {
+          campaigns = await db.select().from(schema.distributionCampaigns)
+            .where(eq(schema.distributionCampaigns.active, false))
+            .orderBy(desc(schema.distributionCampaigns.updatedAt))
+            .limit(limit);
+        } else {
+          campaigns = await db.select().from(schema.distributionCampaigns)
+            .where(eq(schema.distributionCampaigns.active, true))
+            .orderBy(desc(schema.distributionCampaigns.updatedAt))
+            .limit(limit);
+        }
 
         const allBuckets = await db.select().from(schema.distributionBuckets);
+        const allTrades = await db.select().from(schema.simulatedTrades);
         const openPositions = orchestrator.getOpenPositions();
         
         const results = [];
@@ -202,13 +211,16 @@ export class ApiServer {
               });
            }
            
+           const historicalTrades = allTrades.filter(t => t.campaignId === c.id);
+
            results.push({
               ...c,
               modalBucketTitle: modalBucket?.groupItemTitle ?? "N/A",
               candidateCount,
               trackedCount,
               positionCount,
-              relevantBuckets
+              relevantBuckets,
+              historicalTrades
            });
         }
 

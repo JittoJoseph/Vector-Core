@@ -214,10 +214,29 @@ export class MarketOrchestrator extends EventEmitter {
     
     const db = getDb();
     
+    const activeApiEventIds = new Set(result.events.map(e => String(e.id)));
+    
     for (const event of result.events) {
       if (this.paused) break;
       if (!event.negRisk) continue; // Must be a multi-outcome campaign
       await this.persistCampaign(event);
+    }
+    
+    // Check for campaigns that dropped from the active API list
+    const activeDbCampaigns = await db.select().from(schema.distributionCampaigns).where(eq(schema.distributionCampaigns.active, true));
+    for (const c of activeDbCampaigns) {
+      if (this.paused) break;
+      if (!activeApiEventIds.has(c.id)) {
+        try {
+          const fullEvent = await this.client.getEventById(c.id);
+          if (fullEvent && (fullEvent.closed || !fullEvent.active)) {
+            logger.info({ campaignId: c.id }, "Campaign dropped from active API list, fetching final state...");
+            await this.persistCampaign(fullEvent);
+          }
+        } catch (err) {
+          logger.error({ err, campaignId: c.id }, "Failed to fetch dropped campaign state");
+        }
+      }
     }
     
     if (this.paused) return;
@@ -420,8 +439,24 @@ export class MarketOrchestrator extends EventEmitter {
     const tokensToSubscribe = Array.from(requiredTokens).filter(t => !currentlySubscribed.has(t));
     const tokensToUnsubscribe = Array.from(currentlySubscribed).filter(t => !requiredTokens.has(t));
     
-    if (tokensToSubscribe.length > 0) this.wsWatcher.subscribe(tokensToSubscribe);
-    if (tokensToUnsubscribe.length > 0) this.wsWatcher.unsubscribe(tokensToUnsubscribe);
+    if (tokensToSubscribe.length > 0) {
+      const details = tokensToSubscribe.map(t => {
+        const bucketId = this.tokenToBucket.get(t);
+        const bucket = bucketId ? this.trackedBuckets.get(bucketId) : null;
+        return bucket ? `"${bucket.groupItemTitle}" (${t.slice(0, 4)}...)` : t;
+      });
+      logger.info({ count: tokensToSubscribe.length, tokens: tokensToSubscribe, details }, "Tracking new tokens due to modal bucket shift or new campaign");
+      this.wsWatcher.subscribe(tokensToSubscribe);
+    }
+    if (tokensToUnsubscribe.length > 0) {
+      const details = tokensToUnsubscribe.map(t => {
+        const bucketId = this.tokenToBucket.get(t);
+        const bucket = bucketId ? this.trackedBuckets.get(bucketId) : null;
+        return bucket ? `"${bucket.groupItemTitle}" (${t.slice(0, 4)}...)` : t;
+      });
+      logger.info({ count: tokensToUnsubscribe.length, tokens: tokensToUnsubscribe, details }, "Untracking tokens that are no longer candidates");
+      this.wsWatcher.unsubscribe(tokensToUnsubscribe);
+    }
     
     allCandidates.sort((a, b) => {
       if (b.expectedReturnPercent !== a.expectedReturnPercent) return b.expectedReturnPercent - a.expectedReturnPercent;
@@ -518,6 +553,29 @@ export class MarketOrchestrator extends EventEmitter {
     const positions = [...this.openPositions.values()].filter((p) => p.bucketId === bucketId);
     const state = this.trackedBuckets.get(bucketId);
     if (state) state.resolved = true;
+
+    // Update the DB to reflect the resolution of this bucket so it stops being considered
+    try {
+      const db = getDb();
+      const [bucket] = await db.select().from(schema.distributionBuckets).where(eq(schema.distributionBuckets.id, bucketId));
+      if (bucket) {
+        const isYesWinner = bucket.yesTokenId === winningTokenId;
+        await db.update(schema.distributionBuckets).set({
+          yesPrice: isYesWinner ? "1" : "0",
+          noPrice: isYesWinner ? "0" : "1",
+          updatedAt: new Date()
+        }).where(eq(schema.distributionBuckets.id, bucketId));
+        
+        await db.update(schema.distributionCampaigns).set({
+          active: false,
+          closed: true,
+          updatedAt: new Date()
+        }).where(eq(schema.distributionCampaigns.id, bucket.campaignId));
+      }
+    } catch (err) {
+      logger.error({ err, bucketId }, "Failed to update bucket resolution in DB");
+    }
+
 
     for (const pos of positions) {
       const isWin = pos.tokenId === winningTokenId;

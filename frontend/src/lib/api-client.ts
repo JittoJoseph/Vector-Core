@@ -70,9 +70,10 @@ export class ApiClient {
     return fetchWithRetry(`${this.baseUrl}/ping`);
   }
 
-  async getCampaigns(params?: { limit?: number }): Promise<DistributionCampaign[]> {
+  async getCampaigns(params?: { limit?: number; status?: string }): Promise<DistributionCampaign[]> {
     const searchParams = new URLSearchParams();
     if (params?.limit) searchParams.set("limit", String(params.limit));
+    if (params?.status) searchParams.set("status", params.status);
     const qs = searchParams.toString();
     return fetchWithRetry(`${this.baseUrl}/api/campaigns${qs ? `?${qs}` : ""}`);
   }

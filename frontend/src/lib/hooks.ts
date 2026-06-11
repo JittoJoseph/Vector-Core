@@ -204,7 +204,7 @@ export function useSystemStats() {
 }
 
 
-export function useCampaigns() {
+export function useCampaigns(status: 'active' | 'history' = 'active') {
   const [campaigns, setCampaigns] = useState<DistributionCampaign[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
@@ -213,7 +213,7 @@ export function useCampaigns() {
     try {
       setLoading(true);
       const api = getApiClient();
-      const response = await api.getCampaigns({ limit: 100 });
+      const response = await api.getCampaigns({ limit: 100, status });
       setCampaigns(response);
       setError(null);
     } catch (err) {
@@ -225,7 +225,7 @@ export function useCampaigns() {
 
   useEffect(() => {
     fetchCampaigns();
-  }, [fetchCampaigns]);
+  }, [fetchCampaigns, status]);
 
   return { campaigns, loading, error, refetch: fetchCampaigns };
 }

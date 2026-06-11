@@ -4,8 +4,8 @@ import { useCampaigns } from "@/lib/hooks";
 import { CampaignDetailPopup } from "./campaign-detail-popup";
 import type { DistributionCampaign } from "@/lib/types";
 
-export function CampaignsTable() {
-  const { campaigns, loading } = useCampaigns();
+export function CampaignsTable({ status = 'active' }: { status?: 'active' | 'history' }) {
+  const { campaigns, loading } = useCampaigns(status);
   const [selectedCampaign, setSelectedCampaign] = useState<DistributionCampaign | null>(null);
 
   if (loading) {
@@ -20,7 +20,7 @@ export function CampaignsTable() {
     <div className="flex flex-col h-full bg-card/50 relative">
       <div className="p-4 border-b border-border/20 bg-muted/5 flex items-center justify-between">
         <div className="text-[10px] tracking-[0.15em] text-muted-foreground uppercase font-bold">
-          Active Campaigns
+          {status === 'active' ? "Active Campaigns" : "Campaign History"}
         </div>
         <div className="text-xs font-bold text-foreground">
           {campaigns.length}
@@ -33,9 +33,18 @@ export function CampaignsTable() {
               <th className="text-left py-2.5 px-4 font-medium text-muted-foreground tracking-wider text-[10px] w-8"></th>
               <th className="text-left py-2.5 px-4 font-medium text-muted-foreground tracking-wider text-[10px]">CAMPAIGN</th>
               <th className="text-right py-2.5 px-4 font-medium text-muted-foreground tracking-wider text-[10px]">SERIES</th>
-              <th className="text-right py-2.5 px-4 font-medium text-muted-foreground tracking-wider text-[10px]" title="Actionable Candidate Buckets">CANDIDATES</th>
-              <th className="text-right py-2.5 px-4 font-medium text-muted-foreground tracking-wider text-[10px]" title="Currently Tracked by WS">TRACKED</th>
-              <th className="text-right py-2.5 px-4 font-medium text-muted-foreground tracking-wider text-[10px]">POSITIONS</th>
+              {status === 'active' ? (
+                <>
+                  <th className="text-right py-2.5 px-4 font-medium text-muted-foreground tracking-wider text-[10px]" title="Actionable Candidate Buckets">CANDIDATES</th>
+                  <th className="text-right py-2.5 px-4 font-medium text-muted-foreground tracking-wider text-[10px]" title="Currently Tracked by WS">TRACKED</th>
+                  <th className="text-right py-2.5 px-4 font-medium text-muted-foreground tracking-wider text-[10px]">POSITIONS</th>
+                </>
+              ) : (
+                <>
+                  <th className="text-right py-2.5 px-4 font-medium text-muted-foreground tracking-wider text-[10px]">TRADES</th>
+                  <th className="text-right py-2.5 px-4 font-medium text-muted-foreground tracking-wider text-[10px]">TOTAL PNL</th>
+                </>
+              )}
             </tr>
           </thead>
           <tbody className="divide-y divide-border/10">
@@ -62,15 +71,36 @@ export function CampaignsTable() {
                      </span>
                   ) : "—"}
                 </td>
-                <td className="py-3 px-4 text-right">
-                  <span className="tabular-nums font-medium text-emerald-400">{c.candidateCount ?? 0}</span>
-                </td>
-                <td className="py-3 px-4 text-right">
-                  <span className="tabular-nums font-medium text-blue-400">{c.trackedCount ?? 0}</span>
-                </td>
-                <td className="py-3 px-4 text-right">
-                  <span className="tabular-nums font-medium">{c.positionCount ?? 0}</span>
-                </td>
+                {status === 'active' ? (
+                  <>
+                    <td className="py-3 px-4 text-right">
+                      <span className="tabular-nums font-medium text-emerald-400">{c.candidateCount ?? 0}</span>
+                    </td>
+                    <td className="py-3 px-4 text-right">
+                      <span className="tabular-nums font-medium text-blue-400">{c.trackedCount ?? 0}</span>
+                    </td>
+                    <td className="py-3 px-4 text-right">
+                      <span className="tabular-nums font-medium">{c.positionCount ?? 0}</span>
+                    </td>
+                  </>
+                ) : (
+                  <>
+                    <td className="py-3 px-4 text-right">
+                      <span className="tabular-nums font-medium">{(c as any).historicalTrades?.length ?? 0}</span>
+                    </td>
+                    <td className="py-3 px-4 text-right">
+                      {(() => {
+                        const trades = (c as any).historicalTrades || [];
+                        const pnl = trades.reduce((acc: number, t: any) => acc + (parseFloat(t.realizedPnl || "0")), 0);
+                        return (
+                          <span className={`tabular-nums font-medium font-bold ${pnl > 0 ? "text-emerald-400" : pnl < 0 ? "text-red-400" : ""}`}>
+                            {pnl > 0 ? "+" : ""}{pnl.toFixed(4)}
+                          </span>
+                        );
+                      })()}
+                    </td>
+                  </>
+                )}
               </tr>
             ))}
           </tbody>
