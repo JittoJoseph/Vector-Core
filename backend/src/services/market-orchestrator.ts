@@ -257,6 +257,9 @@ export class MarketOrchestrator extends EventEmitter {
       return;
     }
     
+    const isClosed = event.closed ?? false;
+    const isActive = isClosed ? false : (event.active ?? true);
+    
     await db.insert(schema.distributionCampaigns).values({
       id: eventId,
       slug: event.slug ?? eventId,
@@ -264,16 +267,16 @@ export class MarketOrchestrator extends EventEmitter {
       seriesSlug: (event as any).seriesSlug ?? null,
       startDate: event.startDate ? new Date(event.startDate) : null,
       endDate: event.endDate ? new Date(event.endDate) : null,
-      active: event.active ?? true,
-      closed: event.closed ?? false,
+      active: isActive,
+      closed: isClosed,
       lastFetchedAt: new Date(),
       updatedAt: new Date(),
     }).onConflictDoUpdate({
       target: schema.distributionCampaigns.id,
       set: {
         title: event.title ?? eventId,
-        active: event.active ?? true,
-        closed: event.closed ?? false,
+        active: isActive,
+        closed: isClosed,
         lastFetchedAt: new Date(),
         updatedAt: new Date(),
       }
@@ -440,21 +443,23 @@ export class MarketOrchestrator extends EventEmitter {
     const tokensToUnsubscribe = Array.from(currentlySubscribed).filter(t => !requiredTokens.has(t));
     
     if (tokensToSubscribe.length > 0) {
-      const details = tokensToSubscribe.map(t => {
+      const details = tokensToSubscribe.slice(0, 5).map(t => {
         const bucketId = this.tokenToBucket.get(t);
         const bucket = bucketId ? this.trackedBuckets.get(bucketId) : null;
         return bucket ? `"${bucket.groupItemTitle}" (${t.slice(0, 4)}...)` : t;
       });
-      logger.info({ count: tokensToSubscribe.length, tokens: tokensToSubscribe, details }, "Tracking new tokens due to modal bucket shift or new campaign");
+      if (tokensToSubscribe.length > 5) details.push(`... and ${tokensToSubscribe.length - 5} more`);
+      logger.info({ count: tokensToSubscribe.length, details }, "Tracking new tokens due to modal bucket shift or new campaign");
       this.wsWatcher.subscribe(tokensToSubscribe);
     }
     if (tokensToUnsubscribe.length > 0) {
-      const details = tokensToUnsubscribe.map(t => {
+      const details = tokensToUnsubscribe.slice(0, 5).map(t => {
         const bucketId = this.tokenToBucket.get(t);
         const bucket = bucketId ? this.trackedBuckets.get(bucketId) : null;
         return bucket ? `"${bucket.groupItemTitle}" (${t.slice(0, 4)}...)` : t;
       });
-      logger.info({ count: tokensToUnsubscribe.length, tokens: tokensToUnsubscribe, details }, "Untracking tokens that are no longer candidates");
+      if (tokensToUnsubscribe.length > 5) details.push(`... and ${tokensToUnsubscribe.length - 5} more`);
+      logger.info({ count: tokensToUnsubscribe.length, details }, "Untracking tokens that are no longer candidates");
       this.wsWatcher.unsubscribe(tokensToUnsubscribe);
     }
     
