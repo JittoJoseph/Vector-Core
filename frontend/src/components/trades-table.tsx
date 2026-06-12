@@ -75,9 +75,6 @@ export function TradesTable({
                   MARKET
                 </th>
                 <th className="text-right py-2.5 px-3 font-medium text-muted-foreground tracking-wider text-[10px]">
-                  TIME LEFT
-                </th>
-                <th className="text-right py-2.5 px-3 font-medium text-muted-foreground tracking-wider text-[10px]">
                   COST BASIS
                 </th>
                 <th className="text-right py-2.5 px-3 font-medium text-muted-foreground tracking-wider text-[10px]">
@@ -85,6 +82,9 @@ export function TradesTable({
                 </th>
                 <th className="text-right py-2.5 px-3 font-medium text-muted-foreground tracking-wider text-[10px]">
                   PNL / ROI
+                </th>
+                <th className="text-right py-2.5 px-3 font-medium text-muted-foreground tracking-wider text-[10px]">
+                  TIME LEFT
                 </th>
               </>
             ) : (
@@ -175,20 +175,6 @@ export function TradesTable({
                     </div>
                   </td>
 
-                  {/* TIME LEFT */}
-                  <td className="py-3 px-3 text-right">
-                    {endDateStr ? (
-                      <div className="flex items-center justify-end">
-                        <span className="inline-flex items-center gap-1 px-1.5 py-[2px] rounded border border-yellow-500/10 bg-yellow-500/5 text-yellow-500/90 font-mono text-[10px] font-medium">
-                          <Clock size={10} className="opacity-70" />
-                          <MarketCountdown endDate={endDateStr} />
-                        </span>
-                      </div>
-                    ) : (
-                      <span className="text-muted-foreground/40">—</span>
-                    )}
-                  </td>
-
                   {/* COST BASIS */}
                   <td className="py-3 px-3 text-right">
                     <div className="flex flex-col gap-0.5 items-end">
@@ -249,6 +235,20 @@ export function TradesTable({
                         </span>
                       )}
                     </div>
+                  </td>
+
+                  {/* TIME LEFT */}
+                  <td className="py-3 px-3 text-right">
+                    {endDateStr ? (
+                      <div className="flex items-center justify-end">
+                        <span className="inline-flex items-center gap-1.5 text-muted-foreground font-mono text-[11px] font-medium tabular-nums">
+                          <Clock size={11} className="text-muted-foreground/50" />
+                          <MarketCountdown endDate={endDateStr} />
+                        </span>
+                      </div>
+                    ) : (
+                      <span className="text-muted-foreground/40">—</span>
+                    )}
                   </td>
                 </tr>
               );
@@ -416,7 +416,7 @@ export function TradesTable({
 // Inline MarketCountdown component for portability
 import { useEffect, useState } from "react";
 
-export function MarketCountdown({ endDate }: { endDate: string }) {
+export function MarketCountdown({ endDate, showSeconds = false }: { endDate: string, showSeconds?: boolean }) {
   const [timeLeft, setTimeLeft] = useState("");
 
   useEffect(() => {
@@ -434,16 +434,24 @@ export function MarketCountdown({ endDate }: { endDate: string }) {
       const days = Math.floor(diff / (1000 * 60 * 60 * 24));
       const hours = Math.floor((diff / (1000 * 60 * 60)) % 24);
       const minutes = Math.floor((diff / 1000 / 60) % 60);
+      const seconds = Math.floor((diff / 1000) % 60);
 
-      if (days > 0) setTimeLeft(`${days}d ${hours}h`);
-      else if (hours > 0) setTimeLeft(`${hours}h ${minutes}m`);
-      else setTimeLeft(`${minutes}m`);
+      if (showSeconds) {
+        if (days > 0) setTimeLeft(`${days}d ${hours}h ${minutes}m ${seconds}s`);
+        else if (hours > 0) setTimeLeft(`${hours}h ${minutes}m ${seconds}s`);
+        else if (minutes > 0) setTimeLeft(`${minutes}m ${seconds}s`);
+        else setTimeLeft(`${seconds}s`);
+      } else {
+        if (days > 0) setTimeLeft(`${days}d ${hours}h`);
+        else if (hours > 0) setTimeLeft(`${hours}h ${minutes}m`);
+        else setTimeLeft(`${minutes}m`);
+      }
     };
 
     update();
-    const timer = setInterval(update, 60000);
+    const timer = setInterval(update, showSeconds ? 1000 : 60000);
     return () => clearInterval(timer);
-  }, [endDate]);
+  }, [endDate, showSeconds]);
 
   return <span>{timeLeft}</span>;
 }
