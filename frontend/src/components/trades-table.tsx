@@ -3,7 +3,7 @@
 import type { SimulatedTrade, LiveMarketPrice } from "@/lib/types";
 import { polymarketMarketUrl, formatPnl, pnlColor, shortCampaignTitle, calculateTradeUnrealizedPnl } from "@/lib/utils";
 import NumberFlow from "@number-flow/react";
-import { ExternalLink } from "lucide-react";
+import { ExternalLink, Clock } from "lucide-react";
 
 interface TradesTableProps {
   trades: SimulatedTrade[];
@@ -71,14 +71,11 @@ export function TradesTable({
           <tr className="border-b border-border/30">
             {type === "OPEN" ? (
               <>
-                <th className="text-left py-2.5 px-3 font-medium text-amber-500/80 tracking-wider text-[10px]">
+                <th className="text-left py-2.5 px-3 font-medium text-muted-foreground tracking-wider text-[10px]">
+                  MARKET
+                </th>
+                <th className="text-right py-2.5 px-3 font-medium text-muted-foreground tracking-wider text-[10px]">
                   TIME LEFT
-                </th>
-                <th className="text-left py-2.5 px-3 font-medium text-muted-foreground tracking-wider text-[10px]">
-                  CAMPAIGN
-                </th>
-                <th className="text-left py-2.5 px-3 font-medium text-muted-foreground tracking-wider text-[10px]">
-                  COUNT
                 </th>
                 <th className="text-right py-2.5 px-3 font-medium text-muted-foreground tracking-wider text-[10px]">
                   COST BASIS
@@ -93,10 +90,7 @@ export function TradesTable({
             ) : (
               <>
                 <th className="text-left py-2.5 px-3 font-medium text-muted-foreground tracking-wider text-[10px]">
-                  CAMPAIGN
-                </th>
-                <th className="text-left py-2.5 px-3 font-medium text-muted-foreground tracking-wider text-[10px]">
-                  COUNT
+                  MARKET
                 </th>
                 <th className="text-right py-2.5 px-3 font-medium text-muted-foreground tracking-wider text-[10px]">
                   RESOLUTION DATE
@@ -152,46 +146,47 @@ export function TradesTable({
                     idx % 2 === 0 ? "bg-transparent" : "bg-card/5"
                   }`}
                 >
-                  {/* TIME LEFT */}
-                  <td className="py-2.5 px-3 text-left whitespace-nowrap">
-                    {endDateStr ? (
-                      <div className="text-xs font-medium text-yellow-500/70">
-                        <MarketCountdown endDate={endDateStr} />
+                  {/* MARKET */}
+                  <td className="py-3 px-3">
+                    <div className="flex flex-col gap-1.5 max-w-[280px]">
+                      <div className="flex items-center gap-1.5">
+                        <a
+                          href={polyUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="font-medium text-[12px] text-foreground/90 hover:text-blue-400 truncate inline-flex items-center gap-1 group"
+                          title={trade.campaignTitle || "Unknown Campaign"}
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <span className="truncate">
+                            {shortCampaignTitle(trade.campaignTitle)}
+                          </span>
+                          <ExternalLink
+                            size={10}
+                            className="text-muted-foreground/40 shrink-0 group-hover:text-blue-400/70 transition-colors"
+                          />
+                        </a>
                       </div>
-                    ) : (
-                      <span className="text-xs font-medium text-amber-500/80">
-                        —
-                      </span>
-                    )}
-                  </td>
-
-                  {/* CAMPAIGN */}
-                  <td className="py-2.5 px-3 max-w-[200px]">
-                    <div className="flex flex-col gap-1">
-                      <a
-                        href={polyUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="font-medium text-[11px] text-foreground hover:text-blue-400 truncate inline-flex items-center gap-1.5"
-                        title={trade.campaignTitle || "Unknown Campaign"}
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        <span className="truncate">
-                          {shortCampaignTitle(trade.campaignTitle)}
+                      <div className="flex items-center">
+                        <span className="text-[11px] font-medium text-muted-foreground/80">
+                          {trade.bucketGroupTitle || "N/A"}
                         </span>
-                        <ExternalLink
-                          size={10}
-                          className="text-muted-foreground/40 shrink-0"
-                        />
-                      </a>
+                      </div>
                     </div>
                   </td>
 
-                  {/* COUNT */}
-                  <td className="py-2.5 px-3 whitespace-nowrap">
-                    <span className="text-[11px] font-medium text-muted-foreground">
-                      {trade.bucketGroupTitle || "N/A"}
-                    </span>
+                  {/* TIME LEFT */}
+                  <td className="py-3 px-3 text-right">
+                    {endDateStr ? (
+                      <div className="flex items-center justify-end">
+                        <span className="inline-flex items-center gap-1 px-1.5 py-[2px] rounded border border-yellow-500/10 bg-yellow-500/5 text-yellow-500/90 font-mono text-[10px] font-medium">
+                          <Clock size={10} className="opacity-70" />
+                          <MarketCountdown endDate={endDateStr} />
+                        </span>
+                      </div>
+                    ) : (
+                      <span className="text-muted-foreground/40">—</span>
+                    )}
                   </td>
 
                   {/* COST BASIS */}
@@ -277,33 +272,33 @@ export function TradesTable({
                     idx % 2 === 0 ? "bg-transparent" : "bg-card/5"
                   }`}
                 >
-                  {/* CAMPAIGN */}
-                  <td className="py-2.5 px-3 max-w-[200px]">
-                    <div className="flex flex-col">
-                      <a
-                        href={polyUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="font-medium text-[11px] text-foreground hover:text-blue-400 truncate inline-flex items-center gap-1.5"
-                        title={trade.campaignTitle || "Unknown Campaign"}
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        <span className="truncate">
-                          {shortCampaignTitle(trade.campaignTitle)}
+                  {/* MARKET */}
+                  <td className="py-3 px-3">
+                    <div className="flex flex-col gap-1.5 max-w-[280px]">
+                      <div className="flex items-center gap-1.5">
+                        <a
+                          href={polyUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="font-medium text-[12px] text-foreground/90 hover:text-blue-400 truncate inline-flex items-center gap-1 group"
+                          title={trade.campaignTitle || "Unknown Campaign"}
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <span className="truncate">
+                            {shortCampaignTitle(trade.campaignTitle)}
+                          </span>
+                          <ExternalLink
+                            size={10}
+                            className="text-muted-foreground/40 shrink-0 group-hover:text-blue-400/70 transition-colors"
+                          />
+                        </a>
+                      </div>
+                      <div className="flex items-center">
+                        <span className="text-[11px] font-medium text-muted-foreground/80">
+                          {trade.bucketGroupTitle || "N/A"}
                         </span>
-                        <ExternalLink
-                          size={10}
-                          className="text-muted-foreground/40 shrink-0"
-                        />
-                      </a>
+                      </div>
                     </div>
-                  </td>
-
-                  {/* COUNT */}
-                  <td className="py-2.5 px-3 whitespace-nowrap">
-                    <span className="text-[11px] font-medium text-muted-foreground">
-                      {trade.bucketGroupTitle || "N/A"}
-                    </span>
                   </td>
 
                   {/* RESOLUTION DATE */}
