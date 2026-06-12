@@ -250,26 +250,41 @@ export function usePerformanceRealtime(
   const [error, setError] = useState<Error | null>(null);
 
   // Fetch initial data on mount and when period changes
+  const fetchPerformance = useCallback(async () => {
+    try {
+      setLoading(true);
+      const data = await getApiClient().getPerformance(period);
+      setPerformance(data);
+      setError(null);
+    } catch (err) {
+      setError(err as Error);
+    } finally {
+      setLoading(false);
+    }
+  }, [period]);
+
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
-
-    getApiClient()
-      .getPerformance(period)
-      .then((data) => {
+    
+    // Define an async IIFE to handle the fetch safely with cancellation
+    const doFetch = async () => {
+      try {
+        setLoading(true);
+        const data = await getApiClient().getPerformance(period);
         if (!cancelled) {
           setPerformance(data);
           setError(null);
         }
-      })
-      .catch((err) => {
+      } catch (err) {
         if (!cancelled) {
           setError(err as Error);
         }
-      })
-      .finally(() => {
+      } finally {
         if (!cancelled) setLoading(false);
-      });
+      }
+    };
+    
+    doFetch();
 
     return () => {
       cancelled = true;
@@ -381,7 +396,7 @@ export function usePerformanceRealtime(
     };
   }, []);
 
-  return { performance, loading, error };
+  return { performance, loading, error, refetch: fetchPerformance };
 }
 
 /**

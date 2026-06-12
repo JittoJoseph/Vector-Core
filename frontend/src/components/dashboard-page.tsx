@@ -61,8 +61,7 @@ export function DashboardPage() {
   } = useCampaigns();
 
   const { activities, loading: activitiesLoading } = useActivityLog();
-  const { performance } = usePerformanceRealtime("ALL");
-
+  const { performance, refetch: refetchPerformance } = usePerformanceRealtime("ALL");
 
   const [isRefreshing, setIsRefreshing] = useState(false);
 
@@ -72,9 +71,10 @@ export function DashboardPage() {
       refetchStats().catch(() => {}),
       refetchTrades().catch(() => {}),
       refetchCampaigns().catch(() => {}),
+      refetchPerformance().catch(() => {}),
     ]);
     setIsRefreshing(false);
-  }, [refetchStats, refetchTrades, refetchCampaigns]);
+  }, [refetchStats, refetchTrades, refetchCampaigns, refetchPerformance]);
 
   // Derived datasets
   const openTrades = useMemo(
@@ -174,127 +174,148 @@ export function DashboardPage() {
 
       <main className="flex-1 px-4 py-4 pb-16 max-w-7xl mx-auto w-full space-y-4">
         {/* ── TOP LEVEL COMMAND PANELS ── */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {/* ENGINE HEALTH (MINIMAL) */}
-          <div className="border border-border/30 rounded bg-card/25 p-5 flex flex-col justify-between">
-            <div className="flex items-center justify-between mb-5">
-              <div className="text-[11px] tracking-[0.2em] text-muted-foreground/80 uppercase flex items-center gap-2 font-bold">
-                <Server size={14} className="text-muted-foreground" /> Engine
-                Health
-              </div>
-              <button
-                onClick={handleManualRefresh}
-                className="text-muted-foreground/50 hover:text-foreground transition-colors"
-              >
-                <RefreshCw
-                  size={12}
-                  className={isRefreshing ? "animate-spin" : ""}
-                />
-              </button>
+        <div className="border border-border/30 rounded-xl bg-card/25 p-6 pt-4">
+          <div className="flex items-center justify-between border-b border-border/20 pb-2 mb-3">
+            <div className="text-[10px] tracking-[0.2em] text-muted-foreground/80 uppercase flex items-center gap-2 font-bold">
+              PORTFOLIO PERFORMANCE
             </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <div className="text-[9px] text-muted-foreground/60 uppercase tracking-widest mb-1.5">
-                  Trading Engine
-                </div>
-                <div
-                  className={`text-sm font-bold ${isPaused ? "text-amber-500" : stats?.orchestrator.running ? "text-emerald-400" : "text-muted-foreground"}`}
-                >
-                  {isPaused
-                    ? "PAUSED"
-                    : stats?.orchestrator.running
-                      ? "RUNNING"
-                      : "IDLE"}
-                </div>
-              </div>
-              <div>
-                <div className="text-[9px] text-muted-foreground/60 uppercase tracking-widest mb-1.5">
-                  Websocket Feed
-                </div>
-                <div
-                  className={`text-sm font-bold ${stats?.orchestrator.ws.connected ? "text-emerald-400" : "text-red-400"}`}
-                >
-                  {stats?.orchestrator.ws.connected
-                    ? "CONNECTED"
-                    : "DISCONNECTED"}
-                </div>
-              </div>
-            </div>
+            <button
+              onClick={handleManualRefresh}
+              className="text-muted-foreground/50 hover:text-foreground transition-colors"
+            >
+              <RefreshCw size={12} className={isRefreshing ? "animate-spin" : ""} />
+            </button>
           </div>
 
-          {/* PORTFOLIO HEALTH (MARK TO MARKET) */}
-          <div className="border border-border/30 rounded bg-card/25 p-5 flex flex-col justify-between">
-            <div className="flex items-center justify-between mb-5">
-              <div className="text-[11px] tracking-[0.2em] text-muted-foreground/80 uppercase flex items-center gap-2 font-bold">
-                <TrendingUp size={14} className="text-muted-foreground" />{" "}
-                Portfolio Health (Live)
-              </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 divide-y md:divide-y-0 md:divide-x divide-border/20">
+            {/* Section 1: Returns & PnL */}
+            <div className="flex flex-col gap-4 lg:pr-6">
+               <div className="pt-3">
+                 <div className="text-[9px] text-muted-foreground/60 uppercase tracking-widest mb-0.5 font-bold">Net P&L</div>
+                 <div className={`text-3xl font-bold tracking-tight leading-none ${pnlColor(netPnl)}`}>
+                   <NumberFlow value={netPnl} format={{ style: "currency", currency: "USD", signDisplay: "always", minimumFractionDigits: 4, maximumFractionDigits: 4 }} />
+                 </div>
+                 <div className={`text-xs mt-1.5 font-bold tracking-widest uppercase ${pnlColor(roi, "80")}`}>
+                   {roi > 0 ? "+" : ""}{roi.toFixed(2)}% ROI
+                 </div>
+               </div>
+               
+               <div className="grid grid-cols-2 gap-2 mt-auto">
+                 <div>
+                   <div className="text-[9px] text-muted-foreground/60 uppercase tracking-widest mb-0.5 font-bold">Unrealized</div>
+                   <div className={`text-sm font-bold tracking-tight leading-none ${pnlColor(liveUnrealizedPnl)}`}>
+                     <NumberFlow value={liveUnrealizedPnl} format={{ style: "currency", currency: "USD", signDisplay: "always", minimumFractionDigits: 4, maximumFractionDigits: 4 }} />
+                   </div>
+                 </div>
+                 <div>
+                   <div className="text-[9px] text-muted-foreground/60 uppercase tracking-widest mb-0.5 font-bold">Realized</div>
+                   <div className={`text-sm font-bold tracking-tight leading-none ${pnlColor(parseFloat(performance?.totalPnl || "0"))}`}>
+                     <NumberFlow value={parseFloat(performance?.totalPnl || "0")} format={{ style: "currency", currency: "USD", signDisplay: "always", minimumFractionDigits: 4, maximumFractionDigits: 4 }} />
+                   </div>
+                 </div>
+               </div>
             </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-y-6 gap-x-4">
-              <div className="flex flex-col">
-                <div className="text-[9px] text-muted-foreground/60 uppercase tracking-widest mb-1.5">
-                  Portfolio Value
-                </div>
-                <div className="text-xl font-bold tracking-tight leading-none text-foreground">
-                  <NumberFlow
-                    value={livePortfolioValue}
-                    format={{ style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 2 }}
-                  />
-                </div>
-                <div className="text-[10px] mt-1.5 text-muted-foreground/80">
-                  Cash: $
-                  {cashBalance.toLocaleString(undefined, {
-                    minimumFractionDigits: 1,
-                    maximumFractionDigits: 1,
-                  })}
-                </div>
-              </div>
+            {/* Section 2: Capital Allocation */}
+            <div className="flex flex-col gap-4 md:pl-6 lg:px-6 md:pt-0 pt-4">
+               <div className="pt-3">
+                 <div className="text-[9px] text-muted-foreground/60 uppercase tracking-widest mb-0.5 font-bold">Portfolio Value</div>
+                 <div className="text-2xl font-bold tracking-tight leading-none text-foreground">
+                   <NumberFlow value={portfolioValue} format={{ style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 2 }} />
+                 </div>
+               </div>
+               <div className="flex flex-col gap-1.5 mt-auto">
+                 <div className="flex justify-between items-center">
+                   <div className="text-[10px] text-muted-foreground/60 uppercase tracking-widest font-bold">Cash Balance</div>
+                   <div className="text-xs font-bold text-foreground">${cashBalance.toFixed(2)}</div>
+                 </div>
+                 <div className="flex justify-between items-center">
+                   <div className="text-[10px] text-muted-foreground/60 uppercase tracking-widest font-bold">In Positions</div>
+                   <div className="text-xs font-bold text-foreground">${openPositionsValue.toFixed(2)}</div>
+                 </div>
+                 <div className="flex justify-between items-center border-t border-border/10 pt-1.5 mt-0.5">
+                   <div className="text-[10px] text-muted-foreground/80 uppercase tracking-widest font-bold">Initial Capital</div>
+                   <div className="text-sm font-bold text-foreground">${initialCapital.toFixed(2)}</div>
+                 </div>
+               </div>
+            </div>
 
-              <div className="flex flex-col">
-                <div className="text-[9px] text-muted-foreground/60 uppercase tracking-widest mb-1.5">
-                  Unrealized PnL
-                </div>
-                <div
-                  className={`text-xl font-bold tracking-tight leading-none ${pnlColor(liveUnrealizedPnl)}`}
-                >
-                  <NumberFlow
-                    value={liveUnrealizedPnl}
-                    format={{ style: "currency", currency: "USD", signDisplay: "always", minimumFractionDigits: 4, maximumFractionDigits: 4 }}
-                  />
-                </div>
-                <div
-                  className={`text-[10px] mt-1.5 font-bold ${pnlColor(parseFloat(performance?.totalPnl || "0"), "80")}`}
-                >
-                  <NumberFlow
-                    value={parseFloat(performance?.totalPnl || "0")}
-                    format={{ style: "currency", currency: "USD", signDisplay: "always", minimumFractionDigits: 4, maximumFractionDigits: 4 }}
-                  /> (Realized)
-                </div>
-              </div>
+            {/* Section 3: Trade Statistics */}
+            <div className="flex flex-col gap-3 lg:pl-6 lg:px-6 md:pt-4 lg:pt-0 pt-4">
+               <div className="pt-3">
+                 <div className="flex justify-between items-center mb-1.5">
+                   <div className="text-[10px] text-muted-foreground/60 uppercase tracking-widest font-bold">Win Rate</div>
+                   <div className="text-sm font-bold text-foreground">{winRate.toFixed(1)}%</div>
+                 </div>
+                 <div className="h-1.5 w-full bg-red-500/30 rounded-full overflow-hidden flex">
+                    <div className="h-full bg-emerald-500" style={{ width: `${winRate}%` }}></div>
+                 </div>
+                 <div className="flex items-center justify-between mt-1.5">
+                   <div className="text-xs text-emerald-500/80 font-bold">{performance?.wins || 0} wins</div>
+                   <div className="text-[11px] text-muted-foreground/60 font-bold">{performance?.totalTrades || 0} trades</div>
+                   <div className="text-xs text-red-500/80 font-bold">{performance?.losses || 0} losses</div>
+                 </div>
+               </div>
+               
+               <div className="grid grid-cols-2 gap-2 mt-auto border-t border-border/10 pt-2">
+                 <div>
+                   <div className="text-[9px] text-muted-foreground/60 uppercase tracking-widest mb-0.5 font-bold">Avg Win</div>
+                   <div className="text-xs font-bold text-emerald-400">
+                     {formatPnl(parseFloat(performance?.avgWin || "0"))}
+                   </div>
+                 </div>
+                 <div>
+                   <div className="text-[9px] text-muted-foreground/60 uppercase tracking-widest mb-0.5 font-bold">Avg Loss</div>
+                   <div className="text-xs font-bold text-red-400">
+                     {formatPnl(parseFloat(performance?.avgLoss || "0"))}
+                   </div>
+                 </div>
+               </div>
+            </div>
 
-              <div className="flex flex-col col-span-2 sm:col-span-1">
-                <div className="text-[9px] text-muted-foreground/60 uppercase tracking-widest mb-1.5">
-                  Win Rate
-                </div>
-                <div className="text-xl font-bold tracking-tight leading-none text-foreground">
-                  {winRate.toFixed(1)}%
-                </div>
-                <div className="text-[9px] mt-1.5 flex items-center gap-1.5 font-bold text-muted-foreground/60">
-                  <span className="text-emerald-400">
-                    {performance?.wins || 0}W
-                  </span>
-                  <span>/</span>
-                  <span className="text-red-400">
-                    {performance?.losses || 0}L
-                  </span>
-                  <span>/</span>
-                  <span className="text-foreground">
-                    {performance?.totalTrades || 0} Total
-                  </span>
-                </div>
-              </div>
+            {/* Section 4: System & Engine Health */}
+            <div className="flex flex-col gap-4 md:pl-6 lg:pl-6 md:pt-4 lg:pt-0 pt-4">
+               
+               {/* Engine & Feed Status */}
+               <div className="flex flex-col gap-2 mt-3">
+                 <div className="flex items-center justify-between bg-card/30 border border-border/20 rounded px-3 py-1.5">
+                   <div className="flex items-center gap-2">
+                      <span className="text-[10px] text-muted-foreground/80 uppercase tracking-widest font-bold">Engine</span>
+                   </div>
+                   <span className={`text-[10px] font-bold tracking-widest uppercase ${isPaused ? "text-amber-500" : stats?.orchestrator.running ? "text-emerald-400" : "text-muted-foreground"}`}>
+                     {isPaused ? "PAUSED" : stats?.orchestrator.running ? "RUNNING" : "IDLE"}
+                   </span>
+                 </div>
+
+                 <div className="flex items-center justify-between bg-card/30 border border-border/20 rounded px-3 py-1.5">
+                   <div className="flex items-center gap-2">
+                      <span className="text-[10px] text-muted-foreground/80 uppercase tracking-widest font-bold">Feed</span>
+                   </div>
+                   <span className={`text-[10px] font-bold tracking-widest uppercase ${stats?.orchestrator.ws.connected ? "text-emerald-400" : "text-red-400"}`}>
+                     {stats?.orchestrator.ws.connected ? "LIVE" : "DEAD"}
+                   </span>
+                 </div>
+               </div>
+
+               {/* Telemetry Grid */}
+               <div className="grid grid-cols-2 gap-x-4 gap-y-2">
+                 <div>
+                   <div className="text-[9px] text-muted-foreground/60 uppercase tracking-widest mb-0.5 font-bold">Active Pos</div>
+                   <div className="text-xs font-bold text-foreground">{openTrades.length}</div>
+                 </div>
+                 <div>
+                   <div className="text-[9px] text-muted-foreground/60 uppercase tracking-widest mb-0.5 font-bold">Analyzed</div>
+                   <div className="text-xs font-bold text-foreground">{evaluatedCount}</div>
+                 </div>
+                 <div>
+                   <div className="text-[9px] text-muted-foreground/60 uppercase tracking-widest mb-0.5 font-bold">Loops</div>
+                   <div className="text-xs font-mono font-bold text-foreground">{stats?.orchestrator.cycleCount || 0}</div>
+                 </div>
+                 <div>
+                   <div className="text-[9px] text-muted-foreground/60 uppercase tracking-widest mb-0.5 font-bold">Found</div>
+                   <div className="text-xs font-mono font-bold text-foreground">{discoveredLaddersCount}</div>
+                 </div>
+               </div>
             </div>
           </div>
         </div>
