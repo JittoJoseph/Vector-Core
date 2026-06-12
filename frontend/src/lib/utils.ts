@@ -42,3 +42,73 @@ export function shortCampaignTitle(title: string | null | undefined): string {
   }
   return title;
 }
+
+import { SimulatedTrade, LiveMarketPrice } from "./types";
+
+/**
+ * Calculates the unrealized PnL and return percentage for a single trade.
+ */
+export function calculateTradeUnrealizedPnl(
+  trade: SimulatedTrade,
+  livePrice: LiveMarketPrice | null
+): { pnl: number | null; pnlPct: number | null } {
+  const liveMid = livePrice?.mid ?? null;
+  if (liveMid === null) return { pnl: null, pnlPct: null };
+
+  const entryPrice = parseFloat(trade.entryPrice || "0");
+  const shares = parseFloat(trade.entryShares || "0");
+  const fees = parseFloat(trade.entryFees || "0");
+  const actualCost = parseFloat(trade.actualCost || "0");
+
+  const pnl = (liveMid - entryPrice) * shares - fees;
+  const pnlPct = actualCost > 0 ? (pnl / actualCost) * 100 : null;
+
+  return { pnl, pnlPct };
+}
+
+/**
+ * Aggregates portfolio metrics from a list of open trades and a map of live prices.
+ */
+export function aggregatePortfolioMetrics(
+  openTrades: SimulatedTrade[],
+  livePricesMap: Record<string, LiveMarketPrice>
+) {
+  let liveUnrealizedPnl = 0;
+  let closestExpiration: Date | null = null;
+  let closestTrades: SimulatedTrade[] = [];
+  const expirationBuckets = { "<24h": 0, "1-3d": 0, "4-7d": 0, ">7d": 0 };
+
+  const now = new Date();
+
+  for (const t of openTrades) {
+    const livePrice = t.tokenId ? (livePricesMap[t.tokenId] ?? null) : null;
+    const { pnl } = calculateTradeUnrealizedPnl(t, livePrice);
+    if (pnl !== null) {
+      liveUnrealizedPnl += pnl;
+    }
+
+    const endStr = t.campaignEndDate;
+    if (endStr) {
+      const d = new Date(endStr);
+      if (!closestExpiration || d < closestExpiration) {
+        closestExpiration = d;
+        closestTrades = [t];
+      } else if (d.getTime() === closestExpiration.getTime()) {
+        closestTrades.push(t);
+      }
+
+      const hours = (d.getTime() - now.getTime()) / (1000 * 60 * 60);
+      if (hours < 24) expirationBuckets["<24h"]++;
+      else if (hours < 72) expirationBuckets["1-3d"]++;
+      else if (hours < 168) expirationBuckets["4-7d"]++;
+      else expirationBuckets[">7d"]++;
+    }
+  }
+
+  return {
+    liveUnrealizedPnl,
+    closestExpiration,
+    closestTrades,
+    expirationBuckets,
+  };
+}

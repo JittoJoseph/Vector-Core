@@ -10,9 +10,7 @@ import type {
   DistributionCampaign,
 
   PerformanceMetrics,
-  PortfolioState,
   AuditLog,
-  HealthResponse,
   WsMessage,
 } from "./types";
 
@@ -60,10 +58,6 @@ export class ApiClient {
 
   constructor(baseUrl: string = API_BASE_URL) {
     this.baseUrl = baseUrl;
-  }
-
-  async getHealth(): Promise<HealthResponse> {
-    return fetchWithRetry(`${this.baseUrl}/health`);
   }
 
   async ping(): Promise<{ pong: boolean; ts: number }> {
@@ -114,10 +108,6 @@ export class ApiClient {
 
     const qs = searchParams.toString();
     return fetchWithRetry(`${this.baseUrl}/api/audit${qs ? `?${qs}` : ""}`);
-  }
-
-  async getPortfolio(): Promise<PortfolioState> {
-    return fetchWithRetry(`${this.baseUrl}/api/portfolio`);
   }
 
   async pauseSystem(

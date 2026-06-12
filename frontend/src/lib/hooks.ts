@@ -400,51 +400,6 @@ export function usePerformanceRealtime(
 }
 
 /**
- * Hook to calculate unrealized PnL from open trades and live market prices.
- *
- * - Looks at all OPEN trades from the trades hook
- * - Uses live market prices from liveMarkets to calculate current value
- * - Recalculates every time trades or prices update
- * - Returns the sum of all unrealized PnLs across open positions
- */
-export function useUnrealizedPnL(
-  trades: SimulatedTrade[],
-  liveMarkets: LiveMarketInfo[],
-): number {
-  return useMemo(() => {
-    // Filter for open trades only
-    const openTrades = trades.filter((t) => t.status === "OPEN");
-    if (openTrades.length === 0) return 0;
-
-    // Build a tokenId → current price map from live markets
-    const priceMap: Record<string, number> = {};
-    for (const market of liveMarkets) {
-      for (const [tokenId, priceData] of Object.entries(market.markPrice)) {
-        priceMap[tokenId] = priceData.mid;
-      }
-    }
-
-    // Calculate unrealized PnL for each open trade
-    let totalUnrealized = 0;
-    for (const trade of openTrades) {
-      if (!trade.tokenId || !priceMap[trade.tokenId]) continue;
-
-      const entryPrice = parseFloat(trade.entryPrice || "0");
-      const currentPrice = priceMap[trade.tokenId];
-      const shares = parseFloat(trade.entryShares || "0");
-
-      // For YES tokens (long): profit if price up
-      // For NO tokens (short): profit if price down
-      // PnL = (currentPrice - entryPrice) * shares
-      const tradePnL = (currentPrice - entryPrice) * shares;
-      totalUnrealized += tradePnL;
-    }
-
-    return totalUnrealized;
-  }, [trades, liveMarkets]);
-}
-
-/**
  * Hook for WebSocket connection status.
  * Sends a JSON ping to the backend every 15 s; isConnected flips to true
  * only after receiving a pong, and resets to false if none arrives within 20 s.
@@ -482,57 +437,6 @@ export function useWsConnection() {
   }, []);
 
   return isConnected;
-}
-
-/**
- * Hook for subscribing to specific WebSocket events.
- */
-export function useWsEvent(
-  eventType: string,
-  callback: (message: WsMessage) => void,
-) {
-  useEffect(() => {
-    const ws = getWsClient();
-    ws.connect();
-    const unsubscribe = ws.on(eventType, callback);
-    return unsubscribe;
-  }, [eventType, callback]);
-}
-
-/**
- * Countdown timer hook — returns { days, hours, minutes, seconds, expired }.
- */
-export function useCountdown(endDate: string | null) {
-  const calcRemaining = useCallback(() => {
-    if (!endDate) return null;
-    const diff = new Date(endDate).getTime() - Date.now();
-    if (diff <= 0)
-      return { days: 0, hours: 0, minutes: 0, seconds: 0, expired: true };
-    const totalSeconds = Math.floor(diff / 1000);
-    return {
-      days: Math.floor(totalSeconds / 86400),
-      hours: Math.floor((totalSeconds % 86400) / 3600),
-      minutes: Math.floor((totalSeconds % 3600) / 60),
-      seconds: totalSeconds % 60,
-      expired: false,
-    };
-  }, [endDate]);
-
-  const [remaining, setRemaining] = useState(calcRemaining);
-
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  useEffect(() => {
-    setRemaining(calcRemaining());
-    timerRef.current = setInterval(() => {
-      setRemaining(calcRemaining());
-    }, 1000);
-    return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
-    };
-  }, [calcRemaining]);
-
-  return remaining;
 }
 
 /**

@@ -8,7 +8,7 @@ import { ActivityPanel } from "./activity-panel";
 import { CampaignsTable } from "./campaigns-table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { getApiClient } from "@/lib/api-client";
-import { pnlColor, formatPnl } from "@/lib/utils";
+import { pnlColor, formatPnl, aggregatePortfolioMetrics } from "@/lib/utils";
 import NumberFlow from "@number-flow/react";
 import {
   useTrades,
@@ -22,11 +22,7 @@ import type { SimulatedTrade, LiveMarketPrice } from "@/lib/types";
 import {
   ShieldAlert,
   RefreshCw,
-  Server,
   Activity,
-  Briefcase,
-  TrendingUp,
-  ExternalLink,
   Workflow,
   SlidersHorizontal,
 } from "lucide-react";
@@ -40,7 +36,6 @@ export function DashboardPage() {
   // Core Hooks
   const {
     stats,
-    loading: statsLoading,
     refetch: refetchStats,
   } = useSystemStats();
   const liveMarkets = useLiveMarkets();
@@ -55,8 +50,6 @@ export function DashboardPage() {
   } = useTrades();
 
   const {
-    campaigns,
-    loading: campaignsLoading,
     refetch: refetchCampaigns,
   } = useCampaigns();
 
@@ -109,41 +102,12 @@ export function DashboardPage() {
   const isPaused = stats?.orchestrator.paused ?? false;
 
 
-  let liveUnrealizedPnl = 0;
-  let closestExpiration: Date | null = null;
-  let closestTrades: SimulatedTrade[] = [];
-  const expirationBuckets = { "<24h": 0, "1-3d": 0, "4-7d": 0, ">7d": 0 };
-
-  const now = new Date();
-
-  for (const t of openTrades) {
-    const entryPrice = parseFloat(t.entryPrice);
-    const shares = parseFloat(t.entryShares || "0");
-    const fees = parseFloat(t.entryFees || "0");
-
-    const livePrice = t.tokenId ? (livePricesMap[t.tokenId] ?? null) : null;
-    const liveMid = livePrice?.mid ?? null;
-    if (liveMid !== null) {
-      liveUnrealizedPnl += (liveMid - entryPrice) * shares - fees;
-    }
-
-    const endStr = t.campaignEndDate;
-    if (endStr) {
-      const d = new Date(endStr);
-      if (!closestExpiration || d < closestExpiration) {
-        closestExpiration = d;
-        closestTrades = [t];
-      } else if (d.getTime() === closestExpiration.getTime()) {
-        closestTrades.push(t);
-      }
-
-      const hours = (d.getTime() - now.getTime()) / (1000 * 60 * 60);
-      if (hours < 24) expirationBuckets["<24h"]++;
-      else if (hours < 72) expirationBuckets["1-3d"]++;
-      else if (hours < 168) expirationBuckets["4-7d"]++;
-      else expirationBuckets[">7d"]++;
-    }
-  }
+  const {
+    liveUnrealizedPnl,
+    closestExpiration,
+    closestTrades,
+    expirationBuckets,
+  } = aggregatePortfolioMetrics(openTrades, livePricesMap);
 
   const livePortfolioValue =
     cashBalance + openPositionsValue + liveUnrealizedPnl;

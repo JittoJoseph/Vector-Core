@@ -150,16 +150,6 @@ export interface PerformanceMetrics {
   avgBtcDistance?: string;
 }
 
-export interface PortfolioState {
-  initialCapital: number;
-  cashBalance: number;
-  openPositionsValue: number;
-  portfolioValue: number;
-  roi: number;
-  createdAt: string;
-  updatedAt: string;
-}
-
 export interface AuditLog {
   id: string;
   level: string;
@@ -188,54 +178,8 @@ export interface ActivityEntry {
   pnl?: number;
 }
 
-export interface HealthResponse {
-  status: string;
-  uptime: number;
-  [key: string]: unknown;
-}
-
 export interface WsMessage {
   type: "systemState" | "tradeOpened" | "tradeResolved" | "btcPriceUpdate" | "pong";
   data?: unknown;
 }
 
-export interface MonteCarloResult {
-  config: { simulations: number; tradesPerSim: number };
-  historical: {
-    totalSettled: number;
-    wins: number;
-    losses: number;
-    winRate: number;
-    avgWinPnl: number;
-    avgLossPnl: number;
-    avgWinPct: number;
-    avgLossPct: number;
-    largestWin: number;
-    largestLoss: number;
-    profitFactor: number;
-    expectancy: number;
-  };
-  distribution: {
-    histogram: Array<{ min: number; max: number; count: number }>;
-    percentiles: { p5: number; p25: number; p50: number; p75: number; p95: number };
-    mean: number;
-    stdDev: number;
-    profitProbability: number;
-    ruinProbability: number;
-  };
-  equityCurves: Array<{ percentile: number; curve: Array<{ tradeIndex: number; balance: number }> }>;
-  drawdown: { median: number; p95: number; worst: number };
-  startingCapital: number;
-}
-
-export type MarketWindow = "5M" | "15M" | "1H" | "4H" | "1D";
-export const MARKET_WINDOW_LABELS: Record<MarketWindow, string> = {
-  "5M": "LEGACY",
-  "15M": "LEGACY",
-  "1H": "LEGACY",
-  "4H": "LEGACY",
-  "1D": "LEGACY",
-};
-export function getMarketWindowDurationMs(_windowType?: string | null): number {
-  return 0;
-}

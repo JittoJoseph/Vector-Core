@@ -1,7 +1,7 @@
 "use client";
 
 import type { SimulatedTrade, LiveMarketPrice } from "@/lib/types";
-import { polymarketMarketUrl, formatPnl, pnlColor, shortCampaignTitle } from "@/lib/utils";
+import { polymarketMarketUrl, formatPnl, pnlColor, shortCampaignTitle, calculateTradeUnrealizedPnl } from "@/lib/utils";
 import NumberFlow from "@number-flow/react";
 import { ExternalLink } from "lucide-react";
 
@@ -137,14 +137,7 @@ export function TradesTable({
               const liveMid = livePrice?.mid ?? null;
               const liveCents =
                 liveMid !== null ? Math.round(liveMid * 100) : null;
-              const unrealizedPnl =
-                liveMid !== null
-                  ? (liveMid - entryPrice) * shares - fees
-                  : null;
-              const unrealizedPnlPct =
-                unrealizedPnl !== null && actualCost > 0
-                  ? (unrealizedPnl / actualCost) * 100
-                  : null;
+              const { pnl: unrealizedPnl, pnlPct: unrealizedPnlPct } = calculateTradeUnrealizedPnl(trade, livePrice);
 
               const polyUrl = polymarketMarketUrl({
                 eventSlug: trade.campaignSlug,
