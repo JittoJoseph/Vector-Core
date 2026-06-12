@@ -38,22 +38,6 @@ export interface DistributionBucket {
   hasOpenPosition?: boolean;
 }
 
-export interface Opportunity {
-  bucketId: string;
-  campaignId: string;
-  noTokenId: string;
-  status: string;
-  reason: string | null;
-  noPrice: string | null;
-  noBestBid: string | null;
-  noBestAsk: string | null;
-  spread: string | null;
-  depthAtLimit: string | null;
-  expectedNetProfit: string | null;
-  expectedReturnPercent: string | null;
-  createdAt: string;
-  updatedAt: string;
-}
 
 export interface LiveMarketPrice {
   bid: number;
@@ -135,12 +119,9 @@ export interface SystemStats {
     };
   };
   config: {
-    deadlineLookaheadDays: number;
     minNoEntryPrice: number;
     maxNoEntryPrice: number;
-    maxSpread: number;
-    minLiquidityNum: number;
-    minVolume24h: number;
+
     minExpectedNetProfit: number;
     startingCapital: number;
     maxPositions: number;

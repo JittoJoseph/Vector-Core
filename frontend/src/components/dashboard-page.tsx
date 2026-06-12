@@ -18,7 +18,7 @@ import {
   usePerformanceRealtime,
   useActivityLog,
 } from "@/lib/hooks";
-import type { SimulatedTrade, Opportunity, LiveMarketPrice } from "@/lib/types";
+import type { SimulatedTrade, LiveMarketPrice } from "@/lib/types";
 import {
   ShieldAlert,
   RefreshCw,
@@ -63,34 +63,18 @@ export function DashboardPage() {
   const { activities, loading: activitiesLoading } = useActivityLog();
   const { performance } = usePerformanceRealtime("ALL");
 
-  // Diagnostics state
-  const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
-  const [refreshingExtra, setRefreshingExtra] = useState(false);
 
-  const fetchExtraData = useCallback(async () => {
-    setRefreshingExtra(true);
-    try {
-      const api = getApiClient();
-      // Only fetch opportunities for rejection analytics
-      const opps = await api.getOpportunities({ limit: 500 }).catch(() => []);
-      setOpportunities(opps);
-    } finally {
-      setRefreshingExtra(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    fetchExtraData();
-  }, [fetchExtraData]);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   const handleManualRefresh = useCallback(async () => {
+    setIsRefreshing(true);
     await Promise.all([
       refetchStats().catch(() => {}),
       refetchTrades().catch(() => {}),
       refetchCampaigns().catch(() => {}),
-      fetchExtraData().catch(() => {}),
     ]);
-  }, [refetchStats, refetchTrades, refetchCampaigns, fetchExtraData]);
+    setIsRefreshing(false);
+  }, [refetchStats, refetchTrades, refetchCampaigns]);
 
   // Derived datasets
   const openTrades = useMemo(
@@ -125,23 +109,6 @@ export function DashboardPage() {
   const winRate = parseFloat(performance?.winRate || "0");
   const isPaused = stats?.orchestrator.paused ?? false;
 
-  // Diagnostics Aggregation
-  const rejectionStats = useMemo(() => {
-    const rejections = opportunities.filter((o) => o.status === "rejected");
-    const total = rejections.length;
-    if (total === 0) return [];
-
-    const counts: Record<string, number> = {};
-    rejections.forEach((r) => {
-      let reason = r.reason || "Unknown";
-      if (reason.includes(" - ")) reason = reason.split(" - ")[1] || reason;
-      counts[reason] = (counts[reason] || 0) + 1;
-    });
-
-    return Object.entries(counts)
-      .sort((a, b) => b[1] - a[1])
-      .map(([reason, count]) => ({ reason, pct: (count / total) * 100 }));
-  }, [opportunities]);
 
   let liveUnrealizedPnl = 0;
   let closestExpiration: Date | null = null;
@@ -221,7 +188,7 @@ export function DashboardPage() {
               >
                 <RefreshCw
                   size={12}
-                  className={refreshingExtra ? "animate-spin" : ""}
+                  className={isRefreshing ? "animate-spin" : ""}
                 />
               </button>
             </div>
@@ -682,30 +649,7 @@ export function DashboardPage() {
                     {Math.round((stats?.config.maxNoEntryPrice || 0) * 100)}¢
                   </span>
                 </div>
-                <div className="flex justify-between items-end">
-                  <span className="text-[10px] text-muted-foreground uppercase tracking-widest">
-                    Max Allowable Spread
-                  </span>
-                  <span className="text-[11px] font-mono text-foreground tabular-nums">
-                    {((stats?.config.maxSpread || 0) * 100).toFixed(1)}¢
-                  </span>
-                </div>
-                <div className="flex justify-between items-end">
-                  <span className="text-[10px] text-muted-foreground uppercase tracking-widest">
-                    Scanner Lookahead
-                  </span>
-                  <span className="text-[11px] font-mono text-foreground tabular-nums">
-                    {stats?.config.deadlineLookaheadDays || 0} Days
-                  </span>
-                </div>
-                <div className="flex justify-between items-end">
-                  <span className="text-[10px] text-muted-foreground uppercase tracking-widest">
-                    Min Liquidity Req
-                  </span>
-                  <span className="text-[11px] font-mono text-foreground tabular-nums">
-                    ${stats?.config.minLiquidityNum?.toLocaleString()}
-                  </span>
-                </div>
+
                 <div className="flex justify-between items-end">
                   <span className="text-[10px] text-muted-foreground uppercase tracking-widest">
                     Expected Profit Min

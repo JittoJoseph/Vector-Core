@@ -240,14 +240,7 @@ export class ApiServer {
       }
     });
 
-    this.app.get("/api/opportunities", async (req, res) => {
-      try {
-        res.json([]);
-      } catch (error) {
-        logger.error({ error }, "Opportunities list error");
-        res.status(500).json({ error: "Failed to get opportunities" });
-      }
-    });
+
 
     this.app.get("/api/trades", async (req, res) => {
       try {

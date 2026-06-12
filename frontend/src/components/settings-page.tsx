@@ -325,10 +325,7 @@ export function SettingsPage() {
                     <ConfigItem label="Max Open Positions" value={stats.config.maxPositions?.toString() ?? "N/A"} />
                     <ConfigItem label="Min NO Entry Price" value={`${(stats.config.minNoEntryPrice * 100).toFixed(1)}¢`} />
                     <ConfigItem label="Max NO Entry Price" value={`${(stats.config.maxNoEntryPrice * 100).toFixed(1)}¢`} />
-                    <ConfigItem label="Max Spread" value={`${(stats.config.maxSpread * 100).toFixed(1)}¢`} />
-                    <ConfigItem label="Lookahead Scope" value={`${stats.config.deadlineLookaheadDays} Days`} />
-                    <ConfigItem label="Min Liquidity (USD)" value={`$${stats.config.minLiquidityNum.toLocaleString()}`} />
-                    <ConfigItem label="Min 24h Volume (USD)" value={`$${stats.config.minVolume24h.toLocaleString()}`} />
+
                     <ConfigItem label="Min Expected Net Profit" value={`$${stats.config.minExpectedNetProfit}`} />
                   </div>
                 ) : (

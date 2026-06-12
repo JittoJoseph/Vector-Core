@@ -8,7 +8,7 @@ import type {
   LiveMarketInfo,
   DistributionBucket,
   DistributionCampaign,
-  Opportunity,
+
   PerformanceMetrics,
   PortfolioState,
   AuditLog,
@@ -78,14 +78,7 @@ export class ApiClient {
     return fetchWithRetry(`${this.baseUrl}/api/campaigns${qs ? `?${qs}` : ""}`);
   }
 
-  async getOpportunities(params?: { limit?: number }): Promise<Opportunity[]> {
-    const searchParams = new URLSearchParams();
-    if (params?.limit) searchParams.set("limit", String(params.limit));
-    const qs = searchParams.toString();
-    return fetchWithRetry(
-      `${this.baseUrl}/api/opportunities${qs ? `?${qs}` : ""}`,
-    );
-  }
+
 
   async getLiveMarkets(): Promise<LiveMarketInfo[]> {
     return fetchWithRetry(`${this.baseUrl}/api/live-markets`);
