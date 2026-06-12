@@ -58,34 +58,7 @@ export const distributionBuckets = pgTable(
   }),
 );
 
-export const opportunities = pgTable(
-  "opportunities",
-  {
-    bucketId: text("bucket_id").primaryKey(),
-    campaignId: text("campaign_id").notNull(),
-    noTokenId: text("no_token_id").notNull(),
-    status: text("status").notNull(),
-    reason: text("reason"),
-    noPrice: decimal("no_price", { precision: 18, scale: 8 }),
-    noBestBid: decimal("no_best_bid", { precision: 18, scale: 8 }),
-    noBestAsk: decimal("no_best_ask", { precision: 18, scale: 8 }),
-    spread: decimal("spread", { precision: 18, scale: 8 }),
-    depthAtLimit: decimal("depth_at_limit", { precision: 18, scale: 8 }),
-    expectedNetProfit: decimal("expected_net_profit", {
-      precision: 18,
-      scale: 8,
-    }),
-    expectedReturnPercent: decimal("expected_return_percent", {
-      precision: 18,
-      scale: 8,
-    }),
-    createdAt: timestamp("created_at").defaultNow().notNull(),
-    updatedAt: timestamp("updated_at").defaultNow().notNull(),
-  },
-  (table) => ({
-    statusIdx: index("opportunities_status_idx").on(table.status),
-  }),
-);
+
 
 export const portfolio = pgTable("portfolio", {
   id: integer("id").primaryKey().default(1),

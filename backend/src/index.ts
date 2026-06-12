@@ -8,7 +8,7 @@ const logger = createModuleLogger("main");
 
 async function main(): Promise<void> {
   logger.info("═══════════════════════════════════════════");
-  logger.info("  Vector Core — Explicit-Date Deadline Engine");
+  logger.info("  Vector Core — Distribution Strategy Engine");
   logger.info("  Polymarket NO-side Simulation");
   logger.info("═══════════════════════════════════════════");
 
@@ -16,11 +16,8 @@ async function main(): Promise<void> {
   const config = getConfig();
   logger.info(
     {
-      deadlineLookaheadDays: config.strategy.deadlineLookaheadDays,
       minNoEntryPrice: config.strategy.minNoEntryPrice,
       maxNoEntryPrice: config.strategy.maxNoEntryPrice,
-      maxSpread: config.strategy.maxSpread,
-      minLiquidityNum: config.strategy.minLiquidityNum,
       startingCapital: config.portfolio.startingCapital,
       maxPositions: config.strategy.maxSimultaneousPositions,
     },

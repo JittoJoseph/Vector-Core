@@ -23,22 +23,7 @@ import type { MarketResolvedEvent } from "../interfaces/websocket-types.js";
 
 const logger = createModuleLogger("distribution-orchestrator");
 
-export function parseBucketMinMax(title: string): [number, number] {
-  if (title.includes("+")) {
-    const val = parseFloat(title.replace("+", ""));
-    return [val, Infinity];
-  }
-  if (title.includes("<")) {
-    const val = parseFloat(title.replace("<", ""));
-    return [-Infinity, val - 0.0001];
-  }
-  if (title.includes("-")) {
-    const parts = title.split("-");
-    return [parseFloat(parts[0] ?? "0"), parseFloat(parts[1] ?? "0")];
-  }
-  const val = parseFloat(title);
-  return [val, val];
-}
+import { parseBucketMinMax, findModalBucket, isCandidateBucket, isRelevantBucket } from "../utils/distribution-logic.js";
 
 interface TrackedBucket {
   bucketId: string;
@@ -379,12 +364,7 @@ export class MarketOrchestrator extends EventEmitter {
       const buckets = await db.select().from(schema.distributionBuckets).where(eq(schema.distributionBuckets.campaignId, campaign.id));
       if (buckets.length === 0) continue;
       
-      let modalBucket = buckets[0];
-      let maxYes = parseFloat(buckets[0]?.yesPrice?.toString() ?? "0");
-      for (const b of buckets) {
-        const y = parseFloat(b.yesPrice?.toString() ?? "0");
-        if (y > maxYes) { maxYes = y; modalBucket = b; }
-      }
+      const modalBucket = findModalBucket(buckets);
       if (!modalBucket) continue;
       
       const [modalMin] = parseBucketMinMax(modalBucket.groupItemTitle);
@@ -394,15 +374,16 @@ export class MarketOrchestrator extends EventEmitter {
       requiredTokens.add(modalBucket.yesTokenId);
       
       for (const bucket of buckets) {
-        const [, bMax] = parseBucketMinMax(bucket.groupItemTitle);
-        const isCandidate = bMax < modalMin;
+        const isCandidate = isCandidateBucket(bucket.groupItemTitle, modalMin);
         
         if (isCandidate) {
           const noPrice = parseFloat(bucket.noPrice?.toString() ?? "1");
           
           // Relevance Rule 2: Candidate bucket reasonably close to entry range
-          const isPricedForTracking = noPrice <= config.strategy.maxNoEntryPrice + 0.10 || Number.isNaN(noPrice);
-          if (isPricedForTracking) {
+          const bucketHasPosition = Array.from(this.openPositions.values()).some(p => p.bucketId === bucket.id);
+          const isRelevant = isRelevantBucket(isCandidate, false, noPrice, config.strategy.maxNoEntryPrice, bucketHasPosition);
+          
+          if (isRelevant) {
              requiredTokens.add(bucket.noTokenId);
              requiredTokens.add(bucket.yesTokenId);
           }

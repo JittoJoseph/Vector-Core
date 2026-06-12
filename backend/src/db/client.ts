@@ -97,7 +97,7 @@ export async function updateCashBalance(newBalance: string) {
 export async function wipeAndResetPortfolio(startingCapital: number) {
   const database = getDb();
   await database.delete(schema.simulatedTrades);
-  await database.delete(schema.opportunities);
+
   await database.delete(schema.distributionBuckets);
   await database.delete(schema.distributionCampaigns);
   await database.delete(schema.auditLogs);

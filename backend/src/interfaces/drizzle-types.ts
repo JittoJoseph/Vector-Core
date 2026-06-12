@@ -5,7 +5,6 @@ import type {
   distributionCampaigns,
   auditLogs,
   portfolio,
-  opportunities,
 } from "../db/schema.js";
 
 export type SimulatedTrade = InferSelectModel<typeof simulatedTrades>;
@@ -13,4 +12,3 @@ export type DistributionBucket = InferSelectModel<typeof distributionBuckets>;
 export type DistributionCampaign = InferSelectModel<typeof distributionCampaigns>;
 export type AuditLog = InferSelectModel<typeof auditLogs>;
 export type Portfolio = InferSelectModel<typeof portfolio>;
-export type Opportunity = InferSelectModel<typeof opportunities>;

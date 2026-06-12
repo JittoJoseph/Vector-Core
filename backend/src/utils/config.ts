@@ -42,14 +42,9 @@ export function loadConfig(): Config {
     },
     strategy: {
       scanIntervalMs: envNum("SCAN_INTERVAL_MS", 60_000),
-      discoveryPages: envNum("DISCOVERY_PAGES", 12),
-      deadlineLookaheadDays: envNum("DEADLINE_LOOKAHEAD_DAYS", 14),
-      allowPostDeadlineEntries: envBool("ALLOW_POST_DEADLINE_ENTRIES", false),
       minNoEntryPrice: envNum("MIN_NO_ENTRY_PRICE", 0.90),
       maxNoEntryPrice: envNum("MAX_NO_ENTRY_PRICE", 0.98),
-      maxSpread: envNum("MAX_SPREAD", 0.03),
-      minLiquidityNum: envNum("MIN_LIQUIDITY_NUM", 10_000),
-      minVolume24h: envNum("MIN_VOLUME_24H", 0),
+
       minExpectedNetProfit: envNum("MIN_EXPECTED_NET_PROFIT_USDC", 0.1),
       maxSimultaneousPositions: envNum("MAX_SIMULTANEOUS_POSITIONS", 5),
       consecutiveLossPauseLimit: envNum("CONSECUTIVE_LOSS_PAUSE_LIMIT", 3),

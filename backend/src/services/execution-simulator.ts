@@ -24,16 +24,7 @@ export interface ExecutionResult {
   orderbookSnapshot: unknown;
 }
 
-export interface SellExecutionResult {
-  averagePrice: number;
-  totalSharesSold: number;
-  totalRevenue: number;
-  fees: number;
-  netRevenue: number;
-  isPartialFill: boolean;
-  fillDetails: FillDetail[];
-  orderbookSnapshot: unknown;
-}
+
 
 function snapshotOrderbook(orderbook: Orderbook, depth = 5) {
   return {
@@ -167,60 +158,6 @@ export function simulateLimitBuy(
   };
 }
 
-export function simulateLimitSell(
-  orderbook: Orderbook,
-  sharesToSell: number,
-  limitPrice: number,
-  feeSchedule?: FeeSchedule | null,
-): SellExecutionResult {
-  const bids = [...orderbook.bids].sort(
-    (a, b) => parseFloat(b.price) - parseFloat(a.price),
-  );
-  const fillDetails: FillDetail[] = [];
-  let remainingShares = new Decimal(sharesToSell);
-  let totalSharesSold = new Decimal(0);
-  let totalRevenue = new Decimal(0);
-  let totalFees = new Decimal(0);
-
-  for (const level of bids) {
-    if (remainingShares.lte(0)) break;
-    const price = parseFloat(level.price);
-    const size = parseFloat(level.size);
-    if (!Number.isFinite(price) || !Number.isFinite(size)) continue;
-    if (price < limitPrice) break;
-
-    const sharesToFill = Math.min(remainingShares.toNumber(), size);
-    const feePerShare = calculateFeePerShare(price, feeSchedule);
-    const shares = new Decimal(sharesToFill);
-    const revenue = shares.mul(price);
-    const fees = shares.mul(feePerShare);
-    totalSharesSold = totalSharesSold.plus(shares);
-    totalRevenue = totalRevenue.plus(revenue);
-    totalFees = totalFees.plus(fees);
-    remainingShares = remainingShares.minus(shares);
-    fillDetails.push({
-      price,
-      shares: sharesToFill,
-      cost: revenue.toNumber(),
-      feeForLevel: fees.toNumber(),
-    });
-  }
-
-  const avgPrice = totalSharesSold.gt(0)
-    ? totalRevenue.div(totalSharesSold).toNumber()
-    : 0;
-  const roundedFees = Math.round(totalFees.toNumber() * 10000) / 10000;
-  return {
-    averagePrice: avgPrice,
-    totalSharesSold: totalSharesSold.toNumber(),
-    totalRevenue: totalRevenue.toNumber(),
-    fees: roundedFees,
-    netRevenue: totalRevenue.toNumber() - roundedFees,
-    isPartialFill: remainingShares.gt(new Decimal(sharesToSell).mul(0.1)),
-    fillDetails,
-    orderbookSnapshot: snapshotOrderbook(orderbook),
-  };
-}
 
 export function calculateWinProfit(
   entryPrice: number,

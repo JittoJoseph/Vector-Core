@@ -18,14 +18,9 @@ export const ConfigSchema = z.object({
   }),
   strategy: z.object({
     scanIntervalMs: z.number().min(10_000),
-    discoveryPages: z.number().min(1).max(50),
-    deadlineLookaheadDays: z.number().min(1).max(365),
-    allowPostDeadlineEntries: z.boolean(),
     minNoEntryPrice: z.number().min(0.5).max(0.999),
     maxNoEntryPrice: z.number().min(0.5).max(0.999),
-    maxSpread: z.number().min(0).max(1),
-    minLiquidityNum: z.number().min(0),
-    minVolume24h: z.number().min(0),
+
     minExpectedNetProfit: z.number().min(0),
     maxSimultaneousPositions: z.number().min(1).max(100),
     consecutiveLossPauseLimit: z.number().min(0).max(20),

@@ -5,17 +5,27 @@ import express, {
 } from "express";
 import { createServer, type Server } from "http";
 import { WebSocket, WebSocketServer } from "ws";
-import { desc, eq } from "drizzle-orm";
+import { desc, eq, inArray } from "drizzle-orm";
 import { createModuleLogger } from "../utils/logger.js";
 import { getConfig } from "../utils/config.js";
 import { getDb, getPortfolio, wipeAndResetPortfolio } from "../db/client.js";
 import * as schema from "../db/schema.js";
-import { getMarketOrchestrator, parseBucketMinMax } from "./market-orchestrator.js";
+import { getMarketOrchestrator } from "./market-orchestrator.js";
 import {
   calculatePortfolioPerformance,
   type TimePeriod,
 } from "./performance-calculator.js";
-
+import {
+  calculateExpectedNetProfit,
+  calculateLossAmount,
+  calculateWinProfit,
+} from "./execution-simulator.js";
+import {
+  parseBucketMinMax,
+  findModalBucket,
+  isCandidateBucket,
+  isRelevantBucket,
+} from "../utils/distribution-logic.js";
 
 const logger = createModuleLogger("api-server");
 
@@ -122,12 +132,9 @@ export class ApiServer {
       res.json({
         orchestrator: orchestrator.getStats(),
         config: {
-          deadlineLookaheadDays: config.strategy.deadlineLookaheadDays,
           minNoEntryPrice: config.strategy.minNoEntryPrice,
           maxNoEntryPrice: config.strategy.maxNoEntryPrice,
-          maxSpread: config.strategy.maxSpread,
-          minLiquidityNum: config.strategy.minLiquidityNum,
-          minVolume24h: config.strategy.minVolume24h,
+
           minExpectedNetProfit: config.strategy.minExpectedNetProfit,
           startingCapital: config.portfolio.startingCapital,
           maxPositions: config.strategy.maxSimultaneousPositions,
@@ -160,8 +167,15 @@ export class ApiServer {
             .limit(limit);
         }
 
-        const allBuckets = await db.select().from(schema.distributionBuckets);
-        const allTrades = await db.select().from(schema.simulatedTrades);
+        let allBuckets: typeof schema.distributionBuckets.$inferSelect[] = [];
+        let allTrades: typeof schema.simulatedTrades.$inferSelect[] = [];
+        
+        if (campaigns.length > 0) {
+          const campaignIds = campaigns.map(c => c.id);
+          allBuckets = await db.select().from(schema.distributionBuckets).where(inArray(schema.distributionBuckets.campaignId, campaignIds));
+          allTrades = await db.select().from(schema.simulatedTrades).where(inArray(schema.simulatedTrades.campaignId, campaignIds));
+        }
+
         const openPositions = orchestrator.getOpenPositions();
         
         const results = [];
@@ -169,12 +183,7 @@ export class ApiServer {
         for (const c of campaigns) {
            const buckets = allBuckets.filter(b => b.campaignId === c.id);
            
-           let modalBucket = buckets[0];
-           let maxYes = parseFloat(buckets[0]?.yesPrice?.toString() ?? "0");
-           for (const b of buckets) {
-             const y = parseFloat(b.yesPrice?.toString() ?? "0");
-             if (y > maxYes) { maxYes = y; modalBucket = b; }
-           }
+           const modalBucket = findModalBucket(buckets);
            
            let candidateCount = 0;
            let positionCount = 0;
@@ -185,8 +194,7 @@ export class ApiServer {
               const [modalMin] = parseBucketMinMax(modalBucket.groupItemTitle);
               
               for (const b of buckets) {
-                 const [, bMax] = parseBucketMinMax(b.groupItemTitle);
-                 const isCandidate = bMax < modalMin;
+                 const isCandidate = isCandidateBucket(b.groupItemTitle, modalMin);
                  const noPrice = parseFloat(b.noPrice?.toString() ?? "1");
                  const isModal = b.id === modalBucket.id;
                  const hasOpenPosition = openPositions.some(p => p.tokenId === b.yesTokenId || p.tokenId === b.noTokenId);
@@ -194,7 +202,8 @@ export class ApiServer {
                  if (isCandidate) candidateCount++;
                  if (hasOpenPosition) positionCount++;
                  
-                 const isRelevant = hasOpenPosition || isModal || (isCandidate && (noPrice <= config.strategy.maxNoEntryPrice + 0.10 || Number.isNaN(noPrice)));
+                 const isRelevant = isRelevantBucket(isCandidate, isModal, noPrice, config.strategy.maxNoEntryPrice, hasOpenPosition);
+                 
                  if (isRelevant) {
                     trackedCount++;
                     relevantBuckets.push({
@@ -233,14 +242,7 @@ export class ApiServer {
 
     this.app.get("/api/opportunities", async (req, res) => {
       try {
-        const db = getDb();
-        const limit = Math.min(parseInt(req.query.limit as string) || 100, 300);
-        const rows = await db
-          .select()
-          .from(schema.opportunities)
-          .orderBy(desc(schema.opportunities.createdAt))
-          .limit(limit);
-        res.json(rows);
+        res.json([]);
       } catch (error) {
         logger.error({ error }, "Opportunities list error");
         res.status(500).json({ error: "Failed to get opportunities" });
