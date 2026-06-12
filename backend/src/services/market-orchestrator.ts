@@ -443,23 +443,11 @@ export class MarketOrchestrator extends EventEmitter {
     const tokensToUnsubscribe = Array.from(currentlySubscribed).filter(t => !requiredTokens.has(t));
     
     if (tokensToSubscribe.length > 0) {
-      const details = tokensToSubscribe.slice(0, 5).map(t => {
-        const bucketId = this.tokenToBucket.get(t);
-        const bucket = bucketId ? this.trackedBuckets.get(bucketId) : null;
-        return bucket ? `"${bucket.groupItemTitle}" (${t.slice(0, 4)}...)` : t;
-      });
-      if (tokensToSubscribe.length > 5) details.push(`... and ${tokensToSubscribe.length - 5} more`);
-      logger.info({ count: tokensToSubscribe.length, details }, "Tracking new tokens due to modal bucket shift or new campaign");
+      logger.info({ count: tokensToSubscribe.length }, `Subscribed ${tokensToSubscribe.length} tokens`);
       this.wsWatcher.subscribe(tokensToSubscribe);
     }
     if (tokensToUnsubscribe.length > 0) {
-      const details = tokensToUnsubscribe.slice(0, 5).map(t => {
-        const bucketId = this.tokenToBucket.get(t);
-        const bucket = bucketId ? this.trackedBuckets.get(bucketId) : null;
-        return bucket ? `"${bucket.groupItemTitle}" (${t.slice(0, 4)}...)` : t;
-      });
-      if (tokensToUnsubscribe.length > 5) details.push(`... and ${tokensToUnsubscribe.length - 5} more`);
-      logger.info({ count: tokensToUnsubscribe.length, details }, "Untracking tokens that are no longer candidates");
+      logger.info({ count: tokensToUnsubscribe.length }, `Unsubscribed ${tokensToUnsubscribe.length} tokens`);
       this.wsWatcher.unsubscribe(tokensToUnsubscribe);
     }
     
