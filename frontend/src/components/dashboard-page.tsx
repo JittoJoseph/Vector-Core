@@ -217,22 +217,22 @@ export function DashboardPage() {
                     <div className="h-full bg-emerald-500" style={{ width: `${winRate}%` }}></div>
                  </div>
                  <div className="flex items-center justify-between mt-1.5">
-                   <div className="text-xs text-emerald-500/80 font-bold">{performance?.wins || 0} wins</div>
+                   <div className={`text-xs font-bold ${pnlColor(1, "80")}`}>{performance?.wins || 0} wins</div>
                    <div className="text-[11px] text-muted-foreground/60 font-bold">{performance?.totalTrades || 0} trades</div>
-                   <div className="text-xs text-red-500/80 font-bold">{performance?.losses || 0} losses</div>
+                   <div className={`text-xs font-bold ${pnlColor(-1, "80")}`}>{performance?.losses || 0} losses</div>
                  </div>
                </div>
                
                <div className="grid grid-cols-2 gap-2 mt-auto border-t border-border/10 pt-2">
                  <div>
                    <div className="text-[9px] text-muted-foreground/60 uppercase tracking-widest mb-0.5 font-bold">Avg Win</div>
-                   <div className="text-xs font-bold text-emerald-400">
+                   <div className={`text-xs font-bold ${pnlColor(1)}`}>
                      {formatPnl(parseFloat(performance?.avgWin || "0"))}
                    </div>
                  </div>
                  <div>
                    <div className="text-[9px] text-muted-foreground/60 uppercase tracking-widest mb-0.5 font-bold">Avg Loss</div>
-                   <div className="text-xs font-bold text-red-400">
+                   <div className={`text-xs font-bold ${pnlColor(-1)}`}>
                      {formatPnl(parseFloat(performance?.avgLoss || "0"))}
                    </div>
                  </div>
@@ -359,7 +359,7 @@ export function DashboardPage() {
                       <span className="text-[9px] text-muted-foreground uppercase tracking-widest">
                         Avg Win
                       </span>
-                      <span className="text-sm font-bold text-emerald-400">
+                      <span className={`text-sm font-bold ${pnlColor(1)}`}>
                         {formatPnl(parseFloat(performance?.avgWin || "0"))}
                       </span>
                     </div>
@@ -367,7 +367,7 @@ export function DashboardPage() {
                       <span className="text-[9px] text-muted-foreground uppercase tracking-widest">
                         Avg Loss
                       </span>
-                      <span className="text-sm font-bold text-red-400">
+                      <span className={`text-sm font-bold ${pnlColor(-1)}`}>
                         {formatPnl(parseFloat(performance?.avgLoss || "0"))}
                       </span>
                     </div>

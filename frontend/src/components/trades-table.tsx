@@ -215,7 +215,7 @@ export function TradesTable({
                       <span className="text-muted-foreground/40">→</span>
                       {liveCents !== null ? (
                         <span
-                          className={`font-semibold ${liveCents >= entryCents ? "text-emerald-400" : "text-red-400"}`}
+                          className={`font-semibold ${pnlColor(liveCents - entryCents)}`}
                         >
                           {liveCents}¢
                         </span>
@@ -231,7 +231,7 @@ export function TradesTable({
                       {unrealizedPnl !== null ? (
                         <div className="flex items-center gap-1">
                           <span
-                            className={`tabular-nums font-semibold ${unrealizedPnl >= 0 ? "text-emerald-400" : "text-red-400"}`}
+                            className={`tabular-nums font-semibold ${pnlColor(unrealizedPnl)}`}
                           >
                             <NumberFlow
                               value={unrealizedPnl}
@@ -239,10 +239,10 @@ export function TradesTable({
                             />
                           </span>
                           <span
-                            className={`text-[10px] tabular-nums ${unrealizedPnlPct! >= 0 ? "text-emerald-400/60" : "text-red-400/60"}`}
+                            className={`text-[10px] tabular-nums ${pnlColor(unrealizedPnlPct!, "80")}`}
                           >
-                            ({unrealizedPnlPct! >= 0 ? "+" : ""}
-                            {unrealizedPnlPct!.toFixed(1)}%)
+                            {unrealizedPnlPct! >= 0 ? "+" : ""}
+                            {unrealizedPnlPct!.toFixed(1)}%
                           </span>
                         </div>
                       ) : (
@@ -344,7 +344,7 @@ export function TradesTable({
                       <span className="text-muted-foreground/40">→</span>
                       {trade.exitPrice !== null && trade.exitPrice !== undefined ? (
                         <span
-                          className={`font-semibold ${Math.round(parseFloat(trade.exitPrice.toString()) * 100) >= entryCents ? "text-emerald-400" : "text-red-400"}`}
+                          className={`font-semibold ${pnlColor(Math.round(parseFloat(trade.exitPrice.toString()) * 100) - entryCents)}`}
                         >
                           {Math.round(parseFloat(trade.exitPrice.toString()) * 100)}¢
                         </span>
@@ -381,7 +381,7 @@ export function TradesTable({
                         />
                       </span>
                       <span
-                        className={`text-[10px] tabular-nums ${pnlColor(realizedPnl, "60")}`}
+                        className={`text-[10px] tabular-nums ${pnlColor(realizedPnl, "80")}`}
                       >
                         {realizedPnlPct >= 0 ? "+" : ""}
                         {realizedPnlPct.toFixed(1)}%
