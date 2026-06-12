@@ -104,8 +104,7 @@ export function DashboardPage() {
   const cashBalance = parseFloat(performance?.cashBalance || "0");
   const openPositionsValue = parseFloat(performance?.openPositionsValue || "0");
   const portfolioValue = cashBalance + openPositionsValue;
-  const netPnl = portfolioValue - initialCapital;
-  const roi = initialCapital > 0 ? (netPnl / initialCapital) * 100 : 0;
+  
   const winRate = parseFloat(performance?.winRate || "0");
   const isPaused = stats?.orchestrator.paused ?? false;
 
@@ -148,6 +147,9 @@ export function DashboardPage() {
 
   const livePortfolioValue =
     cashBalance + openPositionsValue + liveUnrealizedPnl;
+
+  const netPnl = livePortfolioValue - initialCapital;
+  const roi = initialCapital > 0 ? (netPnl / initialCapital) * 100 : 0;
 
   const evaluatedCount =
     stats?.orchestrator.scanner.evaluatedOpportunities || 0;
@@ -221,7 +223,7 @@ export function DashboardPage() {
                <div className="pt-3">
                  <div className="text-[9px] text-muted-foreground/60 uppercase tracking-widest mb-0.5 font-bold">Portfolio Value</div>
                  <div className="text-2xl font-bold tracking-tight leading-none text-foreground">
-                   <NumberFlow value={portfolioValue} format={{ style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 2 }} />
+                   <NumberFlow value={livePortfolioValue} format={{ style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 2 }} />
                  </div>
                </div>
                <div className="flex flex-col gap-1.5 mt-auto">
