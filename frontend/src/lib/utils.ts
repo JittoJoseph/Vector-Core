@@ -5,10 +5,15 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-/** Returns "text-emerald-500" or "text-red-500" based on sign. Optional opacity suffix e.g. "/70". */
+/** Returns "text-emerald-500" or "text-red-500" based on sign. Optional opacity suffix e.g. "/80". */
 export function pnlColor(value: number, opacity?: string): string {
-  const base = value >= 0 ? "text-emerald-500" : "text-red-500";
-  return opacity ? `${base}/${opacity}` : base;
+  if (value >= 0) {
+    if (opacity === "80") return "text-emerald-500/80";
+    return opacity ? `text-emerald-500/${opacity}` : "text-emerald-500";
+  } else {
+    if (opacity === "80") return "text-red-500/80";
+    return opacity ? `text-red-500/${opacity}` : "text-red-500";
+  }
 }
 
 /** Format a PnL value as "+$0.0123" or "-$0.0456". */
