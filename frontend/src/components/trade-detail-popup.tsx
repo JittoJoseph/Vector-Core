@@ -1,20 +1,23 @@
 "use client";
 
-import type { SimulatedTrade } from "@/lib/types";
-import { formatPnl, pnlColor, polymarketMarketUrl } from "@/lib/utils";
+import type { SimulatedTrade, LiveMarketPrice } from "@/lib/types";
+import { formatPnl, pnlColor, polymarketMarketUrl, calculateTradeUnrealizedPnl } from "@/lib/utils";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { ExternalLink, X } from "lucide-react";
+import NumberFlow from "@number-flow/react";
 
 interface TradeDetailPopupProps {
   trade: SimulatedTrade | null;
   open: boolean;
   onClose: () => void;
+  livePrice?: LiveMarketPrice;
 }
 
 export function TradeDetailPopup({
   trade,
   open,
   onClose,
+  livePrice,
 }: TradeDetailPopupProps) {
   if (!trade) return null;
 
@@ -37,7 +40,6 @@ export function TradeDetailPopup({
     marketSlug: trade.bucketSlug,
   });
 
-  const resolvedQuestion = trade.campaignTitle ? `${trade.campaignTitle} - ${trade.bucketGroupTitle}` : null;
   const returnPct = actualCost > 0 ? (pnl / actualCost) * 100 : 0;
   const exitReason = trade.exitReason;
 
@@ -46,6 +48,8 @@ export function TradeDetailPopup({
     : isWin
       ? "text-emerald-400 border-emerald-500/25 bg-emerald-500/5"
       : "text-red-400 border-red-500/25 bg-red-500/5";
+
+  const { pnl: unrealizedPnl, pnlPct: unrealizedPnlPct } = !isClosed ? calculateTradeUnrealizedPnl(trade, livePrice || null) : { pnl: null, pnlPct: null };
 
   // Attempt to parse orderbook snapshot if available
   let orderbook: any = null;
@@ -93,15 +97,20 @@ export function TradeDetailPopup({
             </div>
           </div>
 
-          {resolvedQuestion ? (
+          {trade.campaignTitle ? (
             <DialogTitle className="mt-3 text-[13px] font-sans font-medium text-foreground/80 leading-relaxed">
-              {resolvedQuestion}
+              {trade.campaignTitle}
             </DialogTitle>
           ) : (
             <DialogTitle className="sr-only">Trade Detail</DialogTitle>
           )}
-          {trade.campaignTitle && (
-            <div className="mt-1 text-[11px] text-muted-foreground/60">{trade.campaignTitle}</div>
+          {trade.bucketGroupTitle && (
+            <div className="mt-2 mb-1 flex items-center gap-2">
+              <span className="text-[10px] uppercase tracking-widest text-muted-foreground/60 font-bold">COUNT BUCKET:</span>
+              <span className="text-[11px] font-semibold text-foreground/90 bg-muted/20 px-2 py-0.5 rounded border border-border/10">
+                {trade.bucketGroupTitle}
+              </span>
+            </div>
           )}
         </div>
 
@@ -130,7 +139,19 @@ export function TradeDetailPopup({
                     <span className={pnlColor(pnl)}>
                       {formatPnl(pnl)} ({returnPct >= 0 ? "+" : ""}{returnPct.toFixed(1)}%)
                     </span>
-                  ) : "—" // We omit unrealized here as we don't pass live prices to the modal currently
+                  ) : unrealizedPnl !== null ? (
+                    <div className="flex items-center gap-1.5">
+                      <span className={`font-bold tabular-nums tracking-tight ${pnlColor(unrealizedPnl)}`}>
+                        <NumberFlow
+                          value={unrealizedPnl}
+                          format={{ style: "currency", currency: "USD", signDisplay: "always", minimumFractionDigits: 4, maximumFractionDigits: 4 }}
+                        />
+                      </span>
+                      <span className={`text-[10px] tracking-tight tabular-nums font-bold ${pnlColor(unrealizedPnlPct!, "80")}`}>
+                        ({unrealizedPnlPct! >= 0 ? "+" : ""}{unrealizedPnlPct!.toFixed(1)}%)
+                      </span>
+                    </div>
+                  ) : "—"
                 } 
               />
             </Row2>

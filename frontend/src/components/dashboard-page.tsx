@@ -626,6 +626,7 @@ export function DashboardPage() {
         trade={selectedTrade}
         open={!!selectedTrade}
         onClose={() => setSelectedTrade(null)}
+        livePrice={selectedTrade?.tokenId ? (livePricesMap[selectedTrade.tokenId] ?? undefined) : undefined}
       />
     </div>
   );
