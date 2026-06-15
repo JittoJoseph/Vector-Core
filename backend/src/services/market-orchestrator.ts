@@ -347,6 +347,7 @@ export class MarketOrchestrator extends EventEmitter {
       top: any;
       depthAtLimit: number;
       budget: number;
+      modalBucketTitle: string;
     }
     
     let allCandidates: Candidate[] = [];
@@ -413,7 +414,7 @@ export class MarketOrchestrator extends EventEmitter {
             
             const expectedReturnPercent = expectedNetProfit / fill.totalCost;
             
-            allCandidates.push({ bucket, campaign, expectedNetProfit, expectedReturnPercent, fill, top, depthAtLimit, budget });
+            allCandidates.push({ bucket, campaign, expectedNetProfit, expectedReturnPercent, fill, top, depthAtLimit, budget, modalBucketTitle: modalBucket.groupItemTitle });
           }
         }
       }
@@ -467,7 +468,7 @@ export class MarketOrchestrator extends EventEmitter {
             noBestBidAtEntry: cand.top.bestBid?.toFixed(8),
             noBestAskAtEntry: cand.top.bestAsk?.toFixed(8),
             depthAtLimit: cand.depthAtLimit.toFixed(8),
-            orderbookSnapshot: cand.fill.orderbookSnapshot,
+            modalBucketAtEntry: cand.modalBucketTitle,
           });
         } catch (err) {
           await this.portfolioManager.addCash(cand.fill.netCost);

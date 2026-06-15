@@ -51,17 +51,7 @@ export function TradeDetailPopup({
 
   const { pnl: unrealizedPnl, pnlPct: unrealizedPnlPct } = !isClosed ? calculateTradeUnrealizedPnl(trade, livePrice || null) : { pnl: null, pnlPct: null };
 
-  // Attempt to parse orderbook snapshot if available
-  let orderbook: any = null;
-  try {
-    if (typeof trade.orderbookSnapshot === "string") {
-      orderbook = JSON.parse(trade.orderbookSnapshot);
-    } else if (trade.orderbookSnapshot) {
-      orderbook = trade.orderbookSnapshot;
-    }
-  } catch (e) {
-    // Ignore parse errors
-  }
+
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
@@ -105,11 +95,21 @@ export function TradeDetailPopup({
             <DialogTitle className="sr-only">Trade Detail</DialogTitle>
           )}
           {trade.bucketGroupTitle && (
-            <div className="mt-2 mb-1 flex items-center gap-2">
-              <span className="text-[10px] uppercase tracking-widest text-muted-foreground/60 font-bold">COUNT BUCKET:</span>
-              <span className="text-[11px] font-semibold text-foreground/90 bg-muted/20 px-2 py-0.5 rounded border border-border/10">
-                {trade.bucketGroupTitle}
-              </span>
+            <div className="mt-2 mb-1 flex flex-wrap items-center gap-x-4 gap-y-2">
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] uppercase tracking-widest text-muted-foreground/60 font-bold">COUNT BUCKET:</span>
+                <span className="text-[11px] font-semibold text-foreground/90 bg-muted/20 px-2 py-0.5 rounded border border-border/10">
+                  {trade.bucketGroupTitle}
+                </span>
+              </div>
+              {trade.modalBucketAtEntry && (
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] uppercase tracking-widest text-muted-foreground/60 font-bold">MODAL AT ENTRY:</span>
+                  <span className="text-[11px] font-semibold text-foreground/90 bg-muted/20 px-2 py-0.5 rounded border border-border/10">
+                    {trade.modalBucketAtEntry}
+                  </span>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -157,43 +157,6 @@ export function TradeDetailPopup({
             </Row2>
           </Section>
 
-          {/* ── ORDERBOOK SNAPSHOT AT ENTRY ── */}
-          {orderbook && (
-            <Section title="ORDERBOOK AT ENTRY">
-              <div className="px-4 py-3 grid grid-cols-2 gap-4 bg-muted/5">
-                <div>
-                  <div className="text-[10px] text-muted-foreground/50 mb-1">NO BIDS</div>
-                  {orderbook.bids && orderbook.bids.length > 0 ? (
-                    <div className="flex flex-col gap-1">
-                      {orderbook.bids.slice(0, 3).map((b: any, i: number) => (
-                        <div key={i} className="flex justify-between text-[11px]">
-                          <span className="text-emerald-400/80">{parseFloat(b.price).toFixed(3)}</span>
-                          <span className="text-muted-foreground/60">{parseFloat(b.size).toFixed(1)} sh</span>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="text-[11px] text-muted-foreground/40">Empty</div>
-                  )}
-                </div>
-                <div>
-                  <div className="text-[10px] text-muted-foreground/50 mb-1">NO ASKS</div>
-                  {orderbook.asks && orderbook.asks.length > 0 ? (
-                    <div className="flex flex-col gap-1">
-                      {orderbook.asks.slice(0, 3).map((a: any, i: number) => (
-                        <div key={i} className="flex justify-between text-[11px]">
-                          <span className="text-red-400/80">{parseFloat(a.price).toFixed(3)}</span>
-                          <span className="text-muted-foreground/60">{parseFloat(a.size).toFixed(1)} sh</span>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="text-[11px] text-muted-foreground/40">Empty</div>
-                  )}
-                </div>
-              </div>
-            </Section>
-          )}
 
           {/* ── RESOLUTION & RESULT (only if settled) ── */}
           {isClosed && outcome && (

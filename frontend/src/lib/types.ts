@@ -84,7 +84,7 @@ export interface SimulatedTrade {
   exitReason: string | null;
   realizedPnl: string | null;
   status: string;
-  orderbookSnapshot: unknown;
+  modalBucketAtEntry?: string | null;
   createdAt: string;
   updatedAt: string;
 }

@@ -21,24 +21,6 @@ export interface ExecutionResult {
   belowMinimumOrderSize: boolean;
   minOrderSize: number;
   fillDetails: FillDetail[];
-  orderbookSnapshot: unknown;
-}
-
-
-
-function snapshotOrderbook(orderbook: Orderbook, depth = 5) {
-  return {
-    bids: [...orderbook.bids]
-      .sort((a, b) => parseFloat(b.price) - parseFloat(a.price))
-      .slice(0, depth),
-    asks: [...orderbook.asks]
-      .sort((a, b) => parseFloat(a.price) - parseFloat(b.price))
-      .slice(0, depth),
-    tick_size: orderbook.tick_size,
-    min_order_size: orderbook.min_order_size,
-    timestamp: orderbook.timestamp,
-    hash: orderbook.hash,
-  };
 }
 
 export function calculateFeePerShare(
@@ -154,7 +136,6 @@ export function simulateLimitBuy(
     belowMinimumOrderSize,
     minOrderSize,
     fillDetails,
-    orderbookSnapshot: snapshotOrderbook(orderbook),
   };
 }
 

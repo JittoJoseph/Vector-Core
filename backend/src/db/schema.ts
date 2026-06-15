@@ -120,7 +120,7 @@ export const simulatedTrades = pgTable(
     exitReason: text("exit_reason"),
     realizedPnl: decimal("realized_pnl", { precision: 18, scale: 8 }),
     status: text("status").default("OPEN").notNull(),
-    orderbookSnapshot: jsonb("orderbook_snapshot"),
+    modalBucketAtEntry: text("modal_bucket_at_entry"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
   },
