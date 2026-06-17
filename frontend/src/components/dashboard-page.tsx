@@ -8,7 +8,12 @@ import { ActivityPanel } from "./activity-panel";
 import { CampaignsTable } from "./campaigns-table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { getApiClient } from "@/lib/api-client";
-import { pnlColor, formatPnl, aggregatePortfolioMetrics, shortCampaignTitle } from "@/lib/utils";
+import {
+  pnlColor,
+  formatPnl,
+  aggregatePortfolioMetrics,
+  shortCampaignTitle,
+} from "@/lib/utils";
 import NumberFlow from "@number-flow/react";
 import {
   useTrades,
@@ -35,10 +40,7 @@ export function DashboardPage() {
   );
 
   // Core Hooks
-  const {
-    stats,
-    refetch: refetchStats,
-  } = useSystemStats();
+  const { stats, refetch: refetchStats } = useSystemStats();
   const liveMarkets = useLiveMarkets();
 
   const {
@@ -50,12 +52,11 @@ export function DashboardPage() {
     refetch: refetchTrades,
   } = useTrades();
 
-  const {
-    refetch: refetchCampaigns,
-  } = useCampaigns();
+  const { refetch: refetchCampaigns } = useCampaigns();
 
   const { activities, loading: activitiesLoading } = useActivityLog();
-  const { performance, refetch: refetchPerformance } = usePerformanceRealtime("ALL");
+  const { performance, refetch: refetchPerformance } =
+    usePerformanceRealtime("ALL");
 
   const [isRefreshing, setIsRefreshing] = useState(false);
 
@@ -73,7 +74,7 @@ export function DashboardPage() {
   // Derived datasets
   const openTrades = useMemo(() => {
     const active = trades.filter((t) => t.status === "OPEN");
-    const pendingSimulatedTrades = (stats?.pendingOrders || []).map(p => ({
+    const pendingSimulatedTrades = (stats?.pendingOrders || []).map((p) => ({
       id: p.orderId,
       campaignId: p.campaignId,
       campaignSlug: p.campaignSlug,
@@ -107,12 +108,12 @@ export function DashboardPage() {
       minNoPriceDuringPosition: null,
       campaignEndDate: null,
       createdAt: new Date(p.createdAtMs).toISOString(),
-      updatedAt: new Date(p.createdAtMs).toISOString()
+      updatedAt: new Date(p.createdAtMs).toISOString(),
     })) as any;
-    
+
     return [...pendingSimulatedTrades, ...active];
   }, [trades, stats?.pendingOrders]);
-  
+
   const settledTrades = useMemo(
     () => trades.filter((t) => t.status === "SETTLED"),
     [trades],
@@ -129,17 +130,14 @@ export function DashboardPage() {
     return map;
   }, [liveMarkets]);
 
-
-
   // Financial Stats
   const initialCapital = parseFloat(performance?.initialCapital || "0");
   const cashBalance = parseFloat(performance?.cashBalance || "0");
   const openPositionsValue = parseFloat(performance?.openPositionsValue || "0");
   const portfolioValue = cashBalance + openPositionsValue;
-  
+
   const winRate = parseFloat(performance?.winRate || "0");
   const isPaused = stats?.orchestrator.paused ?? false;
-
 
   const {
     liveUnrealizedPnl,
@@ -167,16 +165,6 @@ export function DashboardPage() {
     <div className="min-h-screen bg-background text-foreground flex flex-col font-mono selection:bg-muted-foreground/30">
       <Header />
 
-      {isPaused && (
-        <div className="flex items-center justify-center gap-2 px-4 py-1.5 bg-red-950/20 border-b border-red-500/20 animate-pulse shrink-0">
-          <ShieldAlert className="w-4 h-4 text-red-400 shrink-0" />
-          <span className="text-[11px] font-bold text-red-400 tracking-widest uppercase">
-            SYSTEM PAUSED — Simulated trading is suspended. Go to settings to
-            resume.
-          </span>
-        </div>
-      )}
-
       <main className="flex-1 px-4 py-4 pb-16 max-w-7xl mx-auto w-full space-y-4">
         {/* ── TOP LEVEL COMMAND PANELS ── */}
         <div className="border border-border/30 rounded-xl bg-card/25 p-6 pt-4">
@@ -188,139 +176,250 @@ export function DashboardPage() {
               onClick={handleManualRefresh}
               className="text-muted-foreground/50 hover:text-foreground transition-colors"
             >
-              <RefreshCw size={12} className={isRefreshing ? "animate-spin" : ""} />
+              <RefreshCw
+                size={12}
+                className={isRefreshing ? "animate-spin" : ""}
+              />
             </button>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 divide-y md:divide-y-0 md:divide-x divide-border/20">
             {/* Section 1: Returns & PnL */}
             <div className="flex flex-col gap-4 lg:pr-6">
-               <div className="pt-3">
-                 <div className="text-[9px] text-muted-foreground/60 uppercase tracking-widest mb-0.5 font-bold">Net P&L</div>
-                 <div className={`text-3xl font-bold tracking-tight leading-none ${pnlColor(netPnl)}`}>
-                   <NumberFlow value={netPnl} format={{ style: "currency", currency: "USD", signDisplay: "always", minimumFractionDigits: 4, maximumFractionDigits: 4 }} />
-                 </div>
-                 <div className={`text-xs mt-1.5 font-bold tracking-widest uppercase ${pnlColor(roi, "80")}`}>
-                   {roi > 0 ? "+" : ""}{roi.toFixed(2)}% ROI
-                 </div>
-               </div>
-               
-               <div className="grid grid-cols-2 gap-2 mt-auto">
-                 <div>
-                   <div className="text-[9px] text-muted-foreground/60 uppercase tracking-widest mb-0.5 font-bold">Unrealized</div>
-                   <div className={`text-sm font-bold tracking-tight leading-none ${pnlColor(liveUnrealizedPnl)}`}>
-                     <NumberFlow value={liveUnrealizedPnl} format={{ style: "currency", currency: "USD", signDisplay: "always", minimumFractionDigits: 4, maximumFractionDigits: 4 }} />
-                   </div>
-                 </div>
-                 <div>
-                   <div className="text-[9px] text-muted-foreground/60 uppercase tracking-widest mb-0.5 font-bold">Realized</div>
-                   <div className={`text-sm font-bold tracking-tight leading-none ${pnlColor(parseFloat(performance?.totalPnl || "0"))}`}>
-                     <NumberFlow value={parseFloat(performance?.totalPnl || "0")} format={{ style: "currency", currency: "USD", signDisplay: "always", minimumFractionDigits: 4, maximumFractionDigits: 4 }} />
-                   </div>
-                 </div>
-               </div>
+              <div className="pt-3">
+                <div className="text-[9px] text-muted-foreground/60 uppercase tracking-widest mb-0.5 font-bold">
+                  Net P&L
+                </div>
+                <div
+                  className={`text-3xl font-bold tracking-tight leading-none ${pnlColor(netPnl)}`}
+                >
+                  <NumberFlow
+                    value={netPnl}
+                    format={{
+                      style: "currency",
+                      currency: "USD",
+                      signDisplay: "always",
+                      minimumFractionDigits: 4,
+                      maximumFractionDigits: 4,
+                    }}
+                  />
+                </div>
+                <div
+                  className={`text-xs mt-1.5 font-bold tracking-widest uppercase ${pnlColor(roi, "80")}`}
+                >
+                  {roi > 0 ? "+" : ""}
+                  {roi.toFixed(2)}% ROI
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2 mt-auto">
+                <div>
+                  <div className="text-[9px] text-muted-foreground/60 uppercase tracking-widest mb-0.5 font-bold">
+                    Unrealized
+                  </div>
+                  <div
+                    className={`text-sm font-bold tracking-tight leading-none ${pnlColor(liveUnrealizedPnl)}`}
+                  >
+                    <NumberFlow
+                      value={liveUnrealizedPnl}
+                      format={{
+                        style: "currency",
+                        currency: "USD",
+                        signDisplay: "always",
+                        minimumFractionDigits: 4,
+                        maximumFractionDigits: 4,
+                      }}
+                    />
+                  </div>
+                </div>
+                <div>
+                  <div className="text-[9px] text-muted-foreground/60 uppercase tracking-widest mb-0.5 font-bold">
+                    Realized
+                  </div>
+                  <div
+                    className={`text-sm font-bold tracking-tight leading-none ${pnlColor(parseFloat(performance?.totalPnl || "0"))}`}
+                  >
+                    <NumberFlow
+                      value={parseFloat(performance?.totalPnl || "0")}
+                      format={{
+                        style: "currency",
+                        currency: "USD",
+                        signDisplay: "always",
+                        minimumFractionDigits: 4,
+                        maximumFractionDigits: 4,
+                      }}
+                    />
+                  </div>
+                </div>
+              </div>
             </div>
 
             {/* Section 2: Capital Allocation */}
             <div className="flex flex-col gap-4 md:pl-6 lg:px-6 md:pt-0 pt-4">
-               <div className="pt-3">
-                 <div className="text-[9px] text-muted-foreground/60 uppercase tracking-widest mb-0.5 font-bold">Portfolio Value</div>
-                 <div className="text-2xl font-bold tracking-tight leading-none text-foreground">
-                   <NumberFlow value={livePortfolioValue} format={{ style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 2 }} />
-                 </div>
-               </div>
-               <div className="flex flex-col gap-1.5 mt-auto">
-                 <div className="flex justify-between items-center">
-                   <div className="text-[10px] text-muted-foreground/60 uppercase tracking-widest font-bold">Cash Balance</div>
-                   <div className="text-xs font-bold text-foreground">${cashBalance.toFixed(2)}</div>
-                 </div>
-                 <div className="flex justify-between items-center">
-                   <div className="text-[10px] text-muted-foreground/60 uppercase tracking-widest font-bold">In Positions</div>
-                   <div className="text-xs font-bold text-foreground">${openPositionsValue.toFixed(2)}</div>
-                 </div>
-                 <div className="flex justify-between items-center border-t border-border/10 pt-1.5 mt-0.5">
-                   <div className="text-[10px] text-muted-foreground/80 uppercase tracking-widest font-bold">Initial Capital</div>
-                   <div className="text-sm font-bold text-foreground">${initialCapital.toFixed(2)}</div>
-                 </div>
-               </div>
+              <div className="pt-3">
+                <div className="text-[9px] text-muted-foreground/60 uppercase tracking-widest mb-0.5 font-bold">
+                  Portfolio Value
+                </div>
+                <div className="text-2xl font-bold tracking-tight leading-none text-foreground">
+                  <NumberFlow
+                    value={livePortfolioValue}
+                    format={{
+                      style: "currency",
+                      currency: "USD",
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    }}
+                  />
+                </div>
+              </div>
+              <div className="flex flex-col gap-1.5 mt-auto">
+                <div className="flex justify-between items-center">
+                  <div className="text-[10px] text-muted-foreground/60 uppercase tracking-widest font-bold">
+                    Cash Balance
+                  </div>
+                  <div className="text-xs font-bold text-foreground">
+                    ${cashBalance.toFixed(2)}
+                  </div>
+                </div>
+                <div className="flex justify-between items-center">
+                  <div className="text-[10px] text-muted-foreground/60 uppercase tracking-widest font-bold">
+                    In Positions
+                  </div>
+                  <div className="text-xs font-bold text-foreground">
+                    ${openPositionsValue.toFixed(2)}
+                  </div>
+                </div>
+                <div className="flex justify-between items-center border-t border-border/10 pt-1.5 mt-0.5">
+                  <div className="text-[10px] text-muted-foreground/80 uppercase tracking-widest font-bold">
+                    Initial Capital
+                  </div>
+                  <div className="text-sm font-bold text-foreground">
+                    ${initialCapital.toFixed(2)}
+                  </div>
+                </div>
+              </div>
             </div>
 
             {/* Section 3: Trade Statistics */}
             <div className="flex flex-col gap-3 lg:pl-6 lg:px-6 md:pt-4 lg:pt-0 pt-4">
-               <div className="pt-3">
-                 <div className="flex justify-between items-center mb-1.5">
-                   <div className="text-[10px] text-muted-foreground/60 uppercase tracking-widest font-bold">Win Rate</div>
-                   <div className="text-sm font-bold text-foreground">{winRate.toFixed(1)}%</div>
-                 </div>
-                 <div className="h-1.5 w-full bg-red-500/30 rounded-full overflow-hidden flex">
-                    <div className="h-full bg-emerald-500" style={{ width: `${winRate}%` }}></div>
-                 </div>
-                 <div className="flex items-center justify-between mt-1.5">
-                   <div className={`text-xs font-bold ${pnlColor(1, "80")}`}>{performance?.wins || 0} wins</div>
-                   <div className="text-[11px] text-muted-foreground/60 font-bold">{performance?.totalTrades || 0} trades</div>
-                   <div className={`text-xs font-bold ${pnlColor(-1, "80")}`}>{performance?.losses || 0} losses</div>
-                 </div>
-               </div>
-               
-               <div className="grid grid-cols-2 gap-2 mt-auto border-t border-border/10 pt-2">
-                 <div>
-                   <div className="text-[9px] text-muted-foreground/60 uppercase tracking-widest mb-0.5 font-bold">Avg Win</div>
-                   <div className={`text-xs font-bold ${pnlColor(1)}`}>
-                     {formatPnl(parseFloat(performance?.avgWin || "0"))}
-                   </div>
-                 </div>
-                 <div>
-                   <div className="text-[9px] text-muted-foreground/60 uppercase tracking-widest mb-0.5 font-bold">Avg Loss</div>
-                   <div className={`text-xs font-bold ${pnlColor(-1)}`}>
-                     {formatPnl(parseFloat(performance?.avgLoss || "0"))}
-                   </div>
-                 </div>
-               </div>
+              <div className="pt-3">
+                <div className="flex justify-between items-center mb-1.5">
+                  <div className="text-[10px] text-muted-foreground/60 uppercase tracking-widest font-bold">
+                    Win Rate
+                  </div>
+                  <div className="text-sm font-bold text-foreground">
+                    {winRate.toFixed(1)}%
+                  </div>
+                </div>
+                <div className="h-1.5 w-full bg-red-500/30 rounded-full overflow-hidden flex">
+                  <div
+                    className="h-full bg-emerald-500"
+                    style={{ width: `${winRate}%` }}
+                  ></div>
+                </div>
+                <div className="flex items-center justify-between mt-1.5">
+                  <div className={`text-xs font-bold ${pnlColor(1, "80")}`}>
+                    {performance?.wins || 0} wins
+                  </div>
+                  <div className="text-[11px] text-muted-foreground/60 font-bold">
+                    {performance?.totalTrades || 0} trades
+                  </div>
+                  <div className={`text-xs font-bold ${pnlColor(-1, "80")}`}>
+                    {performance?.losses || 0} losses
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2 mt-auto border-t border-border/10 pt-2">
+                <div>
+                  <div className="text-[9px] text-muted-foreground/60 uppercase tracking-widest mb-0.5 font-bold">
+                    Avg Win
+                  </div>
+                  <div className={`text-xs font-bold ${pnlColor(1)}`}>
+                    {formatPnl(parseFloat(performance?.avgWin || "0"))}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-[9px] text-muted-foreground/60 uppercase tracking-widest mb-0.5 font-bold">
+                    Avg Loss
+                  </div>
+                  <div className={`text-xs font-bold ${pnlColor(-1)}`}>
+                    {formatPnl(parseFloat(performance?.avgLoss || "0"))}
+                  </div>
+                </div>
+              </div>
             </div>
 
             {/* Section 4: System & Engine Health */}
             <div className="flex flex-col gap-4 md:pl-6 lg:pl-6 md:pt-4 lg:pt-0 pt-4">
-               
-               {/* Engine & Feed Status */}
-               <div className="flex flex-col gap-2 mt-3">
-                 <div className="flex items-center justify-between bg-card/30 border border-border/20 rounded px-3 py-1.5">
-                   <div className="flex items-center gap-2">
-                      <span className="text-[10px] text-muted-foreground/80 uppercase tracking-widest font-bold">Engine</span>
-                   </div>
-                   <span className={`text-[10px] font-bold tracking-widest uppercase ${isPaused ? "text-amber-500" : stats?.orchestrator.running ? "text-emerald-400" : "text-muted-foreground"}`}>
-                     {isPaused ? "PAUSED" : stats?.orchestrator.running ? "RUNNING" : "IDLE"}
-                   </span>
-                 </div>
+              {/* Engine & Feed Status */}
+              <div className="flex flex-col gap-2 mt-3">
+                <div className="flex items-center justify-between bg-card/30 border border-border/20 rounded px-3 py-1.5">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] text-muted-foreground/80 uppercase tracking-widest font-bold">
+                      Engine
+                    </span>
+                  </div>
+                  <span
+                    className={`text-[10px] font-bold tracking-widest uppercase ${isPaused ? "text-amber-500" : stats?.orchestrator.running ? "text-emerald-400" : "text-muted-foreground"}`}
+                  >
+                    {isPaused
+                      ? "PAUSED"
+                      : stats?.orchestrator.running
+                        ? "RUNNING"
+                        : "IDLE"}
+                  </span>
+                </div>
 
-                 <div className="flex items-center justify-between bg-card/30 border border-border/20 rounded px-3 py-1.5">
-                   <div className="flex items-center gap-2">
-                      <span className="text-[10px] text-muted-foreground/80 uppercase tracking-widest font-bold">Feed</span>
-                   </div>
-                   <span className={`text-[10px] font-bold tracking-widest uppercase ${stats?.orchestrator.ws.connected ? "text-emerald-400" : "text-red-400"}`}>
-                     {stats?.orchestrator.ws.connected ? "LIVE" : "DEAD"}
-                   </span>
-                 </div>
-               </div>
+                <div className="flex items-center justify-between bg-card/30 border border-border/20 rounded px-3 py-1.5">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] text-muted-foreground/80 uppercase tracking-widest font-bold">
+                      Feed
+                    </span>
+                  </div>
+                  <span
+                    className={`text-[10px] font-bold tracking-widest uppercase ${stats?.orchestrator.ws.connected ? "text-emerald-400" : "text-red-400"}`}
+                  >
+                    {stats?.orchestrator.ws.connected ? "LIVE" : "DEAD"}
+                  </span>
+                </div>
+              </div>
 
-               {/* Telemetry Grid */}
-               <div className="grid grid-cols-2 gap-x-4 gap-y-2">
-                 <div>
-                   <div className="text-[9px] text-muted-foreground/60 uppercase tracking-widest mb-0.5 font-bold">Active Pos</div>
-                   <div className="text-xs font-bold text-foreground">{openTrades.length}</div>
-                 </div>
-                 <div>
-                   <div className="text-[9px] text-muted-foreground/60 uppercase tracking-widest mb-0.5 font-bold">Analyzed</div>
-                   <div className="text-xs font-bold text-foreground">{evaluatedCount}</div>
-                 </div>
-                 <div>
-                   <div className="text-[9px] text-muted-foreground/60 uppercase tracking-widest mb-0.5 font-bold">Loops</div>
-                   <div className="text-xs font-mono font-bold text-foreground">{stats?.orchestrator.cycleCount || 0}</div>
-                 </div>
-                 <div>
-                   <div className="text-[9px] text-muted-foreground/60 uppercase tracking-widest mb-0.5 font-bold">Found</div>
-                   <div className="text-xs font-mono font-bold text-foreground">{discoveredLaddersCount}</div>
-                 </div>
-               </div>
+              {/* Telemetry Grid */}
+              <div className="grid grid-cols-2 gap-x-4 gap-y-2">
+                <div>
+                  <div className="text-[9px] text-muted-foreground/60 uppercase tracking-widest mb-0.5 font-bold">
+                    Active Pos
+                  </div>
+                  <div className="text-xs font-bold text-foreground">
+                    {openTrades.length}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-[9px] text-muted-foreground/60 uppercase tracking-widest mb-0.5 font-bold">
+                    Analyzed
+                  </div>
+                  <div className="text-xs font-bold text-foreground">
+                    {evaluatedCount}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-[9px] text-muted-foreground/60 uppercase tracking-widest mb-0.5 font-bold">
+                    Loops
+                  </div>
+                  <div className="text-xs font-mono font-bold text-foreground">
+                    {stats?.orchestrator.cycleCount || 0}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-[9px] text-muted-foreground/60 uppercase tracking-widest mb-0.5 font-bold">
+                    Found
+                  </div>
+                  <div className="text-xs font-mono font-bold text-foreground">
+                    {discoveredLaddersCount}
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -526,7 +625,7 @@ export function DashboardPage() {
                   {openTrades.length} OPEN
                 </div>
               </div>
-              
+
               <div className="flex flex-col gap-3">
                 {closestTrades.length > 0 && closestExpiration ? (
                   <>
@@ -535,67 +634,96 @@ export function DashboardPage() {
                         Next Settlement
                       </div>
                       <div className="text-2xl font-bold tracking-tight leading-none text-foreground font-mono tabular-nums">
-                        <MarketCountdown endDate={closestExpiration.toISOString()} showSeconds={true} />
+                        <MarketCountdown
+                          endDate={closestExpiration.toISOString()}
+                          showSeconds={true}
+                        />
                       </div>
                     </div>
-                    
+
                     <div className="flex flex-col gap-4 relative">
                       <div className="absolute left-[7px] top-2 bottom-2 w-px bg-border/40 z-0"></div>
-                      
+
                       {closestTrades.map((trade) => {
-                          const entryPrice = parseFloat(trade.entryPrice);
-                          const shares = parseFloat(trade.entryShares || "0");
-                          const fees = parseFloat(trade.entryFees || "0");
-                          const actualCost = parseFloat(trade.actualCost || "1");
+                        const entryPrice = parseFloat(trade.entryPrice);
+                        const shares = parseFloat(trade.entryShares || "0");
+                        const fees = parseFloat(trade.entryFees || "0");
+                        const actualCost = parseFloat(trade.actualCost || "1");
 
-                          const livePrice = trade.tokenId
-                            ? (livePricesMap[trade.tokenId] ?? null)
-                            : null;
-                          const liveMid = livePrice?.mid ?? null;
-                          let pnl: number | null = null;
-                          let pnlPct: number | null = null;
-                          if (liveMid !== null) {
-                            pnl = (liveMid - entryPrice) * shares - fees;
-                            pnlPct = actualCost > 0 ? (pnl / actualCost) * 100 : null;
-                          }
+                        const livePrice = trade.tokenId
+                          ? (livePricesMap[trade.tokenId] ?? null)
+                          : null;
+                        const liveMid = livePrice?.mid ?? null;
+                        let pnl: number | null = null;
+                        let pnlPct: number | null = null;
+                        if (liveMid !== null) {
+                          pnl = (liveMid - entryPrice) * shares - fees;
+                          pnlPct =
+                            actualCost > 0 ? (pnl / actualCost) * 100 : null;
+                        }
 
-                          return (
+                        return (
+                          <div
+                            key={trade.id}
+                            className="relative z-10 pl-6 flex flex-col gap-1 cursor-pointer group"
+                            onClick={() => setSelectedTrade(trade)}
+                          >
+                            {/* Timeline dot */}
                             <div
-                              key={trade.id}
-                              className="relative z-10 pl-6 flex flex-col gap-1 cursor-pointer group"
-                              onClick={() => setSelectedTrade(trade)}
+                              className={`absolute left-0 top-1 w-[15px] h-[15px] rounded-full flex items-center justify-center bg-background border ${pnl !== null && pnl >= 0 ? "border-emerald-500/50" : pnl !== null ? "border-red-500/50" : "border-muted-foreground/30"}`}
                             >
-                               {/* Timeline dot */}
-                               <div className={`absolute left-0 top-1 w-[15px] h-[15px] rounded-full flex items-center justify-center bg-background border ${pnl !== null && pnl >= 0 ? "border-emerald-500/50" : pnl !== null ? "border-red-500/50" : "border-muted-foreground/30"}`}>
-                                 <div className={`w-1.5 h-1.5 rounded-full ${pnl !== null && pnl >= 0 ? "bg-emerald-500" : pnl !== null ? "bg-red-500" : "bg-muted-foreground/50"}`}></div>
-                               </div>
-                               
-                               <div className="flex justify-between items-start w-full">
-                                 <div className="flex flex-col gap-0.5 min-w-0 pr-2">
-                                   <span className="text-[11px] font-semibold text-foreground/90 group-hover:text-blue-400 transition-colors truncate" title={trade.campaignTitle || "Unknown"}>
-                                      {shortCampaignTitle(trade.campaignTitle)}
-                                   </span>
-                                   <span className="text-[10px] text-muted-foreground uppercase tracking-widest truncate">{trade.bucketGroupTitle}</span>
-                                 </div>
-                                 <div className="flex flex-col items-end shrink-0 pt-[2px]">
-                                   {pnl !== null ? (
-                                      <>
-                                        <span className={`text-[11px] font-bold tracking-tight leading-none ${pnlColor(pnl)}`}>
-                                          <NumberFlow value={pnl} format={{ style: "currency", currency: "USD", signDisplay: "always", minimumFractionDigits: 4, maximumFractionDigits: 4 }} />
-                                        </span>
-                                        {pnlPct !== null && (
-                                          <span className={`text-[9px] mt-1 tracking-tight font-bold ${pnlColor(pnlPct, "80")}`}>
-                                            {pnlPct >= 0 ? "+" : ""}{pnlPct.toFixed(1)}%
-                                          </span>
-                                        )}
-                                      </>
-                                   ) : (
-                                      <span className="text-[11px] font-bold text-muted-foreground/40">—</span>
-                                   )}
-                                 </div>
-                               </div>
+                              <div
+                                className={`w-1.5 h-1.5 rounded-full ${pnl !== null && pnl >= 0 ? "bg-emerald-500" : pnl !== null ? "bg-red-500" : "bg-muted-foreground/50"}`}
+                              ></div>
                             </div>
-                          );
+
+                            <div className="flex justify-between items-start w-full">
+                              <div className="flex flex-col gap-0.5 min-w-0 pr-2">
+                                <span
+                                  className="text-[11px] font-semibold text-foreground/90 group-hover:text-blue-400 transition-colors truncate"
+                                  title={trade.campaignTitle || "Unknown"}
+                                >
+                                  {shortCampaignTitle(trade.campaignTitle)}
+                                </span>
+                                <span className="text-[10px] text-muted-foreground uppercase tracking-widest truncate">
+                                  {trade.bucketGroupTitle}
+                                </span>
+                              </div>
+                              <div className="flex flex-col items-end shrink-0 pt-[2px]">
+                                {pnl !== null ? (
+                                  <>
+                                    <span
+                                      className={`text-[11px] font-bold tracking-tight leading-none ${pnlColor(pnl)}`}
+                                    >
+                                      <NumberFlow
+                                        value={pnl}
+                                        format={{
+                                          style: "currency",
+                                          currency: "USD",
+                                          signDisplay: "always",
+                                          minimumFractionDigits: 4,
+                                          maximumFractionDigits: 4,
+                                        }}
+                                      />
+                                    </span>
+                                    {pnlPct !== null && (
+                                      <span
+                                        className={`text-[9px] mt-1 tracking-tight font-bold ${pnlColor(pnlPct, "80")}`}
+                                      >
+                                        {pnlPct >= 0 ? "+" : ""}
+                                        {pnlPct.toFixed(1)}%
+                                      </span>
+                                    )}
+                                  </>
+                                ) : (
+                                  <span className="text-[11px] font-bold text-muted-foreground/40">
+                                    —
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        );
                       })}
                     </div>
                   </>
@@ -604,23 +732,39 @@ export function DashboardPage() {
                     No active exposures
                   </div>
                 )}
-                
+
                 <div className="grid grid-cols-2 gap-y-4 gap-x-4 pt-4 mt-2 border-t border-border/10">
                   <div>
-                    <div className="text-[9px] text-muted-foreground/60 uppercase tracking-widest mb-0.5 font-bold">&lt; 24h</div>
-                    <div className="text-sm font-bold tracking-tight leading-none text-foreground">{expirationBuckets["<24h"]}</div>
+                    <div className="text-[9px] text-muted-foreground/60 uppercase tracking-widest mb-0.5 font-bold">
+                      &lt; 24h
+                    </div>
+                    <div className="text-sm font-bold tracking-tight leading-none text-foreground">
+                      {expirationBuckets["<24h"]}
+                    </div>
                   </div>
                   <div>
-                    <div className="text-[9px] text-muted-foreground/60 uppercase tracking-widest mb-0.5 font-bold">1-3 Days</div>
-                    <div className="text-sm font-bold tracking-tight leading-none text-foreground">{expirationBuckets["1-3d"]}</div>
+                    <div className="text-[9px] text-muted-foreground/60 uppercase tracking-widest mb-0.5 font-bold">
+                      1-3 Days
+                    </div>
+                    <div className="text-sm font-bold tracking-tight leading-none text-foreground">
+                      {expirationBuckets["1-3d"]}
+                    </div>
                   </div>
                   <div>
-                    <div className="text-[9px] text-muted-foreground/60 uppercase tracking-widest mb-0.5 font-bold">4-7 Days</div>
-                    <div className="text-sm font-bold tracking-tight leading-none text-foreground">{expirationBuckets["4-7d"]}</div>
+                    <div className="text-[9px] text-muted-foreground/60 uppercase tracking-widest mb-0.5 font-bold">
+                      4-7 Days
+                    </div>
+                    <div className="text-sm font-bold tracking-tight leading-none text-foreground">
+                      {expirationBuckets["4-7d"]}
+                    </div>
                   </div>
                   <div>
-                    <div className="text-[9px] text-muted-foreground/60 uppercase tracking-widest mb-0.5 font-bold">&gt; 7 Days</div>
-                    <div className="text-sm font-bold tracking-tight leading-none text-foreground">{expirationBuckets[">7d"]}</div>
+                    <div className="text-[9px] text-muted-foreground/60 uppercase tracking-widest mb-0.5 font-bold">
+                      &gt; 7 Days
+                    </div>
+                    <div className="text-sm font-bold tracking-tight leading-none text-foreground">
+                      {expirationBuckets[">7d"]}
+                    </div>
                   </div>
                 </div>
               </div>
@@ -664,7 +808,11 @@ export function DashboardPage() {
         trade={selectedTrade}
         open={!!selectedTrade}
         onClose={() => setSelectedTrade(null)}
-        livePrice={selectedTrade?.tokenId ? (livePricesMap[selectedTrade.tokenId] ?? undefined) : undefined}
+        livePrice={
+          selectedTrade?.tokenId
+            ? (livePricesMap[selectedTrade.tokenId] ?? undefined)
+            : undefined
+        }
       />
     </div>
   );
