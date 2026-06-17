@@ -764,24 +764,20 @@ export function DashboardPage() {
 
                 <div className="flex justify-between items-end">
                   <span className="text-[10px] text-muted-foreground uppercase tracking-widest">
-                    Stop Loss
+                    Stop Loss Enabled
                   </span>
-                  <div className="flex items-center gap-2">
-                    <span
-                      className={`text-[9px] uppercase tracking-wider font-semibold px-1.5 py-0.5 rounded border ${
-                        stats?.config.stopLossEnabled
-                          ? "text-emerald-400 bg-emerald-500/10 border-emerald-500/20"
-                          : "text-muted-foreground bg-muted/10 border-muted/20"
-                      }`}
-                    >
-                      {stats?.config.stopLossEnabled ? "ON" : "OFF"}
-                    </span>
-                    {stats?.config.stopLossEnabled && (
-                      <span className="text-[11px] font-mono text-red-400 tabular-nums">
-                        @{Math.round((stats?.config.stopLossNoPrice || 0) * 100)}¢
-                      </span>
-                    )}
-                  </div>
+                  <span className="text-[11px] font-mono text-foreground tabular-nums">
+                    {stats?.config.stopLossEnabled ? "Enabled" : "Disabled"}
+                  </span>
+                </div>
+
+                <div className="flex justify-between items-end">
+                  <span className="text-[10px] text-muted-foreground uppercase tracking-widest">
+                    Stop Loss Trigger
+                  </span>
+                  <span className="text-[11px] font-mono text-foreground tabular-nums">
+                    {Math.round((stats?.config.stopLossNoPrice || 0) * 100)}¢
+                  </span>
                 </div>
               </div>
             </div>
