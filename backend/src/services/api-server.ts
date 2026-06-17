@@ -400,7 +400,6 @@ export class ApiServer {
       type: "systemState",
       data: {
         ...orchestrator.getStats(),
-        pendingOrders: orchestrator.getPendingOrders(),
         liveMarkets: orchestrator.getLiveMarkets(),
         portfolio: {
           cashBalance: pm.getCashBalance(),
