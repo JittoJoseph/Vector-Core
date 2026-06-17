@@ -209,3 +209,23 @@ export async function resolveTrade(
     .returning();
   return result[0];
 }
+
+export async function updateTradePositionSize(
+  id: string,
+  newShares: string,
+  newActualCost: string,
+  newFees: string,
+) {
+  const database = getDb();
+  const result = await database
+    .update(schema.simulatedTrades)
+    .set({
+      entryShares: newShares,
+      actualCost: newActualCost,
+      entryFees: newFees,
+      updatedAt: new Date(),
+    })
+    .where(eq(schema.simulatedTrades.id, id))
+    .returning();
+  return result[0];
+}

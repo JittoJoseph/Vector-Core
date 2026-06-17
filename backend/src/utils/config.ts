@@ -43,13 +43,15 @@ export function loadConfig(): Config {
     strategy: {
       scanIntervalMs: envNum("SCAN_INTERVAL_MS", 60_000),
       minNoEntryPrice: envNum("MIN_NO_ENTRY_PRICE", 0.90),
-      maxNoEntryPrice: envNum("MAX_NO_ENTRY_PRICE", 0.98),
+      maxNoEntryPrice: envNum("MAX_NO_ENTRY_PRICE", 0.96),
 
       minExpectedNetProfit: envNum("MIN_EXPECTED_NET_PROFIT_USDC", 0.1),
       maxSimultaneousPositions: envNum("MAX_SIMULTANEOUS_POSITIONS", 5),
       consecutiveLossPauseLimit: envNum("CONSECUTIVE_LOSS_PAUSE_LIMIT", 3),
       riskAutoResumeEnabled: envBool("RISK_AUTO_RESUME_ENABLED", false),
       riskAutoResumeCooldownMs: envNum("RISK_AUTO_RESUME_COOLDOWN_MS", 300_000),
+      stopLossEnabled: envBool("STOP_LOSS_ENABLED", true),
+      stopLossNoPrice: envNum("STOP_LOSS_NO_PRICE", 0.85),
     },
     admin: {
       password: env("ADMIN_PASSWORD", isTest ? "test-admin" : undefined),

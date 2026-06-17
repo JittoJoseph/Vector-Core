@@ -139,7 +139,79 @@ export function simulateLimitBuy(
   };
 }
 
+export function simulateTakerSell(
+  orderbook: Orderbook,
+  sharesAmount: number,
+  feeSchedule?: FeeSchedule | null,
+): ExecutionResult {
+  const bids = [...orderbook.bids].sort(
+    (a, b) => parseFloat(b.price) - parseFloat(a.price),
+  );
+  const fillDetails: FillDetail[] = [];
+  let remainingShares = new Decimal(sharesAmount);
+  let totalShares = new Decimal(0);
+  let totalRevenue = new Decimal(0); // Before fees
+  let totalFees = new Decimal(0);
 
+  for (const level of bids) {
+    if (remainingShares.lte(0)) break;
+    const price = parseFloat(level.price);
+    const size = parseFloat(level.size);
+    if (!Number.isFinite(price) || !Number.isFinite(size)) continue;
+
+    const sharesToSell = Math.min(remainingShares.toNumber(), size);
+    if (sharesToSell <= 0) continue;
+
+    const feePerShare = calculateFeePerShare(price, feeSchedule);
+    const shares = new Decimal(sharesToSell);
+    const revenue = shares.mul(price);
+    const fees = shares.mul(feePerShare);
+
+    totalShares = totalShares.plus(shares);
+    totalRevenue = totalRevenue.plus(revenue);
+    totalFees = totalFees.plus(fees);
+    remainingShares = remainingShares.minus(shares);
+
+    fillDetails.push({
+      price,
+      shares: sharesToSell,
+      cost: revenue.toNumber(),
+      feeForLevel: fees.toNumber(),
+    });
+  }
+
+  const avgPrice = totalShares.gt(0)
+    ? totalRevenue.div(totalShares).toNumber()
+    : 0;
+  const roundedFees = Math.round(totalFees.toNumber() * 10000) / 10000;
+  const minOrderSize = parseFloat(orderbook.min_order_size ?? "5") || 5;
+  const belowMinimumOrderSize =
+    totalShares.gt(0) && totalShares.lt(minOrderSize);
+
+  if (totalShares.gt(0)) {
+    logger.debug(
+      {
+        avgPrice,
+        shares: totalShares.toNumber(),
+        fees: roundedFees,
+        levels: fillDetails.length,
+      },
+      "FAK sell simulated",
+    );
+  }
+
+  return {
+    averagePrice: avgPrice,
+    totalShares: totalShares.toNumber(),
+    totalCost: totalRevenue.toNumber(), // Gross revenue
+    fees: roundedFees,
+    netCost: totalRevenue.toNumber() - roundedFees, // Net revenue received
+    isPartialFill: remainingShares.gt(0) && totalShares.gt(0),
+    belowMinimumOrderSize,
+    minOrderSize,
+    fillDetails,
+  };
+}
 export function calculateWinProfit(
   entryPrice: number,
   shares: number,
