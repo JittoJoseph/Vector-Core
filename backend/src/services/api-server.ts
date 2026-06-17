@@ -134,10 +134,11 @@ export class ApiServer {
         config: {
           minNoEntryPrice: config.strategy.minNoEntryPrice,
           maxNoEntryPrice: config.strategy.maxNoEntryPrice,
-
           minExpectedNetProfit: config.strategy.minExpectedNetProfit,
           startingCapital: config.portfolio.startingCapital,
           maxPositions: config.strategy.maxSimultaneousPositions,
+          stopLossEnabled: config.strategy.stopLossEnabled,
+          stopLossNoPrice: config.strategy.stopLossNoPrice,
         },
       });
     });
@@ -395,11 +396,21 @@ export class ApiServer {
 
   private broadcastState(): void {
     const orchestrator = getMarketOrchestrator();
+    const config = getConfig();
     const pm = orchestrator.portfolioManager;
     this.broadcast({
       type: "systemState",
       data: {
         ...orchestrator.getStats(),
+        config: {
+          minNoEntryPrice: config.strategy.minNoEntryPrice,
+          maxNoEntryPrice: config.strategy.maxNoEntryPrice,
+          minExpectedNetProfit: config.strategy.minExpectedNetProfit,
+          startingCapital: config.portfolio.startingCapital,
+          maxPositions: config.strategy.maxSimultaneousPositions,
+          stopLossEnabled: config.strategy.stopLossEnabled,
+          stopLossNoPrice: config.strategy.stopLossNoPrice,
+        },
         liveMarkets: orchestrator.getLiveMarkets(),
         portfolio: {
           cashBalance: pm.getCashBalance(),

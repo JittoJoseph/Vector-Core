@@ -126,6 +126,8 @@ export interface SystemStats {
     minExpectedNetProfit: number;
     startingCapital: number;
     maxPositions: number;
+    stopLossEnabled: boolean;
+    stopLossNoPrice: number;
   };
 }
 
