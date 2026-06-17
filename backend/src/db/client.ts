@@ -188,6 +188,7 @@ export async function resolveTrade(
   exitPrice?: string,
   extras?: {
     exitReason?: "RESOLUTION" | "EARLY_EXIT" | "MANUAL" | "FORCE_TIMEOUT";
+    minNoPriceDuringPosition?: string | null;
   },
 ) {
   const database = getDb();
@@ -202,6 +203,7 @@ export async function resolveTrade(
       status: "SETTLED",
       updatedAt: new Date(),
       ...(extras?.exitReason ? { exitReason: extras.exitReason } : {}),
+      ...(extras?.minNoPriceDuringPosition !== undefined ? { minNoPriceDuringPosition: extras.minNoPriceDuringPosition } : {}),
     })
     .where(eq(schema.simulatedTrades.id, id))
     .returning();

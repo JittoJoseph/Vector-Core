@@ -46,6 +46,7 @@ interface OpenPosition {
   entryShares: number;
   fees: number;
   actualCost: number;
+  minNoPriceDuringPosition: number | null;
 }
 
 export type MarketLifecycle = "OPEN" | "AWAITING_RESOLUTION" | "RESOLVED";
@@ -484,6 +485,7 @@ export class MarketOrchestrator extends EventEmitter {
             entryShares: cand.fill.totalShares,
             fees: cand.fill.fees,
             actualCost: cand.fill.netCost,
+            minNoPriceDuringPosition: null,
           });
           await logAudit("info", "TRADE_OPENED", `Opened simulated NO trade for ${cand.bucket.groupItemTitle}`, { tradeId: trade.id });
         }
@@ -502,6 +504,17 @@ export class MarketOrchestrator extends EventEmitter {
     if (!state) return;
     if (state.resolved) return;
     state.lastPrices[tokenId] = { bid: bestBid, ask: bestAsk, mid: (bestBid + bestAsk) / 2 };
+
+    for (const pos of this.openPositions.values()) {
+      if (pos.tokenId === tokenId && pos.bucketId === bucketId) {
+        if (!state.endDate || new Date() <= state.endDate) {
+          const currentPrice = (bestBid + bestAsk) / 2;
+          if (pos.minNoPriceDuringPosition === null || currentPrice < pos.minNoPriceDuringPosition) {
+            pos.minNoPriceDuringPosition = currentPrice;
+          }
+        }
+      }
+    }
   }
 
   private async onMarketResolved(ev: MarketResolvedEvent): Promise<void> {
@@ -559,7 +572,10 @@ export class MarketOrchestrator extends EventEmitter {
         : calculateLossAmount(pos.entryPrice, pos.entryShares, pos.fees);
       const cashReturn = pos.actualCost + pnl;
       if (cashReturn > 0) await this.portfolioManager.addCash(cashReturn);
-      const trade = await resolveTrade(pos.tradeId, isWin ? "WIN" : "LOSS", pnl.toFixed(8), isWin ? "1" : "0", { exitReason: "RESOLUTION" });
+      const trade = await resolveTrade(pos.tradeId, isWin ? "WIN" : "LOSS", pnl.toFixed(8), isWin ? "1" : "0", { 
+        exitReason: "RESOLUTION",
+        minNoPriceDuringPosition: pos.minNoPriceDuringPosition?.toFixed(8)
+      });
       this.openPositions.delete(pos.tradeId);
       this.updateConsecutiveLossState(isWin);
       await logAudit("info", "TRADE_RESOLVED", `Trade ${pos.tradeId} resolved ${isWin ? "WIN" : "LOSS"}`, { bucketId, pnl });
@@ -591,6 +607,7 @@ export class MarketOrchestrator extends EventEmitter {
         entryShares: parseFloat(trade.entryShares),
         fees: parseFloat(trade.entryFees ?? "0"),
         actualCost: parseFloat(trade.actualCost),
+        minNoPriceDuringPosition: trade.minNoPriceDuringPosition !== null && trade.minNoPriceDuringPosition !== undefined ? parseFloat(trade.minNoPriceDuringPosition) : null,
       });
     }
   }

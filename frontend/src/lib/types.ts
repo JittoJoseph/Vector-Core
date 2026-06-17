@@ -85,6 +85,7 @@ export interface SimulatedTrade {
   realizedPnl: string | null;
   status: string;
   modalBucketAtEntry?: string | null;
+  minNoPriceDuringPosition?: string | null;
   createdAt: string;
   updatedAt: string;
 }

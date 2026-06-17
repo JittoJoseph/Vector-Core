@@ -121,6 +121,7 @@ export const simulatedTrades = pgTable(
     realizedPnl: decimal("realized_pnl", { precision: 18, scale: 8 }),
     status: text("status").default("OPEN").notNull(),
     modalBucketAtEntry: text("modal_bucket_at_entry"),
+    minNoPriceDuringPosition: decimal("min_no_price_during_position", { precision: 18, scale: 8 }),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
   },

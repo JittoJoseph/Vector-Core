@@ -154,6 +154,12 @@ export function TradeDetailPopup({
                   ) : "—"
                 } 
               />
+              {trade.minNoPriceDuringPosition && (
+                <Cell 
+                  label="MIN PRICE (DURING POS)" 
+                  value={`${(parseFloat(trade.minNoPriceDuringPosition) * 100).toFixed(1)}¢`} 
+                />
+              )}
             </Row2>
           </Section>
 
