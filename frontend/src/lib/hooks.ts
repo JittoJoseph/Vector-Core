@@ -196,9 +196,29 @@ export function useSystemStats() {
     }
   }, []);
 
+  // Fetch initial on mount
   useEffect(() => {
     fetchStats();
   }, [fetchStats]);
+
+  // Keep updated via WebSocket
+  useEffect(() => {
+    const ws = getWsClient();
+    ws.connect();
+
+    const unsub = ws.on("systemState", (msg: WsMessage) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const incoming = msg.data as any;
+      if (!incoming) return;
+      
+      setStats((prev) => ({
+        ...prev,
+        ...incoming,
+      }));
+    });
+
+    return unsub;
+  }, []);
 
   return { stats, loading, error, refetch: fetchStats };
 }

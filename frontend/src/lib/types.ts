@@ -90,15 +90,36 @@ export interface SimulatedTrade {
   updatedAt: string;
 }
 
+export interface PendingOrder {
+  orderId: string;
+  campaignId: string;
+  campaignSlug: string;
+  campaignTitle: string;
+  bucketId: string;
+  bucketSlug: string;
+  bucketGroupTitle: string;
+  tokenId: string;
+  limitPrice: number;
+  budget: number;
+  expectedNetProfit: number;
+  expectedReturnPercent: number;
+  modalBucketAtEntry: string;
+  noBestBidAtEntry?: number;
+  noBestAskAtEntry?: number;
+  depthAtLimit: number;
+  createdAtMs: number;
+}
+
 export interface SystemStats {
+  pendingOrders?: PendingOrder[];
   orchestrator: {
     running: boolean;
     paused: boolean;
-    activeMarkets: number;
+    activeBuckets: number;
     openPositions: number;
     cycleCount: number;
     scanner: {
-      discoveredLadders: number;
+      discoveredCampaigns: number;
       evaluatedOpportunities: number;
     };
     ws: {

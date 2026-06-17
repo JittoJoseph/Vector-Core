@@ -245,6 +245,7 @@ export class ApiServer {
     this.app.get("/api/trades", async (req, res) => {
       try {
         const db = getDb();
+        const orchestrator = getMarketOrchestrator();
         const limit = Math.min(parseInt(req.query.limit as string) || 25, 200);
         const offset = Math.max(parseInt(req.query.offset as string) || 0, 0);
         const status = req.query.status as string | undefined;
@@ -265,10 +266,26 @@ export class ApiServer {
             ? await base.where(eq(schema.simulatedTrades.status, status))
             : await base;
             
-        const rows = rawRows.map(r => ({
-           ...r.trade,
-           campaignEndDate: r.campaign?.endDate
-        }));
+        const openPositionsMap = new Map(orchestrator.getOpenPositions().map(p => [p.tradeId, p]));
+        
+        let rows = rawRows.map(r => {
+           let minPrice = r.trade.minNoPriceDuringPosition;
+           if (r.trade.status === "OPEN") {
+             const livePos = openPositionsMap.get(r.trade.id);
+             if (livePos?.minNoPriceDuringPosition !== undefined) {
+               minPrice = livePos.minNoPriceDuringPosition === null ? null : livePos.minNoPriceDuringPosition.toString();
+             }
+           }
+           
+           return {
+             ...r.trade,
+             minNoPriceDuringPosition: minPrice,
+             campaignEndDate: r.campaign?.endDate
+           };
+        });
+        
+        // Removed pending orders mock injection
+        
         
         res.json(rows);
       } catch (error) {
@@ -383,6 +400,7 @@ export class ApiServer {
       type: "systemState",
       data: {
         ...orchestrator.getStats(),
+        pendingOrders: orchestrator.getPendingOrders(),
         liveMarkets: orchestrator.getLiveMarkets(),
         portfolio: {
           cashBalance: pm.getCashBalance(),
