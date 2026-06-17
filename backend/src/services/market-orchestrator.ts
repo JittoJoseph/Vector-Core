@@ -12,6 +12,7 @@ import {
   estimateDepthAtOrBelow,
   getTopOfBook,
   simulateTakerSell,
+  simulateLimitBuy,
 } from "./execution-simulator.js";
 import {
   getMarketWebSocketWatcher,
@@ -48,26 +49,6 @@ interface OpenPosition {
   minNoPriceDuringPosition: number | null;
 }
 
-interface PendingOrder {
-  orderId: string;
-  campaignId: string;
-  campaignSlug: string;
-  campaignTitle: string;
-  bucketId: string;
-  bucketSlug: string;
-  bucketGroupTitle: string;
-  tokenId: string;
-  limitPrice: number;
-  budget: number;
-  expectedNetProfit: number;
-  expectedReturnPercent: number;
-  modalBucketAtEntry: string;
-  noBestBidAtEntry: number | undefined;
-  noBestAskAtEntry: number | undefined;
-  depthAtLimit: number;
-  createdAtMs: number;
-}
-
 export type MarketLifecycle = "OPEN" | "AWAITING_RESOLUTION" | "RESOLVED";
 
 export class MarketOrchestrator extends EventEmitter {
@@ -77,8 +58,6 @@ export class MarketOrchestrator extends EventEmitter {
 
   private scanTimer: ReturnType<typeof setInterval> | null = null;
   private settlementTimer: ReturnType<typeof setInterval> | null = null;
-  private pendingOrders = new Map<string, PendingOrder>();
-
   
   private trackedBuckets = new Map<string, TrackedBucket>();
   private tokenToBucket = new Map<string, string>();
@@ -169,10 +148,6 @@ export class MarketOrchestrator extends EventEmitter {
 
   public getOpenPositions(): OpenPosition[] {
     return Array.from(this.openPositions.values());
-  }
-
-  public getPendingOrders(): PendingOrder[] {
-    return Array.from(this.pendingOrders.values());
   }
 
   getStats() {
@@ -369,10 +344,10 @@ export class MarketOrchestrator extends EventEmitter {
       campaign: typeof schema.distributionCampaigns.$inferSelect;
       expectedNetProfit: number;
       expectedReturnPercent: number;
-      makerPrice: number;
+      budget: number;
+      execResult: any;
       top: any;
       depthAtLimit: number;
-      budget: number;
       modalBucketTitle: string;
     }
     
@@ -396,7 +371,6 @@ export class MarketOrchestrator extends EventEmitter {
       
       const [modalMin] = parseBucketMinMax(modalBucket.groupItemTitle);
       
-      // Relevance Rule 1: Modal bucket is always relevant context
       requiredTokens.add(modalBucket.noTokenId);
       requiredTokens.add(modalBucket.yesTokenId);
       
@@ -405,8 +379,6 @@ export class MarketOrchestrator extends EventEmitter {
         
         if (isCandidate) {
           const noPrice = parseFloat(bucket.noPrice?.toString() ?? "1");
-          
-          // Relevance Rule 2: Candidate bucket reasonably close to entry range
           const bucketHasPosition = Array.from(this.openPositions.values()).some(p => p.bucketId === bucket.id);
           const isRelevant = isRelevantBucket(isCandidate, false, noPrice, config.strategy.maxNoEntryPrice, bucketHasPosition);
           
@@ -415,67 +387,43 @@ export class MarketOrchestrator extends EventEmitter {
              requiredTokens.add(bucket.yesTokenId);
           }
 
-          // Trade Eligibility: STRICTLY bounded by min and max
           if (noPrice >= config.strategy.minNoEntryPrice && noPrice <= config.strategy.maxNoEntryPrice) {
-            
-            const bucketHasPosition = Array.from(this.openPositions.values()).some(p => p.bucketId === bucket.id);
             if (bucketHasPosition) continue;
-            
             if (this.inFlightTokens.has(bucket.noTokenId)) continue;
             
             const { data: book } = await this.client.getOrderbook(bucket.noTokenId);
             const top = getTopOfBook(book);
             if (top.bestAsk == null || top.bestAsk < config.strategy.minNoEntryPrice || top.bestAsk > config.strategy.maxNoEntryPrice) continue;
-            if (top.bestAsk == null) continue;
             
-            const depthAtLimit = estimateDepthAtOrBelow(book, config.strategy.maxNoEntryPrice);
             const budget = this.portfolioManager.computePositionBudget(this.computeOpenPositionsValue());
             if (budget <= 0) continue;
             
-            const makerPrice = Math.min(config.strategy.maxNoEntryPrice, (top.bestAsk ?? 1) - 0.001);
-            if (makerPrice < config.strategy.minNoEntryPrice) continue;
+            const state = this.trackedBuckets.get(bucket.id);
+            const execResult = simulateLimitBuy(book, budget, config.strategy.maxNoEntryPrice, state?.feeSchedule ?? null);
+            if (execResult.totalCost < 5) continue;
             
-            const shares = budget / makerPrice;
-            const expectedNetProfit = shares - budget;
+            const actualCost = execResult.netCost;
+            const shares = execResult.totalShares;
+            const expectedNetProfit = shares - actualCost;
+            
             if (expectedNetProfit < config.strategy.minExpectedNetProfit) continue;
             
-            const expectedReturnPercent = expectedNetProfit / budget;
+            const expectedReturnPercent = expectedNetProfit / actualCost;
             
-            allCandidates.push({ bucket, campaign, expectedNetProfit, expectedReturnPercent, makerPrice, budget, top, depthAtLimit, modalBucketTitle: modalBucket.groupItemTitle });
+            allCandidates.push({ bucket, campaign, expectedNetProfit, expectedReturnPercent, budget: actualCost, execResult, top, depthAtLimit: 0, modalBucketTitle: modalBucket.groupItemTitle });
           }
         }
       }
     }
     
-    // Evaluate and potentially cancel pending orders
-    const now = Date.now();
-    for (const [orderId, pending] of this.pendingOrders.entries()) {
-      // Cancel if older than 5 minutes
-      if (now - pending.createdAtMs > 5 * 60 * 1000) {
-        logger.info({ orderId, bucketId: pending.bucketId }, "Cancelling stale pending order");
-        await this.portfolioManager.addCash(pending.budget);
-        this.pendingOrders.delete(orderId);
-        continue;
-      }
-      
-      const bucketHasPosition = Array.from(this.openPositions.values()).some(p => p.bucketId === pending.bucketId);
-      if (bucketHasPosition) {
-        logger.info({ orderId, bucketId: pending.bucketId }, "Cancelling pending order, bucket already has position");
-        await this.portfolioManager.addCash(pending.budget);
-        this.pendingOrders.delete(orderId);
-      }
-    }
-
     const currentlySubscribed = this.wsWatcher.getSubscribedTokens();
     const tokensToSubscribe = Array.from(requiredTokens).filter(t => !currentlySubscribed.has(t));
     const tokensToUnsubscribe = Array.from(currentlySubscribed).filter(t => !requiredTokens.has(t));
     
     if (tokensToSubscribe.length > 0) {
-      logger.info({ count: tokensToSubscribe.length }, `Subscribed ${tokensToSubscribe.length} tokens`);
       this.wsWatcher.subscribe(tokensToSubscribe);
     }
     if (tokensToUnsubscribe.length > 0) {
-      logger.info({ count: tokensToUnsubscribe.length }, `Unsubscribed ${tokensToUnsubscribe.length} tokens`);
       this.wsWatcher.unsubscribe(tokensToUnsubscribe);
     }
     
@@ -485,41 +433,17 @@ export class MarketOrchestrator extends EventEmitter {
     });
     
     for (const cand of allCandidates) {
-      if (this.openPositions.size + this.pendingOrders.size >= config.strategy.maxSimultaneousPositions && !config.portfolio.allowNegativeBalance) break;
+      if (this.openPositions.size >= config.strategy.maxSimultaneousPositions && !config.portfolio.allowNegativeBalance) break;
       
       this.inFlightTokens.add(cand.bucket.noTokenId);
-      
-      const existingPending = Array.from(this.pendingOrders.values()).some(p => p.bucketId === cand.bucket.id);
-      if (existingPending) continue;
 
       try {
         const deducted = await this.portfolioManager.deductCash(cand.budget);
         if (!deducted) continue;
         
-        const orderId = `pending-${Date.now()}-${Math.random().toString(36).substring(7)}`;
-        this.pendingOrders.set(orderId, {
-          orderId,
-          campaignId: cand.campaign.id,
-          campaignSlug: cand.campaign.slug,
-          campaignTitle: cand.campaign.title,
-          bucketId: cand.bucket.id,
-          bucketSlug: cand.bucket.slug ?? "",
-          bucketGroupTitle: cand.bucket.groupItemTitle,
-          tokenId: cand.bucket.noTokenId,
-          limitPrice: cand.makerPrice,
-          budget: cand.budget,
-          expectedNetProfit: cand.expectedNetProfit,
-          expectedReturnPercent: cand.expectedReturnPercent,
-          modalBucketAtEntry: cand.modalBucketTitle,
-          noBestBidAtEntry: cand.top.bestBid,
-          noBestAskAtEntry: cand.top.bestAsk,
-          depthAtLimit: cand.depthAtLimit,
-          createdAtMs: Date.now()
-        });
-        
-        logger.info({ orderId, bucketId: cand.bucket.id, limitPrice: cand.makerPrice }, "Placed pending Maker order");
+        await this.executeMarketEntry(cand);
       } catch (err) {
-        logger.error({ err, bucketId: cand.bucket.id }, "Failed to place pending Maker order");
+        logger.error({ err, bucketId: cand.bucket.id }, "Failed to execute Taker entry");
       } finally {
         this.inFlightTokens.delete(cand.bucket.noTokenId);
       }
@@ -536,17 +460,6 @@ export class MarketOrchestrator extends EventEmitter {
 
     const config = getConfig();
 
-    // 1. Check pending Maker orders
-    for (const [orderId, pending] of this.pendingOrders.entries()) {
-      if (pending.tokenId === tokenId && pending.bucketId === bucketId) {
-        if (bestAsk <= pending.limitPrice) {
-          this.executePendingOrder(pending).catch(e => logger.error({ err: e }, "Failed to execute pending Maker order"));
-          this.pendingOrders.delete(orderId);
-        }
-      }
-    }
-
-    // 2. Check open positions (Stop Loss & Min Price tracking)
     for (const pos of this.openPositions.values()) {
       if (pos.tokenId === tokenId && pos.bucketId === bucketId) {
         if (!state.endDate || new Date() <= state.endDate) {
@@ -556,7 +469,6 @@ export class MarketOrchestrator extends EventEmitter {
           }
         }
 
-        // Stop-Loss Evaluation
         if (config.strategy.stopLossEnabled && bestBid <= config.strategy.stopLossNoPrice) {
           this.executeStopLoss(pos, state.feeSchedule).catch(e => logger.error({ err: e }, "Failed to execute stop loss"));
         }
@@ -564,47 +476,50 @@ export class MarketOrchestrator extends EventEmitter {
     }
   }
 
-  private async executePendingOrder(pending: PendingOrder) {
+  private async executeMarketEntry(cand: any) {
     try {
-      const shares = pending.budget / pending.limitPrice;
+      const execResult = cand.execResult;
+      
       const trade = await createSimulatedTrade({
-        campaignId: pending.campaignId,
-        campaignSlug: pending.campaignSlug,
-        campaignTitle: pending.campaignTitle,
-        bucketId: pending.bucketId,
-        bucketSlug: pending.bucketSlug,
-        bucketGroupTitle: pending.bucketGroupTitle,
-        tokenId: pending.tokenId,
+        campaignId: cand.campaign.id,
+        campaignSlug: cand.campaign.slug,
+        campaignTitle: cand.campaign.title,
+        bucketId: cand.bucket.id,
+        bucketSlug: cand.bucket.slug,
+        bucketGroupTitle: cand.bucket.groupItemTitle,
+        tokenId: cand.bucket.noTokenId,
         entryTs: new Date(),
-        entryPrice: pending.limitPrice.toFixed(8),
-        entryShares: shares.toFixed(8),
-        positionBudget: pending.budget.toFixed(8),
-        actualCost: pending.budget.toFixed(8),
-        entryFees: "0", // Maker fees are zero
-        fillStatus: "FULL",
-        expectedNetProfit: pending.expectedNetProfit.toFixed(8),
-        expectedReturnPercent: pending.expectedReturnPercent.toFixed(8),
-        noBestBidAtEntry: pending.noBestBidAtEntry?.toFixed(8),
-        noBestAskAtEntry: pending.noBestAskAtEntry?.toFixed(8),
-        depthAtLimit: pending.depthAtLimit.toFixed(8),
-        modalBucketAtEntry: pending.modalBucketAtEntry,
+        entryPrice: execResult.averagePrice.toFixed(8),
+        entryShares: execResult.totalShares.toFixed(8),
+        positionBudget: cand.budget.toFixed(8),
+        actualCost: execResult.netCost.toFixed(8),
+        entryFees: execResult.fees.toFixed(8),
+        fillStatus: execResult.isPartialFill ? "PARTIAL" : "FULL",
+        expectedNetProfit: cand.expectedNetProfit.toFixed(8),
+        expectedReturnPercent: cand.expectedReturnPercent.toFixed(8),
+        noBestBidAtEntry: cand.top.bestBid?.toFixed(8),
+        noBestAskAtEntry: cand.top.bestAsk?.toFixed(8),
+        depthAtLimit: cand.depthAtLimit.toFixed(8),
+        modalBucketAtEntry: cand.modalBucketTitle,
       });
 
       if (trade) {
         this.openPositions.set(trade.id, {
           tradeId: trade.id,
-          bucketId: pending.bucketId,
-          tokenId: pending.tokenId,
-          entryPrice: pending.limitPrice,
-          entryShares: shares,
-          fees: 0,
-          actualCost: pending.budget,
+          bucketId: cand.bucket.id,
+          tokenId: cand.bucket.noTokenId,
+          entryPrice: execResult.averagePrice,
+          entryShares: execResult.totalShares,
+          fees: execResult.fees,
+          actualCost: execResult.netCost,
           minNoPriceDuringPosition: null,
         });
-        await logAudit("info", "TRADE_OPENED", `Opened simulated Maker NO trade for ${pending.bucketGroupTitle}`, { tradeId: trade.id });
+        await logAudit("info", "TRADE_OPENED", `Opened simulated Taker NO trade for ${cand.bucket.groupItemTitle}`, { tradeId: trade.id });
+        logger.info({ tradeId: trade.id, bucketId: cand.bucket.id, fillStatus: execResult.isPartialFill ? "PARTIAL" : "FULL" }, "Taker entry executed");
+        this.emit("tradeOpened", { trade });
       }
     } catch (err) {
-      await this.portfolioManager.addCash(pending.budget);
+      logger.error({ err }, "Simulated trade creation failed");
       throw err;
     }
   }
@@ -678,15 +593,6 @@ export class MarketOrchestrator extends EventEmitter {
     const positions = [...this.openPositions.values()].filter((p) => p.bucketId === bucketId);
     const state = this.trackedBuckets.get(bucketId);
     if (state) state.resolved = true;
-
-    // Cancel any pending orders for this bucket
-    for (const [orderId, pending] of this.pendingOrders.entries()) {
-      if (pending.bucketId === bucketId) {
-        logger.info({ orderId, bucketId }, "Cancelling pending order due to market resolution");
-        await this.portfolioManager.addCash(pending.budget);
-        this.pendingOrders.delete(orderId);
-      }
-    }
 
     // Update the DB to reflect the resolution of this bucket so it stops being considered
     try {
