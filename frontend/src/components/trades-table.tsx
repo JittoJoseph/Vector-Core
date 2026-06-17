@@ -171,11 +171,6 @@ export function TradesTable({
                         <span className="text-[11px] font-medium text-muted-foreground/80">
                           {trade.bucketGroupTitle || "N/A"}
                         </span>
-                        {trade.fillStatus === "PENDING_MAKER" && (
-                          <span className="text-[9px] uppercase tracking-wider font-semibold text-orange-400 bg-orange-400/10 border border-orange-400/20 px-1.5 py-0.5 rounded">
-                            Pending
-                          </span>
-                        )}
                       </div>
                     </div>
                   </td>
