@@ -43,15 +43,17 @@ export function TradeDetailPopup({
   const returnPct = actualCost > 0 ? (pnl / actualCost) * 100 : 0;
   const exitReason = trade.exitReason;
 
-  const statusBadgeCls = !isClosed
+  const isPending = trade.fillStatus === "PENDING_MAKER";
+
+  const statusBadgeCls = isPending
+    ? "text-orange-400 border-orange-400/25 bg-orange-400/5"
+    : !isClosed
     ? "text-blue-400 border-blue-400/25 bg-blue-400/5"
     : isWin
       ? "text-emerald-400 border-emerald-500/25 bg-emerald-500/5"
       : "text-red-400 border-red-500/25 bg-red-500/5";
 
-  const { pnl: unrealizedPnl, pnlPct: unrealizedPnlPct } = !isClosed ? calculateTradeUnrealizedPnl(trade, livePrice || null) : { pnl: null, pnlPct: null };
-
-
+  const { pnl: unrealizedPnl, pnlPct: unrealizedPnlPct } = (!isClosed && !isPending) ? calculateTradeUnrealizedPnl(trade, livePrice || null) : { pnl: null, pnlPct: null };
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
@@ -61,7 +63,7 @@ export function TradeDetailPopup({
           <div className="flex items-start justify-between gap-3">
             <div className="flex items-center gap-1.5 flex-wrap">
               <span className={`inline-flex items-center text-[10px] font-semibold tracking-[0.15em] px-2 py-0.5 rounded border ${statusBadgeCls}`}>
-                {isClosed ? (outcome ?? "SETTLED") : "OPEN"}
+                {isPending ? "PENDING" : isClosed ? (outcome ?? "SETTLED") : "OPEN"}
               </span>
               <Chip>{trade.side}</Chip>
               {trade.orderType && <Chip>{trade.orderType}</Chip>}

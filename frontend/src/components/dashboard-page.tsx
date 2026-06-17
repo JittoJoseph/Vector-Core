@@ -71,10 +71,48 @@ export function DashboardPage() {
   }, [refetchStats, refetchTrades, refetchCampaigns, refetchPerformance]);
 
   // Derived datasets
-  const openTrades = useMemo(
-    () => trades.filter((t) => t.status === "OPEN"),
-    [trades],
-  );
+  const openTrades = useMemo(() => {
+    const active = trades.filter((t) => t.status === "OPEN");
+    const pendingSimulatedTrades = (stats?.pendingOrders || []).map(p => ({
+      id: p.orderId,
+      campaignId: p.campaignId,
+      campaignSlug: p.campaignSlug,
+      campaignTitle: p.campaignTitle,
+      bucketId: p.bucketId,
+      bucketSlug: p.bucketSlug,
+      bucketGroupTitle: p.bucketGroupTitle,
+      tokenId: p.tokenId,
+      entryTs: new Date(p.createdAtMs).toISOString(),
+      entryPrice: p.limitPrice.toString(),
+      entryShares: (p.budget / p.limitPrice).toString(),
+      positionBudget: p.budget.toString(),
+      actualCost: p.budget.toString(),
+      entryFees: "0",
+      outcomeLabel: "No",
+      side: "BUY",
+      orderType: "MAKER",
+      fillStatus: "PENDING_MAKER",
+      expectedNetProfit: p.expectedNetProfit.toString(),
+      expectedReturnPercent: p.expectedReturnPercent.toString(),
+      noBestBidAtEntry: p.noBestBidAtEntry?.toString() || null,
+      noBestAskAtEntry: p.noBestAskAtEntry?.toString() || null,
+      depthAtLimit: p.depthAtLimit.toString(),
+      modalBucketAtEntry: p.modalBucketAtEntry,
+      status: "OPEN",
+      exitOutcome: null,
+      exitPrice: null,
+      exitTs: null,
+      realizedPnl: null,
+      exitReason: null,
+      minNoPriceDuringPosition: null,
+      campaignEndDate: null,
+      createdAt: new Date(p.createdAtMs).toISOString(),
+      updatedAt: new Date(p.createdAtMs).toISOString()
+    })) as any;
+    
+    return [...pendingSimulatedTrades, ...active];
+  }, [trades, stats?.pendingOrders]);
+  
   const settledTrades = useMemo(
     () => trades.filter((t) => t.status === "SETTLED"),
     [trades],
@@ -119,7 +157,7 @@ export function DashboardPage() {
   const evaluatedCount =
     stats?.orchestrator.scanner.evaluatedOpportunities || 0;
   const discoveredLaddersCount =
-    stats?.orchestrator.scanner.discoveredLadders || 0;
+    stats?.orchestrator.scanner.discoveredCampaigns || 0;
   const acceptanceRate =
     evaluatedCount > 0
       ? ((openTrades.length + settledTrades.length) / evaluatedCount) * 100

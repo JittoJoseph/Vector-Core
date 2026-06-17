@@ -30,7 +30,7 @@ export function SystemStatusIndicator({
         {stats && (
           <div className="flex items-center gap-4">
             <span>POSITIONS: {stats.orchestrator.openPositions}</span>
-            <span>MARKETS: {stats.orchestrator.activeMarkets}</span>
+            <span>MARKETS: {stats.orchestrator.activeBuckets}</span>
             <span>CYCLES: {stats.orchestrator.cycleCount}</span>
           </div>
         )}
