@@ -129,6 +129,12 @@ export interface SystemStats {
     stopLossEnabled: boolean;
     stopLossNoPrice: number;
   };
+  openPositionPrices?: Record<string, LiveMarketPrice>;
+  portfolio?: {
+    cashBalance: number;
+    initialCapital: number;
+    openPositionsValue: number;
+  };
 }
 
 export interface PerformanceMetrics {
