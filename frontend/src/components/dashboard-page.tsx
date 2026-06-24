@@ -16,10 +16,10 @@ import {
 } from "@/lib/utils";
 import NumberFlow from "@number-flow/react";
 import {
-  useTrades,
+  usePositions,
+  useTradeHistory,
   useSystemStats,
   useCampaigns,
-  useLiveMarkets,
   usePerformanceRealtime,
   useActivityLog,
 } from "@/lib/hooks";
@@ -41,16 +41,21 @@ export function DashboardPage() {
 
   // Core Hooks
   const { stats, refetch: refetchStats } = useSystemStats();
-  const liveMarkets = useLiveMarkets();
 
   const {
-    trades,
+    positions: openTrades,
+    loading: positionsLoading,
+    refetch: refetchPositions,
+  } = usePositions();
+
+  const {
+    trades: settledTrades,
     loading: tradesLoading,
     loadMore: loadMoreTrades,
     hasMore: hasMoreTrades,
     loadingMore: loadingMoreTrades,
     refetch: refetchTrades,
-  } = useTrades();
+  } = useTradeHistory();
 
   const { refetch: refetchCampaigns } = useCampaigns();
 
@@ -64,34 +69,18 @@ export function DashboardPage() {
     setIsRefreshing(true);
     await Promise.all([
       refetchStats().catch(() => {}),
+      refetchPositions().catch(() => {}),
       refetchTrades().catch(() => {}),
       refetchCampaigns().catch(() => {}),
       refetchPerformance().catch(() => {}),
     ]);
     setIsRefreshing(false);
-  }, [refetchStats, refetchTrades, refetchCampaigns, refetchPerformance]);
-
-  // Derived datasets
-  const openTrades = useMemo(
-    () => trades.filter((t) => t.status === "OPEN"),
-    [trades],
-  );
-
-  const settledTrades = useMemo(
-    () => trades.filter((t) => t.status === "SETTLED"),
-    [trades],
-  );
+  }, [refetchStats, refetchPositions, refetchTrades, refetchCampaigns, refetchPerformance]);
 
   // Live prices map for Open Positions
   const livePricesMap = useMemo<Record<string, LiveMarketPrice>>(() => {
-    const map: Record<string, LiveMarketPrice> = {};
-    for (const m of liveMarkets) {
-      for (const [tokenId, price] of Object.entries(m.markPrice)) {
-        map[tokenId] = price;
-      }
-    }
-    return map;
-  }, [liveMarkets]);
+    return stats?.openPositionPrices || {};
+  }, [stats?.openPositionPrices]);
 
   // Financial Stats
   const initialCapital = parseFloat(performance?.initialCapital || "0");
