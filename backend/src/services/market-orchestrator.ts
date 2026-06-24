@@ -164,15 +164,16 @@ export class MarketOrchestrator extends EventEmitter {
     };
   }
 
-  getLiveMarkets() {
-    return Array.from(this.trackedBuckets.values()).map((b) => ({
-      marketId: b.bucketId,
-      noTokenId: b.noTokenId,
-      yesTokenId: b.yesTokenId,
-      noPrice: b.noPrice,
-      markPrice: b.lastPrices,
-      status: b.resolved ? "RESOLVED" : "OPEN",
-    }));
+  getOpenPositionPrices(): Record<string, { bid: number; ask: number; mid: number }> {
+    const prices: Record<string, { bid: number; ask: number; mid: number }> = {};
+    for (const pos of this.openPositions.values()) {
+      const bucket = this.trackedBuckets.get(pos.bucketId);
+      const price = bucket?.lastPrices[pos.tokenId];
+      if (price) {
+        prices[pos.tokenId] = price;
+      }
+    }
+    return prices;
   }
 
   computeOpenPositionsValue(): number {

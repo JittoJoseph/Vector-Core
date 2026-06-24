@@ -143,9 +143,6 @@ export class ApiServer {
       });
     });
 
-    this.app.get("/api/live-markets", (_req, res) => {
-      res.json(getMarketOrchestrator().getLiveMarkets());
-    });
 
     this.app.get("/api/campaigns", async (req, res) => {
       try {
@@ -243,39 +240,28 @@ export class ApiServer {
 
 
 
-    this.app.get("/api/trades", async (req, res) => {
+    this.app.get("/api/positions", async (req, res) => {
       try {
         const db = getDb();
         const orchestrator = getMarketOrchestrator();
-        const limit = Math.min(parseInt(req.query.limit as string) || 25, 200);
-        const offset = Math.max(parseInt(req.query.offset as string) || 0, 0);
-        const status = req.query.status as string | undefined;
         
-        const base = db
+        const rawRows = await db
           .select({
              trade: schema.simulatedTrades,
              campaign: schema.distributionCampaigns
           })
           .from(schema.simulatedTrades)
           .leftJoin(schema.distributionCampaigns, eq(schema.simulatedTrades.campaignId, schema.distributionCampaigns.id))
-          .orderBy(desc(schema.simulatedTrades.entryTs))
-          .limit(limit)
-          .offset(offset);
-          
-        const rawRows =
-          status === "OPEN" || status === "SETTLED"
-            ? await base.where(eq(schema.simulatedTrades.status, status))
-            : await base;
+          .where(eq(schema.simulatedTrades.status, "OPEN"))
+          .orderBy(desc(schema.simulatedTrades.entryTs));
             
         const openPositionsMap = new Map(orchestrator.getOpenPositions().map(p => [p.tradeId, p]));
         
-        let rows = rawRows.map(r => {
+        const rows = rawRows.map(r => {
            let minPrice = r.trade.minNoPriceDuringPosition;
-           if (r.trade.status === "OPEN") {
-             const livePos = openPositionsMap.get(r.trade.id);
-             if (livePos?.minNoPriceDuringPosition !== undefined) {
-               minPrice = livePos.minNoPriceDuringPosition === null ? null : livePos.minNoPriceDuringPosition.toString();
-             }
+           const livePos = openPositionsMap.get(r.trade.id);
+           if (livePos?.minNoPriceDuringPosition !== undefined) {
+             minPrice = livePos.minNoPriceDuringPosition === null ? null : livePos.minNoPriceDuringPosition.toString();
            }
            
            return {
@@ -285,8 +271,35 @@ export class ApiServer {
            };
         });
         
-        // Removed pending orders mock injection
+        res.json(rows);
+      } catch (error) {
+        logger.error({ error }, "Positions fetch error");
+        res.status(500).json({ error: "Failed to fetch positions" });
+      }
+    });
+
+    this.app.get("/api/trades/history", async (req, res) => {
+      try {
+        const db = getDb();
+        const limit = Math.min(parseInt(req.query.limit as string) || 25, 200);
+        const offset = Math.max(parseInt(req.query.offset as string) || 0, 0);
         
+        const rawRows = await db
+          .select({
+             trade: schema.simulatedTrades,
+             campaign: schema.distributionCampaigns
+          })
+          .from(schema.simulatedTrades)
+          .leftJoin(schema.distributionCampaigns, eq(schema.simulatedTrades.campaignId, schema.distributionCampaigns.id))
+          .where(eq(schema.simulatedTrades.status, "SETTLED"))
+          .orderBy(desc(schema.simulatedTrades.entryTs))
+          .limit(limit)
+          .offset(offset);
+            
+        const rows = rawRows.map(r => ({
+             ...r.trade,
+             campaignEndDate: r.campaign?.endDate
+        }));
         
         res.json(rows);
       } catch (error) {
@@ -411,7 +424,7 @@ export class ApiServer {
           stopLossEnabled: config.strategy.stopLossEnabled,
           stopLossNoPrice: config.strategy.stopLossNoPrice,
         },
-        liveMarkets: orchestrator.getLiveMarkets(),
+        openPositionPrices: orchestrator.getOpenPositionPrices(),
         portfolio: {
           cashBalance: pm.getCashBalance(),
           initialCapital: pm.getInitialCapital(),
