@@ -25,13 +25,65 @@ import type {
  */
 const PAGE_SIZE = 25;
 
-export function useTrades(status?: string) {
+export function usePositions() {
+  const [positions, setPositions] = useState<SimulatedTrade[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<Error | null>(null);
+
+  const fetchPositions = useCallback(async () => {
+    try {
+      setLoading(true);
+      const api = getApiClient();
+      const response = await api.getPositions();
+      setPositions(response);
+      setError(null);
+    } catch (err) {
+      setError(err as Error);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchPositions();
+  }, [fetchPositions]);
+
+  // WS-driven updates
+  useEffect(() => {
+    const ws = getWsClient();
+    ws.connect();
+
+    const unsubOpened = ws.on("tradeOpened", (msg: WsMessage) => {
+      const trade = (msg.data as { trade?: SimulatedTrade })?.trade;
+      if (!trade || trade.status !== "OPEN") return;
+      setPositions((prev) => {
+        if (prev.some((t) => t.id === trade.id)) return prev;
+        return [trade, ...prev];
+      });
+    });
+
+    const unsubResolved = ws.on("tradeResolved", (msg: WsMessage) => {
+      const trade = (msg.data as { trade?: SimulatedTrade })?.trade;
+      if (!trade) return;
+      // Remove it from positions when resolved
+      setPositions((prev) => prev.filter((t) => t.id !== trade.id));
+    });
+
+    return () => {
+      unsubOpened();
+      unsubResolved();
+    };
+  }, []);
+
+  return { positions, loading, error, refetch: fetchPositions };
+}
+
+export function useTradeHistory() {
   const [trades, setTrades] = useState<SimulatedTrade[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(false);
   const [error, setError] = useState<Error | null>(null);
-  // Tracks DB-fetched row count (WS-prepended rows don't count toward offset)
   const dbFetchedRef = useRef(0);
 
   const fetchTrades = useCallback(async () => {
@@ -39,8 +91,7 @@ export function useTrades(status?: string) {
       setLoading(true);
       dbFetchedRef.current = 0;
       const api = getApiClient();
-      const response = await api.getTrades({
-        status,
+      const response = await api.getTradeHistory({
         limit: PAGE_SIZE,
         offset: 0,
       });
@@ -53,15 +104,14 @@ export function useTrades(status?: string) {
     } finally {
       setLoading(false);
     }
-  }, [status]);
+  }, []);
 
   const loadMore = useCallback(async () => {
     if (loadingMore) return;
     try {
       setLoadingMore(true);
       const api = getApiClient();
-      const response = await api.getTrades({
-        status,
+      const response = await api.getTradeHistory({
         limit: PAGE_SIZE,
         offset: dbFetchedRef.current,
       });
@@ -72,39 +122,29 @@ export function useTrades(status?: string) {
       });
       setHasMore(response.length === PAGE_SIZE);
     } catch {
-      // silent — keep existing trades visible
     } finally {
       setLoadingMore(false);
     }
-  }, [status, loadingMore]);
+  }, [loadingMore]);
 
   useEffect(() => {
     fetchTrades();
   }, [fetchTrades]);
 
-  // WS-driven updates — no polling
   useEffect(() => {
     const ws = getWsClient();
     ws.connect();
 
-    const unsubOpened = ws.on("tradeOpened", (msg: WsMessage) => {
+    const unsubResolved = ws.on("tradeResolved", (msg: WsMessage) => {
       const trade = (msg.data as { trade?: SimulatedTrade })?.trade;
       if (!trade) return;
       setTrades((prev) => {
-        // Avoid dupes
         if (prev.some((t) => t.id === trade.id)) return prev;
         return [trade, ...prev];
       });
     });
 
-    const unsubResolved = ws.on("tradeResolved", (msg: WsMessage) => {
-      const trade = (msg.data as { trade?: SimulatedTrade })?.trade;
-      if (!trade) return;
-      setTrades((prev) => prev.map((t) => (t.id === trade.id ? trade : t)));
-    });
-
     return () => {
-      unsubOpened();
       unsubResolved();
     };
   }, []);
@@ -118,61 +158,6 @@ export function useTrades(status?: string) {
     error,
     refetch: fetchTrades,
   };
-}
-
-/**
- * Hook providing live market info from the systemState WS broadcast.
- * Seeds initial state from REST /api/active-market at mount so the top section
- * renders immediately, then WS updates take over in real-time.
- */
-export function useLiveMarkets(): LiveMarketInfo[] {
-  const [liveMarkets, setLiveMarkets] = useState<LiveMarketInfo[]>([]);
-
-  // Seed from REST on mount
-  useEffect(() => {
-    let cancelled = false;
-    getApiClient()
-      .getLiveMarkets()
-      .then((markets) => {
-        if (!cancelled && markets) {
-          setLiveMarkets(markets);
-        }
-      })
-      .catch(() => {
-        /* silently skip if backend not ready */
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  useEffect(() => {
-    const ws = getWsClient();
-    ws.connect();
-
-    const unsub = ws.on("systemState", (msg: WsMessage) => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const incoming = (msg.data as any)?.liveMarkets as
-        | LiveMarketInfo[]
-        | undefined;
-      if (!incoming) return;
-      setLiveMarkets((prev) =>
-        incoming.map((m) => {
-          // Preserve last-known prices when the WS update has none yet
-          // (happens briefly right after a market is first registered)
-          if (Object.keys(m.markPrice).length === 0) {
-            const existing = prev.find((p) => p.marketId === m.marketId);
-            return existing ? { ...m, markPrice: existing.markPrice } : m;
-          }
-          return m;
-        }),
-      );
-    });
-
-    return unsub;
-  }, []);
-
-  return liveMarkets;
 }
 
 /**
