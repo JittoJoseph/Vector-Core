@@ -47,6 +47,7 @@ interface OpenPosition {
   fees: number;
   actualCost: number;
   minNoPriceDuringPosition: number | null;
+  stopLossConditionFirstSeen?: number | null;
 }
 
 export type MarketLifecycle = "OPEN" | "AWAITING_RESOLUTION" | "RESOLVED";
@@ -469,8 +470,17 @@ export class MarketOrchestrator extends EventEmitter {
           }
         }
 
-        if (config.strategy.stopLossEnabled && bestBid <= config.strategy.stopLossNoPrice) {
-          this.executeStopLoss(pos, state.feeSchedule).catch(e => logger.error({ err: e }, "Failed to execute stop loss"));
+        if (config.strategy.stopLossEnabled) {
+          if (bestAsk <= config.strategy.stopLossNoPrice) {
+            const now = Date.now();
+            if (!pos.stopLossConditionFirstSeen) {
+              pos.stopLossConditionFirstSeen = now;
+            } else if (now - pos.stopLossConditionFirstSeen >= 10000) {
+              this.executeStopLoss(pos, state.feeSchedule).catch(e => logger.error({ err: e }, "Failed to execute stop loss"));
+            }
+          } else {
+            pos.stopLossConditionFirstSeen = null;
+          }
         }
       }
     }
