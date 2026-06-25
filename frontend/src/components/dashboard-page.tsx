@@ -57,7 +57,16 @@ export function DashboardPage() {
     refetch: refetchTrades,
   } = useTradeHistory();
 
-  const { refetch: refetchCampaigns } = useCampaigns();
+  const {
+    campaigns: activeCampaigns,
+    loading: activeLoading,
+    refetch: refetchActive,
+  } = useCampaigns("active");
+  const {
+    campaigns: historyCampaigns,
+    loading: historyLoading,
+    refetch: refetchHistory,
+  } = useCampaigns("history");
 
   const { activities, loading: activitiesLoading } = useActivityLog();
   const { performance, refetch: refetchPerformance } =
@@ -71,7 +80,8 @@ export function DashboardPage() {
       refetchStats().catch(() => {}),
       refetchPositions().catch(() => {}),
       refetchTrades().catch(() => {}),
-      refetchCampaigns().catch(() => {}),
+      refetchActive().catch(() => {}),
+      refetchHistory().catch(() => {}),
       refetchPerformance().catch(() => {}),
     ]);
     setIsRefreshing(false);
@@ -79,7 +89,8 @@ export function DashboardPage() {
     refetchStats,
     refetchPositions,
     refetchTrades,
-    refetchCampaigns,
+    refetchActive,
+    refetchHistory,
     refetchPerformance,
   ]);
 
@@ -479,20 +490,27 @@ export function DashboardPage() {
                 />
               </TabsContent>
 
-              {/* CAMPAIGNS TAB */}
               <TabsContent
                 value="campaigns"
                 className="mt-0 flex-1 p-0 flex flex-col h-full"
               >
-                <CampaignsTable status="active" />
+                <CampaignsTable
+                  status="active"
+                  campaigns={activeCampaigns}
+                  loading={activeLoading}
+                  livePrices={livePricesMap}
+                />
               </TabsContent>
 
-              {/* CAMPAIGN HISTORY TAB */}
               <TabsContent
                 value="campaign_history"
                 className="mt-0 flex-1 p-0 flex flex-col h-full"
               >
-                <CampaignsTable status="history" />
+                <CampaignsTable
+                  status="history"
+                  campaigns={historyCampaigns}
+                  loading={historyLoading}
+                />
               </TabsContent>
 
               {/* DIAGNOSTICS TAB */}
