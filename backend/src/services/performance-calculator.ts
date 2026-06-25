@@ -21,6 +21,8 @@ export interface PerformanceMetrics {
   winRate: string;
   avgWin: string;
   avgLoss: string;
+  totalWin: string;
+  totalLoss: string;
   largestWin: string;
   largestLoss: string;
   totalFees: string;
@@ -125,7 +127,6 @@ export async function calculatePortfolioPerformance(
         }
       }
     }
-
   }
 
   const closedTrades = wins + losses;
@@ -156,6 +157,8 @@ export async function calculatePortfolioPerformance(
     winRate,
     avgWin,
     avgLoss,
+    totalWin: winPnlSum.toFixed(6),
+    totalLoss: lossPnlSum.toFixed(6),
     largestWin: largestWin.toFixed(6),
     largestLoss: largestLoss.toFixed(6),
     totalFees: totalFees.toFixed(6),

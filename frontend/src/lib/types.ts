@@ -103,11 +103,6 @@ export interface SystemStats {
       messageCount: number;
       reconnectAttempts: number;
     };
-    strategy: {
-      watchedTokens: number;
-      triggersCount: number;
-      evaluatedTokens: number;
-    };
     risk?: {
       consecutiveLossCount: number;
       consecutiveLossPauseLimit: number;
@@ -145,6 +140,8 @@ export interface PerformanceMetrics {
   winRate: string;
   avgWin: string;
   avgLoss: string;
+  totalWin: string;
+  totalLoss: string;
   largestWin: string;
   largestLoss: string;
   totalFees: string;
