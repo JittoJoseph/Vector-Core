@@ -38,7 +38,6 @@ export interface DistributionBucket {
   hasOpenPosition?: boolean;
 }
 
-
 export interface LiveMarketPrice {
   bid: number;
   ask: number;
@@ -97,10 +96,6 @@ export interface SystemStats {
     activeBuckets: number;
     openPositions: number;
     cycleCount: number;
-    scanner: {
-      discoveredCampaigns: number;
-      evaluatedOpportunities: number;
-    };
     ws: {
       connected: boolean;
       subscribedTokens: number;
@@ -189,7 +184,11 @@ export interface ActivityEntry {
 }
 
 export interface WsMessage {
-  type: "systemState" | "tradeOpened" | "tradeResolved" | "btcPriceUpdate" | "pong";
+  type:
+    | "systemState"
+    | "tradeOpened"
+    | "tradeResolved"
+    | "btcPriceUpdate"
+    | "pong";
   data?: unknown;
 }
-

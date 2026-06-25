@@ -110,15 +110,6 @@ export function DashboardPage() {
   const netPnl = livePortfolioValue - initialCapital;
   const roi = initialCapital > 0 ? (netPnl / initialCapital) * 100 : 0;
 
-  const evaluatedCount =
-    stats?.orchestrator.scanner.evaluatedOpportunities || 0;
-  const discoveredLaddersCount =
-    stats?.orchestrator.scanner.discoveredCampaigns || 0;
-  const acceptanceRate =
-    evaluatedCount > 0
-      ? ((openTrades.length + settledTrades.length) / evaluatedCount) * 100
-      : 0;
-
   return (
     <div className="min-h-screen bg-background text-foreground flex flex-col font-mono selection:bg-muted-foreground/30">
       <Header />
@@ -369,10 +360,12 @@ export function DashboardPage() {
               <div className="grid grid-cols-2 gap-x-4 gap-y-2">
                 <div>
                   <div className="text-[9px] text-muted-foreground/60 uppercase tracking-widest mb-0.5 font-bold">
-                    Analyzed
+                    Total PNL
                   </div>
-                  <div className="text-xs font-bold text-foreground">
-                    {evaluatedCount}
+                  <div
+                    className={`text-xs font-bold ${pnlColor(parseFloat(performance?.totalPnl || "0"))}`}
+                  >
+                    {formatPnl(parseFloat(performance?.totalPnl || "0"))}
                   </div>
                 </div>
                 <div>
@@ -526,37 +519,6 @@ export function DashboardPage() {
                           <div className="text-lg font-bold">
                             {stats?.orchestrator.ws.messageCount || 0}
                           </div>
-                        </div>
-                      </div>
-                    </div>
-                    <div>
-                      <div className="text-[10px] tracking-[0.15em] text-muted-foreground uppercase font-bold mb-3">
-                        Scanner Strategy Telemetry
-                      </div>
-                      <div className="flex flex-col gap-4">
-                        <div className="flex justify-between items-center border-b border-border/10 pb-3">
-                          <span className="text-[11px] text-muted-foreground uppercase tracking-widest">
-                            Discovered Ladders
-                          </span>
-                          <span className="text-sm font-bold text-foreground">
-                            {discoveredLaddersCount}
-                          </span>
-                        </div>
-                        <div className="flex justify-between items-center border-b border-border/10 pb-3">
-                          <span className="text-[11px] text-muted-foreground uppercase tracking-widest">
-                            Evaluated Opportunities
-                          </span>
-                          <span className="text-sm font-bold text-foreground">
-                            {evaluatedCount}
-                          </span>
-                        </div>
-                        <div className="flex justify-between items-center pb-3">
-                          <span className="text-[11px] text-muted-foreground uppercase tracking-widest">
-                            Acceptance Rate
-                          </span>
-                          <span className="text-sm font-bold text-blue-400">
-                            {acceptanceRate.toFixed(2)}%
-                          </span>
                         </div>
                       </div>
                     </div>
