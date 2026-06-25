@@ -75,7 +75,13 @@ export function DashboardPage() {
       refetchPerformance().catch(() => {}),
     ]);
     setIsRefreshing(false);
-  }, [refetchStats, refetchPositions, refetchTrades, refetchCampaigns, refetchPerformance]);
+  }, [
+    refetchStats,
+    refetchPositions,
+    refetchTrades,
+    refetchCampaigns,
+    refetchPerformance,
+  ]);
 
   // Live prices map for Open Positions
   const livePricesMap = useMemo<Record<string, LiveMarketPrice>>(() => {
@@ -335,18 +341,32 @@ export function DashboardPage() {
                     {stats?.orchestrator.ws.connected ? "LIVE" : "DEAD"}
                   </span>
                 </div>
+
+                <div className="flex items-center justify-between bg-card/30 border border-border/20 rounded px-3 py-1.5">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] text-muted-foreground/80 uppercase tracking-widest font-bold">
+                      Polymarket
+                    </span>
+                  </div>
+                  <span
+                    className={`text-[10px] font-bold tracking-widest uppercase ${
+                      stats?.orchestrator?.polymarketStatus === "UP"
+                        ? "text-emerald-400"
+                        : stats?.orchestrator?.polymarketStatus === "HAS_ISSUES"
+                          ? "text-amber-500"
+                          : stats?.orchestrator?.polymarketStatus ===
+                              "UNDER_MAINTENANCE"
+                            ? "text-red-400"
+                            : "text-muted-foreground"
+                    }`}
+                  >
+                    {stats?.orchestrator?.polymarketStatus || "UNKNOWN"}
+                  </span>
+                </div>
               </div>
 
               {/* Telemetry Grid */}
               <div className="grid grid-cols-2 gap-x-4 gap-y-2">
-                <div>
-                  <div className="text-[9px] text-muted-foreground/60 uppercase tracking-widest mb-0.5 font-bold">
-                    Active Pos
-                  </div>
-                  <div className="text-xs font-bold text-foreground">
-                    {openTrades.length}
-                  </div>
-                </div>
                 <div>
                   <div className="text-[9px] text-muted-foreground/60 uppercase tracking-widest mb-0.5 font-bold">
                     Analyzed
@@ -361,14 +381,6 @@ export function DashboardPage() {
                   </div>
                   <div className="text-xs font-mono font-bold text-foreground">
                     {stats?.orchestrator.cycleCount || 0}
-                  </div>
-                </div>
-                <div>
-                  <div className="text-[9px] text-muted-foreground/60 uppercase tracking-widest mb-0.5 font-bold">
-                    Found
-                  </div>
-                  <div className="text-xs font-mono font-bold text-foreground">
-                    {discoveredLaddersCount}
                   </div>
                 </div>
               </div>
