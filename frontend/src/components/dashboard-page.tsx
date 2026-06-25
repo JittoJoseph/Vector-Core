@@ -371,12 +371,10 @@ export function DashboardPage() {
               <div className="grid grid-cols-2 gap-x-4 gap-y-2">
                 <div>
                   <div className="text-[9px] text-muted-foreground/60 uppercase tracking-widest mb-0.5 font-bold">
-                    Total PNL
+                    Watched Markets
                   </div>
-                  <div
-                    className={`text-xs font-bold ${pnlColor(parseFloat(performance?.totalPnl || "0"))}`}
-                  >
-                    {formatPnl(parseFloat(performance?.totalPnl || "0"))}
+                  <div className="text-xs font-mono font-bold text-foreground">
+                    {stats?.orchestrator?.activeBuckets || 0}
                   </div>
                 </div>
                 <div>
@@ -461,6 +459,7 @@ export function DashboardPage() {
                         {formatPnl(parseFloat(performance?.totalPnl || "0"))}
                       </span>
                     </div>
+
                     <div className="flex flex-col">
                       <span className="text-[9px] text-muted-foreground uppercase tracking-widest">
                         Avg Win
@@ -475,6 +474,22 @@ export function DashboardPage() {
                       </span>
                       <span className={`text-sm font-bold ${pnlColor(-1)}`}>
                         {formatPnl(parseFloat(performance?.avgLoss || "0"))}
+                      </span>
+                    </div>
+                    <div className="flex flex-col">
+                      <span className="text-[9px] text-muted-foreground uppercase tracking-widest">
+                        Total Win
+                      </span>
+                      <span className={`text-sm font-bold ${pnlColor(1)}`}>
+                        {formatPnl(parseFloat(performance?.totalWin || "0"))}
+                      </span>
+                    </div>
+                    <div className="flex flex-col">
+                      <span className="text-[9px] text-muted-foreground uppercase tracking-widest">
+                        Total Loss
+                      </span>
+                      <span className={`text-sm font-bold ${pnlColor(-1)}`}>
+                        {formatPnl(parseFloat(performance?.totalLoss || "0"))}
                       </span>
                     </div>
                   </div>
