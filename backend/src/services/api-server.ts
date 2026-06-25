@@ -5,7 +5,7 @@ import express, {
 } from "express";
 import { createServer, type Server } from "http";
 import { WebSocket, WebSocketServer } from "ws";
-import { desc, eq, inArray } from "drizzle-orm";
+import { desc, eq, inArray, sql } from "drizzle-orm";
 import { createModuleLogger } from "../utils/logger.js";
 import { getConfig } from "../utils/config.js";
 import { getDb, getPortfolio, wipeAndResetPortfolio } from "../db/client.js";
@@ -143,134 +143,202 @@ export class ApiServer {
       });
     });
 
-
     this.app.get("/api/campaigns", async (req, res) => {
       try {
         const db = getDb();
-        const config = getConfig();
         const orchestrator = getMarketOrchestrator();
         const limit = Math.min(parseInt(req.query.limit as string) || 50, 200);
-        const status = req.query.status as string || 'active';
-        
-        let campaigns;
-        if (status === 'history') {
-          campaigns = await db.select().from(schema.distributionCampaigns)
+        const status = (req.query.status as string) || "active";
+
+        if (status === "history") {
+          const campaigns = await db
+            .select()
+            .from(schema.distributionCampaigns)
             .where(eq(schema.distributionCampaigns.active, false))
             .orderBy(desc(schema.distributionCampaigns.updatedAt))
             .limit(limit);
+
+          if (campaigns.length === 0) {
+            res.json([]);
+            return;
+          }
+
+          const campaignIds = campaigns.map((c) => c.id);
+          const tradeStatsRows = await db
+            .select({
+              campaignId: schema.simulatedTrades.campaignId,
+              tradeCount: sql<number>`count(*)`,
+              realizedPnl: sql<string>`sum(CAST(${schema.simulatedTrades.realizedPnl} AS NUMERIC))`,
+            })
+            .from(schema.simulatedTrades)
+            .where(inArray(schema.simulatedTrades.campaignId, campaignIds))
+            .groupBy(schema.simulatedTrades.campaignId);
+
+          const statsMap = new Map(
+            tradeStatsRows.map((r) => [r.campaignId, r]),
+          );
+
+          const results = campaigns.map((c) => {
+            const stats = statsMap.get(c.id);
+            return {
+              ...c,
+              historicalTrades: {
+                length: Number(stats?.tradeCount || 0),
+                totalPnl: parseFloat(stats?.realizedPnl || "0"),
+              },
+            };
+          });
+          res.json(results);
+          return;
         } else {
-          campaigns = await db.select().from(schema.distributionCampaigns)
+          const campaigns = await db
+            .select()
+            .from(schema.distributionCampaigns)
             .where(eq(schema.distributionCampaigns.active, true))
             .orderBy(desc(schema.distributionCampaigns.updatedAt))
             .limit(limit);
-        }
 
-        let allBuckets: typeof schema.distributionBuckets.$inferSelect[] = [];
-        let allTrades: typeof schema.simulatedTrades.$inferSelect[] = [];
-        
-        if (campaigns.length > 0) {
-          const campaignIds = campaigns.map(c => c.id);
-          allBuckets = await db.select().from(schema.distributionBuckets).where(inArray(schema.distributionBuckets.campaignId, campaignIds));
-          allTrades = await db.select().from(schema.simulatedTrades).where(inArray(schema.simulatedTrades.campaignId, campaignIds));
-        }
-
-        const openPositions = orchestrator.getOpenPositions();
-        
-        const results = [];
-
-        for (const c of campaigns) {
-           const buckets = allBuckets.filter(b => b.campaignId === c.id);
-           
-           const modalBucket = findModalBucket(buckets);
-           
-           let candidateCount = 0;
-           let positionCount = 0;
-           let trackedCount = 0;
-           const relevantBuckets = [];
-           
-           if (modalBucket) {
-              const [modalMin] = parseBucketMinMax(modalBucket.groupItemTitle);
-              
-              for (const b of buckets) {
-                 const isCandidate = isCandidateBucket(b.groupItemTitle, modalMin);
-                 const noPrice = parseFloat(b.noPrice?.toString() ?? "1");
-                 const isModal = b.id === modalBucket.id;
-                 const hasOpenPosition = openPositions.some(p => p.tokenId === b.yesTokenId || p.tokenId === b.noTokenId);
-                 
-                 if (isCandidate) candidateCount++;
-                 if (hasOpenPosition) positionCount++;
-                 
-                 const isRelevant = isRelevantBucket(isCandidate, isModal, noPrice, config.strategy.maxNoEntryPrice, hasOpenPosition);
-                 
-                 if (isRelevant) {
-                    trackedCount++;
-                    relevantBuckets.push({
-                      ...b,
-                      hasOpenPosition
-                    });
-                 }
-              }
-
-              relevantBuckets.sort((a, b) => {
-                const [aMin] = parseBucketMinMax(a.groupItemTitle);
-                const [bMin] = parseBucketMinMax(b.groupItemTitle);
-                return aMin - bMin;
-              });
-           }
-           
-           const historicalTrades = allTrades.filter(t => t.campaignId === c.id);
-
-           results.push({
+          const results = campaigns.map((c) => {
+            const metrics = orchestrator.getActiveCampaignMetrics(c.id);
+            return {
               ...c,
-              modalBucketTitle: modalBucket?.groupItemTitle ?? "N/A",
-              candidateCount,
-              trackedCount,
-              positionCount,
-              relevantBuckets,
-              historicalTrades
-           });
+              candidateCount: metrics.candidateCount,
+              trackedCount: metrics.trackedCount,
+              positionCount: metrics.positionCount,
+            };
+          });
+          res.json(results);
+          return;
         }
-
-        res.json(results);
       } catch (error) {
         logger.error({ error }, "Campaigns list error");
         res.status(500).json({ error: "Failed to get campaigns" });
       }
     });
 
+    this.app.get("/api/campaigns/:id", async (req, res) => {
+      try {
+        const db = getDb();
+        const config = getConfig();
+        const orchestrator = getMarketOrchestrator();
+        const campaignId = req.params.id;
 
+        const [campaign] = await db
+          .select()
+          .from(schema.distributionCampaigns)
+          .where(eq(schema.distributionCampaigns.id, campaignId));
+        if (!campaign) {
+          res.status(404).json({ error: "Campaign not found" });
+          return;
+        }
+
+        const buckets = await db
+          .select()
+          .from(schema.distributionBuckets)
+          .where(eq(schema.distributionBuckets.campaignId, campaignId));
+        const historicalTrades = await db
+          .select()
+          .from(schema.simulatedTrades)
+          .where(eq(schema.simulatedTrades.campaignId, campaignId));
+
+        const modalBucket = findModalBucket(buckets);
+        const openPositions = orchestrator.getOpenPositions();
+
+        const relevantBuckets = [];
+        let candidateCount = 0;
+        let positionCount = 0;
+        let trackedCount = 0;
+
+        if (modalBucket) {
+          const [modalMin] = parseBucketMinMax(modalBucket.groupItemTitle);
+          for (const b of buckets) {
+            const isCandidate = isCandidateBucket(b.groupItemTitle, modalMin);
+            const noPrice = parseFloat(b.noPrice?.toString() ?? "1");
+            const isModal = b.id === modalBucket.id;
+            const hasOpenPosition = openPositions.some(
+              (p) => p.tokenId === b.yesTokenId || p.tokenId === b.noTokenId,
+            );
+
+            if (isCandidate) candidateCount++;
+            if (hasOpenPosition) positionCount++;
+
+            const isRelevant = isRelevantBucket(
+              isCandidate,
+              isModal,
+              noPrice,
+              config.strategy.maxNoEntryPrice,
+              hasOpenPosition,
+            );
+
+            if (isRelevant) {
+              trackedCount++;
+              relevantBuckets.push({ ...b, hasOpenPosition });
+            }
+          }
+          relevantBuckets.sort((a, b) => {
+            const [aMin] = parseBucketMinMax(a.groupItemTitle);
+            const [bMin] = parseBucketMinMax(b.groupItemTitle);
+            return aMin - bMin;
+          });
+        }
+
+        res.json({
+          ...campaign,
+          modalBucketTitle: modalBucket?.groupItemTitle ?? "N/A",
+          candidateCount,
+          trackedCount,
+          positionCount,
+          relevantBuckets,
+          historicalTrades,
+        });
+      } catch (error) {
+        logger.error({ error }, "Campaign detail error");
+        res.status(500).json({ error: "Failed to get campaign details" });
+      }
+    });
 
     this.app.get("/api/positions", async (req, res) => {
       try {
         const db = getDb();
         const orchestrator = getMarketOrchestrator();
-        
+
         const rawRows = await db
           .select({
-             trade: schema.simulatedTrades,
-             campaign: schema.distributionCampaigns
+            trade: schema.simulatedTrades,
+            campaign: schema.distributionCampaigns,
           })
           .from(schema.simulatedTrades)
-          .leftJoin(schema.distributionCampaigns, eq(schema.simulatedTrades.campaignId, schema.distributionCampaigns.id))
+          .leftJoin(
+            schema.distributionCampaigns,
+            eq(
+              schema.simulatedTrades.campaignId,
+              schema.distributionCampaigns.id,
+            ),
+          )
           .where(eq(schema.simulatedTrades.status, "OPEN"))
           .orderBy(desc(schema.simulatedTrades.entryTs));
-            
-        const openPositionsMap = new Map(orchestrator.getOpenPositions().map(p => [p.tradeId, p]));
-        
-        const rows = rawRows.map(r => {
-           let minPrice = r.trade.minNoPriceDuringPosition;
-           const livePos = openPositionsMap.get(r.trade.id);
-           if (livePos?.minNoPriceDuringPosition !== undefined) {
-             minPrice = livePos.minNoPriceDuringPosition === null ? null : livePos.minNoPriceDuringPosition.toString();
-           }
-           
-           return {
-             ...r.trade,
-             minNoPriceDuringPosition: minPrice,
-             campaignEndDate: r.campaign?.endDate
-           };
+
+        const openPositionsMap = new Map(
+          orchestrator.getOpenPositions().map((p) => [p.tradeId, p]),
+        );
+
+        const rows = rawRows.map((r) => {
+          let minPrice = r.trade.minNoPriceDuringPosition;
+          const livePos = openPositionsMap.get(r.trade.id);
+          if (livePos?.minNoPriceDuringPosition !== undefined) {
+            minPrice =
+              livePos.minNoPriceDuringPosition === null
+                ? null
+                : livePos.minNoPriceDuringPosition.toString();
+          }
+
+          return {
+            ...r.trade,
+            minNoPriceDuringPosition: minPrice,
+            campaignEndDate: r.campaign?.endDate,
+          };
         });
-        
+
         res.json(rows);
       } catch (error) {
         logger.error({ error }, "Positions fetch error");
@@ -283,24 +351,30 @@ export class ApiServer {
         const db = getDb();
         const limit = Math.min(parseInt(req.query.limit as string) || 25, 200);
         const offset = Math.max(parseInt(req.query.offset as string) || 0, 0);
-        
+
         const rawRows = await db
           .select({
-             trade: schema.simulatedTrades,
-             campaign: schema.distributionCampaigns
+            trade: schema.simulatedTrades,
+            campaign: schema.distributionCampaigns,
           })
           .from(schema.simulatedTrades)
-          .leftJoin(schema.distributionCampaigns, eq(schema.simulatedTrades.campaignId, schema.distributionCampaigns.id))
+          .leftJoin(
+            schema.distributionCampaigns,
+            eq(
+              schema.simulatedTrades.campaignId,
+              schema.distributionCampaigns.id,
+            ),
+          )
           .where(eq(schema.simulatedTrades.status, "SETTLED"))
           .orderBy(desc(schema.simulatedTrades.entryTs))
           .limit(limit)
           .offset(offset);
-            
-        const rows = rawRows.map(r => ({
-             ...r.trade,
-             campaignEndDate: r.campaign?.endDate
+
+        const rows = rawRows.map((r) => ({
+          ...r.trade,
+          campaignEndDate: r.campaign?.endDate,
         }));
-        
+
         res.json(rows);
       } catch (error) {
         logger.error({ error }, "Trades error");
@@ -367,8 +441,6 @@ export class ApiServer {
         res.status(500).json({ error: "Failed to get audit logs" });
       }
     });
-
-
 
     this.app.post(
       "/api/admin/pause",
