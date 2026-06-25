@@ -29,15 +29,18 @@ export function CampaignDetailPopup({
   const displayCampaign = campaign || initialCampaign;
   const isHistorical = !displayCampaign.active;
   const buckets = displayCampaign.relevantBuckets || [];
-  const trades =
-    ((displayCampaign as any).historicalTrades as SimulatedTrade[]) || [];
+  const tradesRaw = (displayCampaign as any).historicalTrades;
+  const trades = Array.isArray(tradesRaw)
+    ? (tradesRaw as SimulatedTrade[])
+    : [];
 
   // Derived metrics for Historical
-  const totalTrades = trades.length;
-  const realizedPnl = trades.reduce(
-    (sum, t) => sum + parseFloat(t.realizedPnl || "0"),
-    0,
-  );
+  const totalTrades = Array.isArray(tradesRaw)
+    ? trades.length
+    : (tradesRaw?.length ?? 0);
+  const realizedPnl = Array.isArray(tradesRaw)
+    ? trades.reduce((sum, t) => sum + parseFloat(t.realizedPnl || "0"), 0)
+    : parseFloat(tradesRaw?.totalPnl || "0");
   const winningTrades = trades.filter(
     (t) => parseFloat(t.realizedPnl || "0") > 0,
   ).length;
@@ -110,147 +113,173 @@ export function CampaignDetailPopup({
             </div>
           )}
 
-          {/* ── CAMPAIGN METRICS ── */}
-          <Section title="CAMPAIGN METRICS">
-            <Row2>
-              {!isHistorical ? (
-                <>
-                  <Cell
-                    label="MODAL TARGET"
-                    value={displayCampaign.modalBucketTitle || "—"}
-                  />
-                  <Cell
-                    label="CANDIDATE BUCKETS"
-                    value={displayCampaign.candidateCount?.toString() || "0"}
-                  />
-                  <Cell
-                    label="TRACKED BUCKETS"
-                    value={displayCampaign.trackedCount?.toString() || "0"}
-                  />
-                  <Cell
-                    label="OPEN POSITIONS"
-                    value={displayCampaign.positionCount?.toString() || "0"}
-                  />
-                </>
-              ) : (
-                <>
-                  <Cell label="TRADES TAKEN" value={totalTrades.toString()} />
-                  <Cell label="WIN RATE" value={`${winRate.toFixed(1)}%`} />
-                  <Cell
-                    label="NET PNL"
-                    value={
-                      <span className={pnlColor(realizedPnl)}>
-                        {formatPnl(realizedPnl)}
-                      </span>
-                    }
-                  />
-                </>
-              )}
-            </Row2>
-          </Section>
+          {/* ── COMPACT CAMPAIGN METRICS ── */}
+          <div className="flex flex-wrap items-center gap-x-8 gap-y-3 px-4 py-3 bg-muted/40 border-y border-border/15">
+            {!isHistorical ? (
+              <>
+                <Metric
+                  label="MODAL TARGET"
+                  value={displayCampaign.modalBucketTitle || "—"}
+                />
+                <Metric
+                  label="CANDIDATES"
+                  value={displayCampaign.candidateCount?.toString() || "0"}
+                />
+                <Metric
+                  label="TRACKED"
+                  value={displayCampaign.trackedCount?.toString() || "0"}
+                />
+                <Metric
+                  label="POSITIONS"
+                  value={displayCampaign.positionCount?.toString() || "0"}
+                />
+              </>
+            ) : (
+              <>
+                <Metric label="TRADES" value={totalTrades.toString()} />
+                <Metric label="WIN RATE" value={`${winRate.toFixed(1)}%`} />
+                <Metric
+                  label="NET PNL"
+                  value={
+                    <span className={pnlColor(realizedPnl)}>
+                      {formatPnl(realizedPnl)}
+                    </span>
+                  }
+                />
+              </>
+            )}
+          </div>
 
           {/* ── LIST ── */}
           {!isHistorical ? (
-            <Section title="TRACKED BUCKETS">
-              {buckets.length === 0 && !loading && (
-                <div className="px-4 py-6 text-center text-[10px] text-muted-foreground uppercase tracking-widest">
-                  No tracked buckets found.
-                </div>
-              )}
-              {buckets.map((b) => {
-                const isModal =
-                  b.groupItemTitle === displayCampaign.modalBucketTitle;
-                const openPositions = b.positions || [];
-                return (
-                  <div
-                    key={b.id}
-                    className="border-t border-border/10 px-4 py-3 hover:bg-muted/30 transition-colors"
-                  >
-                    <div className="flex items-center justify-between mb-2">
-                      <div className="flex items-center gap-2">
-                        <span className="font-bold text-xs text-foreground">
-                          {b.groupItemTitle}
-                        </span>
-                        {isModal && (
-                          <span className="text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 font-bold border border-blue-500/20">
-                            MODAL
-                          </span>
-                        )}
-                        {b.hasOpenPosition && (
-                          <span className="text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-500 font-bold border border-amber-500/30">
-                            POSITION
-                          </span>
-                        )}
-                      </div>
-                      <div className="text-xs font-bold text-foreground">
-                        {b.noPrice
-                          ? `${Math.round(parseFloat(b.noPrice) * 100)}¢`
-                          : "—"}
-                      </div>
-                    </div>
+            <>
+              <Section title="TRACKED BUCKETS">
+                {buckets.length === 0 && !loading ? (
+                  <div className="px-4 py-6 text-center text-[10px] text-muted-foreground uppercase tracking-widest">
+                    No tracked buckets found.
+                  </div>
+                ) : (
+                  <div className="px-4 py-3 flex flex-wrap gap-2">
+                    {buckets.map((b) => {
+                      const isModal =
+                        b.groupItemTitle === displayCampaign.modalBucketTitle;
+                      let bgCls =
+                        "bg-muted/40 border-border/20 text-muted-foreground";
+                      if (isModal)
+                        bgCls =
+                          "bg-blue-500/10 border-blue-500/30 text-blue-400 font-bold";
+                      if (b.hasOpenPosition)
+                        bgCls =
+                          "bg-amber-500/10 border-amber-500/40 text-amber-500 font-bold shadow-[0_0_8px_rgba(245,158,11,0.1)]";
 
-                    {/* Open Position details if present */}
-                    {openPositions.length > 0 && (
-                      <div className="mt-2 bg-card border border-border/20 rounded p-2 flex flex-col gap-1.5">
-                        {openPositions.map((pos) => {
-                          const livePrice = pos.tokenId
-                            ? livePrices[pos.tokenId] || null
-                            : null;
-                          const { pnl: unPnl, pnlPct: unPnlPct } =
-                            calculateTradeUnrealizedPnl(pos, livePrice);
-                          const entryPrice = parseFloat(pos.entryPrice);
-                          return (
-                            <div
-                              key={pos.id}
-                              className="flex items-center justify-between text-[10px]"
-                            >
-                              <div className="flex items-center gap-3">
-                                <span className="text-muted-foreground">
-                                  SIZE:{" "}
-                                  <span className="text-foreground font-bold">
-                                    {parseFloat(pos.entryShares).toFixed(2)}
+                      return (
+                        <div
+                          key={b.id}
+                          className={`flex items-center gap-1.5 px-2 py-1 rounded border text-[10px] transition-colors ${bgCls}`}
+                        >
+                          <span>{b.groupItemTitle}</span>
+                          {b.noPrice && (
+                            <>
+                              <span className="opacity-40">|</span>
+                              <span>
+                                {Math.round(parseFloat(b.noPrice) * 100)}¢
+                              </span>
+                            </>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </Section>
+
+              {buckets.some(
+                (b) => b.hasOpenPosition && b.positions?.length,
+              ) && (
+                <Section title="OUR POSITIONS">
+                  {buckets
+                    .filter((b) => b.hasOpenPosition && b.positions?.length)
+                    .map((b) => (
+                      <div
+                        key={b.id}
+                        className="border-t border-border/10 px-4 py-3 hover:bg-muted/30 transition-colors"
+                      >
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="flex items-center gap-2">
+                            <span className="font-bold text-xs text-foreground">
+                              {b.groupItemTitle}
+                            </span>
+                            <span className="text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-500 font-bold border border-amber-500/30">
+                              POSITION
+                            </span>
+                          </div>
+                          <div className="text-xs font-bold text-foreground">
+                            {b.noPrice
+                              ? `${Math.round(parseFloat(b.noPrice) * 100)}¢`
+                              : "—"}
+                          </div>
+                        </div>
+
+                        <div className="mt-2 bg-card border border-border/20 rounded p-2 flex flex-col gap-1.5">
+                          {b.positions!.map((pos) => {
+                            const livePrice = pos.tokenId
+                              ? livePrices[pos.tokenId] || null
+                              : null;
+                            const { pnl: unPnl, pnlPct: unPnlPct } =
+                              calculateTradeUnrealizedPnl(pos, livePrice);
+                            const entryPrice = parseFloat(pos.entryPrice);
+                            return (
+                              <div
+                                key={pos.id}
+                                className="flex items-center justify-between text-[10px]"
+                              >
+                                <div className="flex items-center gap-3">
+                                  <span className="text-muted-foreground">
+                                    SIZE:{" "}
+                                    <span className="text-foreground font-bold">
+                                      {parseFloat(pos.entryShares).toFixed(2)}
+                                    </span>
                                   </span>
-                                </span>
-                                <span className="text-muted-foreground">
-                                  ENTRY:{" "}
-                                  <span className="text-foreground font-bold">
-                                    {Math.round(entryPrice * 100)}¢
-                                  </span>
-                                </span>
-                              </div>
-                              {unPnl !== null && (
-                                <div className="flex items-center gap-1.5">
-                                  <span
-                                    className={`font-bold tabular-nums tracking-tight ${pnlColor(unPnl)}`}
-                                  >
-                                    <NumberFlow
-                                      value={unPnl}
-                                      format={{
-                                        style: "currency",
-                                        currency: "USD",
-                                        signDisplay: "always",
-                                        minimumFractionDigits: 2,
-                                        maximumFractionDigits: 2,
-                                      }}
-                                    />
-                                  </span>
-                                  <span
-                                    className={`text-[9px] tracking-tight tabular-nums font-bold ${pnlColor(unPnlPct!, "80")}`}
-                                  >
-                                    ({unPnlPct! >= 0 ? "+" : ""}
-                                    {unPnlPct!.toFixed(1)}%)
+                                  <span className="text-muted-foreground">
+                                    ENTRY:{" "}
+                                    <span className="text-foreground font-bold">
+                                      {Math.round(entryPrice * 100)}¢
+                                    </span>
                                   </span>
                                 </div>
-                              )}
-                            </div>
-                          );
-                        })}
+                                {unPnl !== null && (
+                                  <div className="flex items-center gap-1.5">
+                                    <span
+                                      className={`font-bold tabular-nums tracking-tight ${pnlColor(unPnl)}`}
+                                    >
+                                      <NumberFlow
+                                        value={unPnl}
+                                        format={{
+                                          style: "currency",
+                                          currency: "USD",
+                                          signDisplay: "always",
+                                          minimumFractionDigits: 2,
+                                          maximumFractionDigits: 2,
+                                        }}
+                                      />
+                                    </span>
+                                    <span
+                                      className={`text-[9px] tracking-tight tabular-nums font-bold ${pnlColor(unPnlPct!, "80")}`}
+                                    >
+                                      ({unPnlPct! >= 0 ? "+" : ""}
+                                      {unPnlPct!.toFixed(1)}%)
+                                    </span>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
                       </div>
-                    )}
-                  </div>
-                );
-              })}
-            </Section>
+                    ))}
+                </Section>
+              )}
+            </>
           ) : (
             <Section title="CAMPAIGN TRADES">
               {trades.length === 0 && !loading && (
@@ -364,6 +393,19 @@ function Cell({ label, value }: { label: string; value: React.ReactNode }) {
         {label}
       </span>
       <div className="text-[12px] font-mono text-foreground/90 font-medium">
+        {value}
+      </div>
+    </div>
+  );
+}
+
+function Metric({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <div className="flex flex-col gap-1">
+      <span className="text-[9px] font-mono tracking-widest text-muted-foreground/60 uppercase font-bold">
+        {label}
+      </span>
+      <div className="text-[11px] font-mono text-foreground/90 font-medium">
         {value}
       </div>
     </div>
