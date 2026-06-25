@@ -36,6 +36,7 @@ export interface DistributionBucket {
   createdAt: string;
   updatedAt: string;
   hasOpenPosition?: boolean;
+  positions?: SimulatedTrade[];
 }
 
 export interface LiveMarketPrice {

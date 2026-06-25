@@ -255,9 +255,10 @@ export class ApiServer {
             const isCandidate = isCandidateBucket(b.groupItemTitle, modalMin);
             const noPrice = parseFloat(b.noPrice?.toString() ?? "1");
             const isModal = b.id === modalBucket.id;
-            const hasOpenPosition = openPositions.some(
+            const bucketPositions = openPositions.filter(
               (p) => p.tokenId === b.yesTokenId || p.tokenId === b.noTokenId,
             );
+            const hasOpenPosition = bucketPositions.length > 0;
 
             if (isCandidate) candidateCount++;
             if (hasOpenPosition) positionCount++;
@@ -272,7 +273,15 @@ export class ApiServer {
 
             if (isRelevant) {
               trackedCount++;
-              relevantBuckets.push({ ...b, hasOpenPosition });
+              relevantBuckets.push({
+                id: b.id,
+                slug: b.slug,
+                groupItemTitle: b.groupItemTitle,
+                noPrice: b.noPrice,
+                volume24h: b.volume24h,
+                hasOpenPosition,
+                positions: bucketPositions,
+              });
             }
           }
           relevantBuckets.sort((a, b) => {
