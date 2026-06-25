@@ -20,6 +20,7 @@ import {
 } from "./market-ws-watcher.js";
 import type { FeeSchedule, GammaEvent, GammaMarket } from "../types/index.js";
 import type { MarketResolvedEvent } from "../interfaces/websocket-types.js";
+import { executionPolicy } from "./execution-policy.js";
 
 const logger = createModuleLogger("distribution-orchestrator");
 
@@ -84,6 +85,7 @@ export class MarketOrchestrator extends EventEmitter {
     await this.loadOpenPositions();
     this.wireEvents();
     this.wsWatcher.start();
+    executionPolicy.start();
     await this.scan();
     const config = getConfig();
     this.scanTimer = setInterval(() => {
@@ -103,6 +105,7 @@ export class MarketOrchestrator extends EventEmitter {
     this.scanTimer = null;
     this.settlementTimer = null;
     this.wsWatcher.stop();
+    executionPolicy.stop();
     logger.info("Distribution market orchestrator stopped");
   }
 
@@ -161,6 +164,7 @@ export class MarketOrchestrator extends EventEmitter {
       scanner: { discoveredCampaigns: this.discoveredCampaigns, evaluatedOpportunities: this.evaluatedOpportunities },
       ws: this.wsWatcher.getStats(),
       risk: { consecutiveLossCount: this.consecutiveLossCount, pausedByRiskGuard: this.pausedByRiskGuard },
+      polymarketStatus: executionPolicy.getStatus(),
     };
   }
 
@@ -477,7 +481,9 @@ export class MarketOrchestrator extends EventEmitter {
             if (!pos.stopLossConditionFirstSeen) {
               pos.stopLossConditionFirstSeen = now;
             } else if (now - pos.stopLossConditionFirstSeen >= 10000) {
-              this.executeStopLoss(pos, state.feeSchedule).catch(e => logger.error({ err: e }, "Failed to execute stop loss"));
+              if (executionPolicy.canExecuteStopLoss()) {
+                this.executeStopLoss(pos, state.feeSchedule).catch(e => logger.error({ err: e }, "Failed to execute stop loss"));
+              }
             }
           } else {
             pos.stopLossConditionFirstSeen = null;
@@ -488,6 +494,11 @@ export class MarketOrchestrator extends EventEmitter {
   }
 
   private async executeMarketEntry(cand: any) {
+    if (!executionPolicy.canOpenNewPositions()) {
+      logger.info("Skipping market entry: Polymarket status restricts new positions.");
+      return;
+    }
+
     try {
       const execResult = cand.execResult;
       
