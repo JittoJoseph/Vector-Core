@@ -195,7 +195,7 @@ export function useSystemStats() {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const incoming = msg.data as any;
       if (!incoming) return;
-      
+
       setStats((prev) => ({
         ...prev,
         ...incoming,
@@ -208,8 +208,7 @@ export function useSystemStats() {
   return { stats, loading, error, refetch: fetchStats };
 }
 
-
-export function useCampaigns(status: 'active' | 'history' = 'active') {
+export function useCampaigns(status: "active" | "history" = "active") {
   const [campaigns, setCampaigns] = useState<DistributionCampaign[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
@@ -233,6 +232,36 @@ export function useCampaigns(status: 'active' | 'history' = 'active') {
   }, [fetchCampaigns, status]);
 
   return { campaigns, loading, error, refetch: fetchCampaigns };
+}
+
+export function useCampaignDetails(id: string | null) {
+  const [details, setDetails] = useState<DistributionCampaign | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<Error | null>(null);
+
+  const fetchDetails = useCallback(async (campaignId: string) => {
+    try {
+      setLoading(true);
+      const api = getApiClient();
+      const response = await api.getCampaignDetails(campaignId);
+      setDetails(response);
+      setError(null);
+    } catch (err) {
+      setError(err as Error);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (id) {
+      fetchDetails(id);
+    } else {
+      setDetails(null);
+    }
+  }, [id, fetchDetails]);
+
+  return { details, loading, error, refetch: () => id && fetchDetails(id) };
 }
 
 /**
@@ -270,7 +299,7 @@ export function usePerformanceRealtime(
 
   useEffect(() => {
     let cancelled = false;
-    
+
     // Define an async IIFE to handle the fetch safely with cancellation
     const doFetch = async () => {
       try {
@@ -288,7 +317,7 @@ export function usePerformanceRealtime(
         if (!cancelled) setLoading(false);
       }
     };
-    
+
     doFetch();
 
     return () => {

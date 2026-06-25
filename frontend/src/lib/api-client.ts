@@ -8,7 +8,6 @@ import type {
   LiveMarketInfo,
   DistributionBucket,
   DistributionCampaign,
-
   PerformanceMetrics,
   AuditLog,
   WsMessage,
@@ -64,7 +63,10 @@ export class ApiClient {
     return fetchWithRetry(`${this.baseUrl}/ping`);
   }
 
-  async getCampaigns(params?: { limit?: number; status?: string }): Promise<DistributionCampaign[]> {
+  async getCampaigns(params?: {
+    limit?: number;
+    status?: string;
+  }): Promise<DistributionCampaign[]> {
     const searchParams = new URLSearchParams();
     if (params?.limit) searchParams.set("limit", String(params.limit));
     if (params?.status) searchParams.set("status", params.status);
@@ -72,7 +74,9 @@ export class ApiClient {
     return fetchWithRetry(`${this.baseUrl}/api/campaigns${qs ? `?${qs}` : ""}`);
   }
 
-
+  async getCampaignDetails(id: string): Promise<DistributionCampaign> {
+    return fetchWithRetry(`${this.baseUrl}/api/campaigns/${id}`);
+  }
 
   async getPositions(): Promise<SimulatedTrade[]> {
     return fetchWithRetry(`${this.baseUrl}/api/positions`);
@@ -91,7 +95,9 @@ export class ApiClient {
     if (params?.offset) searchParams.set("offset", String(params.offset));
 
     const qs = searchParams.toString();
-    return fetchWithRetry(`${this.baseUrl}/api/trades/history${qs ? `?${qs}` : ""}`);
+    return fetchWithRetry(
+      `${this.baseUrl}/api/trades/history${qs ? `?${qs}` : ""}`,
+    );
   }
 
   async getPerformance(
@@ -126,9 +132,7 @@ export class ApiClient {
     });
   }
 
-  async wipeSystem(
-    password: string,
-  ): Promise<{ success: boolean }> {
+  async wipeSystem(password: string): Promise<{ success: boolean }> {
     return fetchWithRetry(`${this.baseUrl}/api/admin/wipe`, {
       method: "DELETE",
       headers: { Authorization: `Bearer ${password}` },
