@@ -232,14 +232,19 @@ export class ApiServer {
           return;
         }
 
-        const buckets = await db
-          .select()
-          .from(schema.distributionBuckets)
-          .where(eq(schema.distributionBuckets.campaignId, campaignId));
-        const historicalTrades = await db
-          .select()
-          .from(schema.simulatedTrades)
-          .where(eq(schema.simulatedTrades.campaignId, campaignId));
+        const buckets = campaign.active
+          ? await db
+              .select()
+              .from(schema.distributionBuckets)
+              .where(eq(schema.distributionBuckets.campaignId, campaignId))
+          : [];
+
+        const historicalTrades = !campaign.active
+          ? await db
+              .select()
+              .from(schema.simulatedTrades)
+              .where(eq(schema.simulatedTrades.campaignId, campaignId))
+          : [];
 
         const modalBucket = findModalBucket(buckets);
         const openPositions = orchestrator.getOpenPositions();
