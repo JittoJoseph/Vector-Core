@@ -13,21 +13,9 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "PenguinX - Market Simulation Engine",
+  title: "Vector Core - Distribution Strategy Engine",
   description:
-    "Autonomous market-driven opportunity detection and simulation engine for Polymarket",
-  icons: {
-    icon: [
-      {
-        url: "/icon-light-32x32.png",
-        media: "(prefers-color-scheme: light)",
-      },
-      {
-        url: "/icon-dark-32x32.png",
-        media: "(prefers-color-scheme: dark)",
-      },
-    ],
-  },
+    "Automated tracking and simulated distribution for social campaigns.",
 };
 
 export const viewport: Viewport = {
