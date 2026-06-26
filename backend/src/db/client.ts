@@ -30,15 +30,6 @@ export async function connectDatabase(): Promise<void> {
   logger.info("Database connection established");
 }
 
-export async function disconnectDatabase(): Promise<void> {
-  if (client) {
-    await client.end();
-    client = null;
-    db = null;
-    logger.info("Database connection closed");
-  }
-}
-
 export async function logAudit(
   level: "info" | "warn" | "error",
   category: string,
@@ -203,7 +194,9 @@ export async function resolveTrade(
       status: "SETTLED",
       updatedAt: new Date(),
       ...(extras?.exitReason ? { exitReason: extras.exitReason } : {}),
-      ...(extras?.minNoPriceDuringPosition !== undefined ? { minNoPriceDuringPosition: extras.minNoPriceDuringPosition } : {}),
+      ...(extras?.minNoPriceDuringPosition !== undefined
+        ? { minNoPriceDuringPosition: extras.minNoPriceDuringPosition }
+        : {}),
     })
     .where(eq(schema.simulatedTrades.id, id))
     .returning();

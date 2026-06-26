@@ -165,11 +165,3 @@ export type OrderbookLevel = z.infer<typeof OrderbookLevelSchema>;
 
 export const MidpointResponseSchema = z.object({ mid: z.string() });
 export type MidpointResponse = z.infer<typeof MidpointResponseSchema>;
-
-
-
-export interface ApiResponse<T> {
-  success: boolean;
-  data?: T;
-  error?: { code: string; message: string; retryAfter?: number };
-}
