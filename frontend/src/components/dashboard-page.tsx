@@ -102,19 +102,13 @@ export function DashboardPage() {
   }, [stats?.openPositionPrices]);
 
   // Financial Stats
-  const initialCapital =
-    stats?.portfolio?.initialCapital ??
-    parseFloat(performance?.initialCapital || "0");
-  const cashBalance =
-    stats?.portfolio?.cashBalance ??
-    parseFloat(performance?.cashBalance || "0");
-  const openPositionsValue =
-    stats?.portfolio?.openPositionsValue ??
-    parseFloat(performance?.openPositionsValue || "0");
+  const initialCapital = stats?.portfolio?.initialCapital ?? 0;
+  const cashBalance = stats?.portfolio?.cashBalance ?? 0;
+  const openPositionsValue = stats?.portfolio?.openPositionsValue ?? 0;
   const portfolioValue = cashBalance + openPositionsValue;
 
   const winRate = parseFloat(performance?.winRate || "0");
-  const isPaused = stats?.orchestrator.paused ?? false;
+  const isPaused = stats?.orchestrator?.paused ?? false;
 
   const {
     liveUnrealizedPnl,
@@ -329,12 +323,12 @@ export function DashboardPage() {
                     </span>
                   </div>
                   <span
-                    className={`text-[10px] font-bold tracking-widest uppercase ${isPaused ? "text-amber-500" : stats?.orchestrator.running ? "text-emerald-400" : "text-muted-foreground"}`}
+                    className={`text-[10px] font-bold tracking-widest uppercase ${isPaused ? "text-amber-500" : stats?.orchestrator?.running ? "text-emerald-400" : "text-muted-foreground"}`}
                   >
                     {isPaused
                       ? "PAUSED"
-                      : stats?.orchestrator.running
-                        ? "RUNNING"
+                      : stats?.orchestrator?.running
+                        ? "ACTIVE"
                         : "IDLE"}
                   </span>
                 </div>
@@ -345,11 +339,11 @@ export function DashboardPage() {
                       Feed
                     </span>
                   </div>
-                  <span
-                    className={`text-[10px] font-bold tracking-widest uppercase ${stats?.orchestrator.ws.connected ? "text-emerald-400" : "text-red-400"}`}
+                  <div
+                    className={`text-[10px] font-bold tracking-widest uppercase ${stats?.orchestrator?.ws?.connected ? "text-emerald-400" : "text-red-400"}`}
                   >
-                    {stats?.orchestrator.ws.connected ? "LIVE" : "DEAD"}
-                  </span>
+                    {stats?.orchestrator?.ws?.connected ? "LIVE" : "DEAD"}
+                  </div>
                 </div>
 
                 <div className="flex items-center justify-between bg-card/30 border border-border/20 rounded px-3 py-1.5">
@@ -389,8 +383,8 @@ export function DashboardPage() {
                   <div className="text-[9px] text-muted-foreground/60 uppercase tracking-widest mb-0.5 font-bold">
                     Loops
                   </div>
-                  <div className="text-xs font-mono font-bold text-foreground">
-                    {stats?.orchestrator.cycleCount || 0}
+                  <div className="text-[10px] font-bold tracking-widest uppercase text-foreground">
+                    {stats?.orchestrator?.cycleCount || 0}
                   </div>
                 </div>
               </div>
@@ -550,7 +544,7 @@ export function DashboardPage() {
                             Scanner Loops
                           </div>
                           <div className="text-lg font-bold">
-                            {stats?.orchestrator.cycleCount || 0}
+                            {stats?.orchestrator?.cycleCount || 0}
                           </div>
                         </div>
                         <div className="border border-border/20 rounded p-3 bg-muted/5">
@@ -558,7 +552,7 @@ export function DashboardPage() {
                             WS Messages
                           </div>
                           <div className="text-lg font-bold">
-                            {stats?.orchestrator.ws.messageCount || 0}
+                            {stats?.orchestrator?.ws?.messageCount || 0}
                           </div>
                         </div>
                       </div>
