@@ -285,7 +285,14 @@ export class ApiServer {
                 noPrice: b.noPrice,
                 volume24h: b.volume24h,
                 hasOpenPosition,
-                positions: bucketPositions,
+                positions: bucketPositions.map((p) => ({
+                  id: p.tradeId,
+                  tokenId: p.tokenId,
+                  entryPrice: p.entryPrice.toString(),
+                  entryShares: p.entryShares.toString(),
+                  actualCost: p.actualCost.toString(),
+                  entryFees: p.fees.toString(),
+                })),
               });
             }
           }
