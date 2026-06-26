@@ -62,6 +62,7 @@ interface OpenPosition {
   actualCost: number;
   minNoPriceDuringPosition: number | null;
   stopLossConditionFirstSeen?: number | null;
+  isExiting?: boolean;
 }
 
 export type MarketLifecycle = "OPEN" | "AWAITING_RESOLUTION" | "RESOLVED";
@@ -71,7 +72,8 @@ export class MarketOrchestrator extends EventEmitter {
   private wsWatcher: MarketWebSocketWatcher = getMarketWebSocketWatcher();
   readonly portfolioManager = new PortfolioManager();
 
-  private scanTimer: ReturnType<typeof setInterval> | null = null;
+  private syncTimer: ReturnType<typeof setInterval> | null = null;
+  private evaluateTimer: ReturnType<typeof setInterval> | null = null;
   private settlementTimer: ReturnType<typeof setInterval> | null = null;
 
   private trackedBuckets = new Map<string, TrackedBucket>();
@@ -100,11 +102,17 @@ export class MarketOrchestrator extends EventEmitter {
     this.wireEvents();
     this.wsWatcher.start();
     executionPolicy.start();
-    await this.scan();
+    await this.syncCampaigns();
+    await this.evaluateOpportunities();
     const config = getConfig();
-    this.scanTimer = setInterval(() => {
-      this.scan().catch((error) =>
-        logger.error({ error }, "Distribution scan failed"),
+    this.syncTimer = setInterval(() => {
+      this.syncCampaigns().catch((error) =>
+        logger.error({ error }, "Distribution sync failed"),
+      );
+    }, 60_000);
+    this.evaluateTimer = setInterval(() => {
+      this.evaluateOpportunities().catch((error) =>
+        logger.error({ error }, "Distribution evaluate failed"),
       );
     }, config.strategy.scanIntervalMs);
     this.settlementTimer = setInterval(() => {
@@ -117,10 +125,12 @@ export class MarketOrchestrator extends EventEmitter {
 
   stop(): void {
     this.running = false;
-    if (this.scanTimer) clearInterval(this.scanTimer);
+    if (this.syncTimer) clearInterval(this.syncTimer);
+    if (this.evaluateTimer) clearInterval(this.evaluateTimer);
     if (this.settlementTimer) clearInterval(this.settlementTimer);
     if (this.riskAutoResumeTimer) clearTimeout(this.riskAutoResumeTimer);
-    this.scanTimer = null;
+    this.syncTimer = null;
+    this.evaluateTimer = null;
     this.settlementTimer = null;
     this.wsWatcher.stop();
     executionPolicy.stop();
@@ -129,9 +139,13 @@ export class MarketOrchestrator extends EventEmitter {
 
   pause(): void {
     this.paused = true;
-    if (this.scanTimer) {
-      clearInterval(this.scanTimer);
-      this.scanTimer = null;
+    if (this.syncTimer) {
+      clearInterval(this.syncTimer);
+      this.syncTimer = null;
+    }
+    if (this.evaluateTimer) {
+      clearInterval(this.evaluateTimer);
+      this.evaluateTimer = null;
     }
     if (this.settlementTimer) {
       clearInterval(this.settlementTimer);
@@ -147,11 +161,17 @@ export class MarketOrchestrator extends EventEmitter {
     this.consecutiveLossCount = 0;
     this.wsWatcher.start();
     await this.portfolioManager.reload();
-    await this.scan();
+    await this.syncCampaigns();
+    await this.evaluateOpportunities();
     const config = getConfig();
-    if (!this.scanTimer)
-      this.scanTimer = setInterval(
-        () => this.scan().catch(console.error),
+    if (!this.syncTimer)
+      this.syncTimer = setInterval(
+        () => this.syncCampaigns().catch(console.error),
+        60_000,
+      );
+    if (!this.evaluateTimer)
+      this.evaluateTimer = setInterval(
+        () => this.evaluateOpportunities().catch(console.error),
         config.strategy.scanIntervalMs,
       );
     if (!this.settlementTimer)
@@ -252,9 +272,8 @@ export class MarketOrchestrator extends EventEmitter {
     );
   }
 
-  async scan(): Promise<void> {
+  async syncCampaigns(): Promise<void> {
     if (this.paused) return;
-    this.cycleCount++;
 
     // Tag 972 = Tweet Markets
     const result = await this.client.listEventsKeyset({
@@ -299,10 +318,6 @@ export class MarketOrchestrator extends EventEmitter {
         }
       }
     }
-
-    if (this.paused) return;
-
-    await this.evaluateOpportunities(activeDbCampaigns);
   }
 
   private async persistCampaign(event: GammaEvent): Promise<void> {
@@ -429,11 +444,17 @@ export class MarketOrchestrator extends EventEmitter {
       this.conditionIdToBucket.set(market.conditionId, market.id);
   }
 
-  private async evaluateOpportunities(
-    campaigns: (typeof schema.distributionCampaigns.$inferSelect)[],
-  ): Promise<void> {
+  async evaluateOpportunities(): Promise<void> {
+    if (this.paused) return;
+    this.cycleCount++;
+
     const config = getConfig();
     const db = getDb();
+
+    const campaigns = await db
+      .select()
+      .from(schema.distributionCampaigns)
+      .where(eq(schema.distributionCampaigns.active, true));
 
     if (campaigns.length === 0) return;
     const campaignIds = campaigns.map((c) => c.id);
@@ -742,8 +763,8 @@ export class MarketOrchestrator extends EventEmitter {
     pos: OpenPosition,
     feeSchedule: FeeSchedule | null,
   ) {
-    if ((pos as any).isExiting) return;
-    (pos as any).isExiting = true;
+    if (pos.isExiting) return;
+    pos.isExiting = true;
     try {
       logger.warn(
         { tradeId: pos.tradeId, bucketId: pos.bucketId },
@@ -757,7 +778,7 @@ export class MarketOrchestrator extends EventEmitter {
           { tradeId: pos.tradeId },
           "Stop-Loss failed: No bids available",
         );
-        (pos as any).isExiting = false;
+        pos.isExiting = false;
         return;
       }
 
@@ -787,7 +808,7 @@ export class MarketOrchestrator extends EventEmitter {
           newActualCost.toFixed(8),
           newFees.toFixed(8),
         );
-        (pos as any).isExiting = false;
+        pos.isExiting = false;
       } else {
         logger.info(
           { tradeId: pos.tradeId, avgPrice: exit.averagePrice },
@@ -808,7 +829,7 @@ export class MarketOrchestrator extends EventEmitter {
         this.emit("tradeResolved", { bucketId: pos.bucketId });
       }
     } catch (e) {
-      (pos as any).isExiting = false;
+      pos.isExiting = false;
       throw e;
     }
   }
