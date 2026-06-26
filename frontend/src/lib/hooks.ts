@@ -43,6 +43,17 @@ function useFetchOnce(
   }, [enabled, ...deps]);
 }
 
+/**
+ * Helper hook to cleanly subscribe to a WebSocket event.
+ */
+function useWsEvent<T>(eventName: string, handler: (data: T) => void) {
+  useEffect(() => {
+    const ws = getWsClient();
+    ws.connect();
+    return ws.on(eventName, (msg) => handler(msg.data as T));
+  }, [eventName, handler]);
+}
+
 export function usePositions() {
   const [positions, setPositions] = useState<SimulatedTrade[]>([]);
   const [loading, setLoading] = useState(true);
@@ -53,7 +64,15 @@ export function usePositions() {
       setLoading(true);
       const api = getApiClient();
       const response = await api.getPositions();
-      setPositions(response);
+      setPositions((prev) => {
+        // Merge: keep any positions that were added via WS while fetching
+        const existingIds = new Set(prev.map((t) => t.id));
+        const missingFromWs = response.filter((t) => !existingIds.has(t.id));
+        return [...missingFromWs, ...prev].sort(
+          (a, b) =>
+            new Date(b.entryTs).getTime() - new Date(a.entryTs).getTime(),
+        );
+      });
       setError(null);
     } catch (err) {
       setError(err as Error);
@@ -67,31 +86,26 @@ export function usePositions() {
   }, [fetchPositions]);
 
   // WS-driven updates
-  useEffect(() => {
-    const ws = getWsClient();
-    ws.connect();
-
-    const unsubOpened = ws.on("tradeOpened", (msg: WsMessage) => {
-      const trade = (msg.data as { trade?: SimulatedTrade })?.trade;
+  useWsEvent<{ trade?: SimulatedTrade }>(
+    "tradeOpened",
+    useCallback((data) => {
+      const trade = data?.trade;
       if (!trade || trade.status !== "OPEN") return;
       setPositions((prev) => {
         if (prev.some((t) => t.id === trade.id)) return prev;
         return [trade, ...prev];
       });
-    });
+    }, []),
+  );
 
-    const unsubResolved = ws.on("tradeResolved", (msg: WsMessage) => {
-      const trade = (msg.data as { trade?: SimulatedTrade })?.trade;
+  useWsEvent<{ trade?: SimulatedTrade }>(
+    "tradeResolved",
+    useCallback((data) => {
+      const trade = data?.trade;
       if (!trade) return;
-      // Remove it from positions when resolved
       setPositions((prev) => prev.filter((t) => t.id !== trade.id));
-    });
-
-    return () => {
-      unsubOpened();
-      unsubResolved();
-    };
-  }, []);
+    }, []),
+  );
 
   return { positions, loading, error, refetch: fetchPositions };
 }
@@ -113,7 +127,14 @@ export function useTradeHistory(enabled: boolean = true) {
         limit: PAGE_SIZE,
         offset: 0,
       });
-      setTrades(response);
+      setTrades((prev) => {
+        const existingIds = new Set(prev.map((t) => t.id));
+        const missingFromWs = response.filter((t) => !existingIds.has(t.id));
+        return [...prev, ...missingFromWs].sort(
+          (a, b) =>
+            new Date(b.entryTs).getTime() - new Date(a.entryTs).getTime(),
+        );
+      });
       dbFetchedRef.current = response.length;
       setHasMore(response.length === PAGE_SIZE);
       setError(null);
@@ -147,23 +168,20 @@ export function useTradeHistory(enabled: boolean = true) {
 
   useFetchOnce(enabled, fetchTrades, [fetchTrades]);
 
-  useEffect(() => {
-    const ws = getWsClient();
-    ws.connect();
-
-    const unsubResolved = ws.on("tradeResolved", (msg: WsMessage) => {
-      const trade = (msg.data as { trade?: SimulatedTrade })?.trade;
+  useWsEvent<{ trade?: SimulatedTrade }>(
+    "tradeResolved",
+    useCallback((data) => {
+      const trade = data?.trade;
       if (!trade) return;
       setTrades((prev) => {
         if (prev.some((t) => t.id === trade.id)) return prev;
-        return [trade, ...prev];
+        return [trade, ...prev].sort(
+          (a, b) =>
+            new Date(b.entryTs).getTime() - new Date(a.entryTs).getTime(),
+        );
       });
-    });
-
-    return () => {
-      unsubResolved();
-    };
-  }, []);
+    }, []),
+  );
 
   return {
     trades,
@@ -188,7 +206,8 @@ export function useSystemStats() {
     try {
       const api = getApiClient();
       const response = await api.getSystemStats();
-      setStats(response);
+      // Merge to ensure we don't overwrite newer WS payloads if they fired during the HTTP fetch
+      setStats((prev) => ({ ...response, ...prev }));
       setError(null);
     } catch (err) {
       setError(err as Error);
@@ -202,24 +221,13 @@ export function useSystemStats() {
     fetchStats();
   }, [fetchStats]);
 
-  // Keep updated via WebSocket
-  useEffect(() => {
-    const ws = getWsClient();
-    ws.connect();
-
-    const unsub = ws.on("systemState", (msg: WsMessage) => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const incoming = msg.data as any;
-      if (!incoming) return;
-
-      setStats((prev) => ({
-        ...prev,
-        ...incoming,
-      }));
-    });
-
-    return unsub;
-  }, []);
+  // Real-time updates
+  useWsEvent<SystemStats>(
+    "systemState",
+    useCallback((data) => {
+      setStats((prev) => ({ ...prev, ...data }));
+    }, []),
+  );
 
   return { stats, loading, error, refetch: fetchStats };
 }
@@ -305,7 +313,7 @@ export function usePerformanceRealtime(
     try {
       setLoading(true);
       const data = await getApiClient().getPerformance(period);
-      setPerformance(data);
+      setPerformance((prev) => ({ ...data, ...prev })); // Merge to prevent REST from clobbering WS
       setError(null);
     } catch (err) {
       setError(err as Error);
@@ -317,13 +325,12 @@ export function usePerformanceRealtime(
   useEffect(() => {
     let cancelled = false;
 
-    // Define an async IIFE to handle the fetch safely with cancellation
     const doFetch = async () => {
       try {
         setLoading(true);
         const data = await getApiClient().getPerformance(period);
         if (!cancelled) {
-          setPerformance(data);
+          setPerformance((prev) => ({ ...data, ...prev }));
           setError(null);
         }
       } catch (err) {
@@ -343,32 +350,25 @@ export function usePerformanceRealtime(
   }, [period]);
 
   // Real-time updates from WebSocket events
-  useEffect(() => {
-    const ws = getWsClient();
-    ws.connect();
-
-    // Handle tradeOpened: increment open positions, deduct cost from cash, add to investedAmount
-    const unsubOpened = ws.on("tradeOpened", (msg: WsMessage) => {
-      const trade = (msg.data as any)?.trade as SimulatedTrade | undefined;
+  useWsEvent<{ trade?: SimulatedTrade }>(
+    "tradeOpened",
+    useCallback((data) => {
+      const trade = data?.trade;
       if (!trade) return;
 
       setPerformance((prev) => {
         if (!prev) return prev;
-        const actualCost = parseFloat(trade.actualCost || "0");
-        const oldCash = parseFloat(prev.cashBalance || "0");
-        const oldPositionsValue = parseFloat(prev.openPositionsValue || "0");
         return {
           ...prev,
           openPositions: prev.openPositions + 1,
-          cashBalance: Math.max(0, oldCash - actualCost).toFixed(2),
-          openPositionsValue: (oldPositionsValue + actualCost).toFixed(2),
         };
       });
-    });
+    }, []),
+  );
 
-    // Handle tradeResolved: update wins/losses, PnL, and derived metrics
-    const unsubResolved = ws.on("tradeResolved", (msg: WsMessage) => {
-      const d = msg.data as any;
+  useWsEvent<any>(
+    "tradeResolved",
+    useCallback((d) => {
       const trade = d?.trade as SimulatedTrade | undefined;
       const isWin = d?.isWin as boolean | undefined;
       const pnl = typeof d?.pnl === "number" ? (d.pnl as number) : 0;
@@ -378,74 +378,37 @@ export function usePerformanceRealtime(
       setPerformance((prev) => {
         if (!prev) return prev;
 
-        // Update win/loss counts
         const newWins = prev.wins + (isWin ? 1 : 0);
         const newLosses = prev.losses + (isWin ? 0 : 1);
         const newClosedPositions = newWins + newLosses;
-
-        // Update PnL values
         const oldTotalPnl = parseFloat(prev.totalPnl || "0");
         const newTotalPnl = oldTotalPnl + pnl;
 
-        // When a trade settles, cash is returned (actualCost) + pnl added back
-        const actualCost = parseFloat(trade.actualCost || "0");
-        const oldCashBalance = parseFloat(prev.cashBalance || "0");
-        const newCashBalance = oldCashBalance + actualCost + pnl;
-
-        // Reduce open positions value by the cost that was deployed
-        const oldOpenPositionsValue = parseFloat(
-          prev.openPositionsValue || "0",
-        );
-        const newOpenPositionsValue = Math.max(
-          0,
-          oldOpenPositionsValue - actualCost,
-        );
-
-        // ROI = (portfolioValue - initialCapital) / initialCapital × 100
-        // (same formula as the backend performance-calculator)
-        const initialCapital = parseFloat(prev.initialCapital || "0");
-        const newPortfolioValue = newCashBalance + newOpenPositionsValue;
-        const newRoi =
-          initialCapital > 0
-            ? ((newPortfolioValue - initialCapital) / initialCapital) * 100
-            : 0;
-
-        // Calculate win rate
         const newWinRate =
           newClosedPositions > 0
             ? ((newWins / newClosedPositions) * 100).toFixed(2)
             : "0.00";
 
-        // Track best and worst trades
         const oldBestTrade = parseFloat(prev.largestWin || "0");
         const oldWorstTrade = parseFloat(prev.largestLoss || "0");
         const newBestTrade = Math.max(oldBestTrade, Math.max(0, pnl));
         const newWorstTrade = Math.min(oldWorstTrade, Math.min(0, pnl));
 
-        // Update open positions
         const newOpenPositions = Math.max(0, prev.openPositions - 1);
 
         return {
           ...prev,
           totalPnl: newTotalPnl.toString(),
-          roi: newRoi.toFixed(2),
           wins: newWins,
           losses: newLosses,
           winRate: newWinRate,
-          cashBalance: newCashBalance.toFixed(2),
-          openPositionsValue: newOpenPositionsValue.toFixed(2),
           largestWin: newBestTrade.toFixed(4),
           largestLoss: newWorstTrade.toFixed(4),
           openPositions: newOpenPositions,
         };
       });
-    });
-
-    return () => {
-      unsubOpened();
-      unsubResolved();
-    };
-  }, []);
+    }, []),
+  );
 
   return { performance, loading, error, refetch: fetchPerformance };
 }

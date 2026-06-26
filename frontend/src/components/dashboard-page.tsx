@@ -102,9 +102,15 @@ export function DashboardPage() {
   }, [stats?.openPositionPrices]);
 
   // Financial Stats
-  const initialCapital = parseFloat(performance?.initialCapital || "0");
-  const cashBalance = parseFloat(performance?.cashBalance || "0");
-  const openPositionsValue = parseFloat(performance?.openPositionsValue || "0");
+  const initialCapital =
+    stats?.portfolio?.initialCapital ??
+    parseFloat(performance?.initialCapital || "0");
+  const cashBalance =
+    stats?.portfolio?.cashBalance ??
+    parseFloat(performance?.cashBalance || "0");
+  const openPositionsValue =
+    stats?.portfolio?.openPositionsValue ??
+    parseFloat(performance?.openPositionsValue || "0");
   const portfolioValue = cashBalance + openPositionsValue;
 
   const winRate = parseFloat(performance?.winRate || "0");
