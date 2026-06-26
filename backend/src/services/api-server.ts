@@ -129,6 +129,7 @@ export class ApiServer {
     this.app.get(["/api/system/stats", "/api/stats"], (_req, res) => {
       const orchestrator = getMarketOrchestrator();
       const config = getConfig();
+      const pm = orchestrator.portfolioManager;
       res.json({
         orchestrator: orchestrator.getStats(),
         config: {
@@ -139,6 +140,12 @@ export class ApiServer {
           maxPositions: config.strategy.maxSimultaneousPositions,
           stopLossEnabled: config.strategy.stopLossEnabled,
           stopLossNoPrice: config.strategy.stopLossNoPrice,
+        },
+        openPositionPrices: orchestrator.getOpenPositionPrices(),
+        portfolio: {
+          cashBalance: pm.getCashBalance(),
+          initialCapital: pm.getInitialCapital(),
+          openPositionsValue: orchestrator.computeOpenPositionsValue(),
         },
       });
     });
@@ -477,7 +484,7 @@ export class ApiServer {
     this.broadcast({
       type: "systemState",
       data: {
-        ...orchestrator.getStats(),
+        orchestrator: orchestrator.getStats(),
         config: {
           minNoEntryPrice: config.strategy.minNoEntryPrice,
           maxNoEntryPrice: config.strategy.maxNoEntryPrice,
