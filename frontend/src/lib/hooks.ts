@@ -25,6 +25,24 @@ import type {
  */
 const PAGE_SIZE = 25;
 
+/**
+ * Helper hook to lazily fetch data exactly once when enabled becomes true.
+ */
+function useFetchOnce(
+  enabled: boolean,
+  action: () => void,
+  deps: React.DependencyList = [],
+) {
+  const hasFetched = useRef(false);
+  useEffect(() => {
+    if (enabled && !hasFetched.current) {
+      hasFetched.current = true;
+      action();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [enabled, ...deps]);
+}
+
 export function usePositions() {
   const [positions, setPositions] = useState<SimulatedTrade[]>([]);
   const [loading, setLoading] = useState(true);
@@ -78,7 +96,7 @@ export function usePositions() {
   return { positions, loading, error, refetch: fetchPositions };
 }
 
-export function useTradeHistory() {
+export function useTradeHistory(enabled: boolean = true) {
   const [trades, setTrades] = useState<SimulatedTrade[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -127,9 +145,7 @@ export function useTradeHistory() {
     }
   }, [loadingMore]);
 
-  useEffect(() => {
-    fetchTrades();
-  }, [fetchTrades]);
+  useFetchOnce(enabled, fetchTrades, [fetchTrades]);
 
   useEffect(() => {
     const ws = getWsClient();
@@ -208,7 +224,10 @@ export function useSystemStats() {
   return { stats, loading, error, refetch: fetchStats };
 }
 
-export function useCampaigns(status: "active" | "history" = "active") {
+export function useCampaigns(
+  status: "active" | "history" = "active",
+  enabled: boolean = true,
+) {
   const [campaigns, setCampaigns] = useState<DistributionCampaign[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
@@ -227,9 +246,7 @@ export function useCampaigns(status: "active" | "history" = "active") {
     }
   }, []);
 
-  useEffect(() => {
-    fetchCampaigns();
-  }, [fetchCampaigns, status]);
+  useFetchOnce(enabled, fetchCampaigns, [fetchCampaigns, status]);
 
   return { campaigns, loading, error, refetch: fetchCampaigns };
 }
@@ -543,18 +560,15 @@ const MAX_ACTIVITY_ENTRIES = 100;
  * - Never polls the API again after initial load
  * - Capped at MAX_ACTIVITY_ENTRIES to prevent unbounded growth
  */
-export function useActivityLog() {
+export function useActivityLog(enabled: boolean = true) {
   const [activities, setActivities] = useState<ActivityEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const seenIds = useRef<Set<string>>(new Set());
 
-  // One-time REST seed on mount
-  useEffect(() => {
-    let cancelled = false;
+  const fetchAuditLogs = useCallback(() => {
     getApiClient()
       .getAuditLogs({ limit: 30 })
       .then((logs) => {
-        if (cancelled) return;
         const entries = logs
           .map(auditLogToActivity)
           .sort((a, b) => b.ts - a.ts); // newest first
@@ -565,12 +579,11 @@ export function useActivityLog() {
         /* silently skip if backend not ready */
       })
       .finally(() => {
-        if (!cancelled) setLoading(false);
+        setLoading(false);
       });
-    return () => {
-      cancelled = true;
-    };
   }, []);
+
+  useFetchOnce(enabled, fetchAuditLogs, [fetchAuditLogs]);
 
   // Real-time: tradeOpened
   useEffect(() => {
