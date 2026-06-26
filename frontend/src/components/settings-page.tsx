@@ -7,7 +7,13 @@ import { useSystemStats } from "@/lib/hooks";
 import { getApiClient } from "@/lib/api-client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -17,10 +23,23 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { AlertTriangle, Lock, Play, Pause, Trash2, Settings, ShieldAlert, Check } from "lucide-react";
+import {
+  AlertTriangle,
+  Lock,
+  Play,
+  Pause,
+  Trash2,
+  Settings,
+  ShieldAlert,
+  Check,
+} from "lucide-react";
 
 export function SettingsPage() {
-  const { stats, loading: statsLoading, refetch: refetchStats } = useSystemStats();
+  const {
+    stats,
+    loading: statsLoading,
+    refetch: refetchStats,
+  } = useSystemStats();
   const [password, setPassword] = useState("");
   const [isSaved, setIsSaved] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -58,7 +77,7 @@ export function SettingsPage() {
 
     try {
       const api = getApiClient();
-      const isCurrentlyPaused = stats?.orchestrator.paused ?? false;
+      const isCurrentlyPaused = stats?.orchestrator?.paused ?? false;
 
       if (isCurrentlyPaused) {
         await api.resumeSystem(password);
@@ -70,7 +89,9 @@ export function SettingsPage() {
       await refetchStats();
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      setActionError(message || "Failed to toggle engine status. Verify your password.");
+      setActionError(
+        message || "Failed to toggle engine status. Verify your password.",
+      );
     } finally {
       setIsTogglingEngine(false);
       setTimeout(() => setActionSuccess(null), 4000);
@@ -90,21 +111,25 @@ export function SettingsPage() {
     try {
       const api = getApiClient();
       await api.wipeSystem(wipePasswordConfirm);
-      setActionSuccess("Simulation database wiped and portfolio reset to initial capital.");
+      setActionSuccess(
+        "Simulation database wiped and portfolio reset to initial capital.",
+      );
       setIsWipeOpen(false);
       setWipePasswordConfirm("");
       await refetchStats();
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      setActionError(message || "Failed to wipe system. Please check your password.");
+      setActionError(
+        message || "Failed to wipe system. Please check your password.",
+      );
     } finally {
       setIsWiping(false);
       setTimeout(() => setActionSuccess(null), 5000);
     }
   };
 
-  const isPaused = stats?.orchestrator.paused ?? false;
-  const isRunning = stats?.orchestrator.running ?? false;
+  const isPaused = stats?.orchestrator?.paused ?? false;
+  const isRunning = stats?.orchestrator?.running ?? false;
 
   return (
     <div className="min-h-screen bg-background text-foreground flex flex-col font-mono">
@@ -112,7 +137,9 @@ export function SettingsPage() {
       <main className="flex-1 px-4 py-6 pb-16 max-w-4xl mx-auto w-full space-y-6">
         <div className="flex items-center gap-2 pb-2 border-b border-border/20">
           <Settings className="w-5 h-5 text-muted-foreground" />
-          <h2 className="text-lg font-bold tracking-wider text-foreground">SYSTEM SETTINGS</h2>
+          <h2 className="text-lg font-bold tracking-wider text-foreground">
+            SYSTEM SETTINGS
+          </h2>
         </div>
 
         {actionError && (
@@ -140,7 +167,8 @@ export function SettingsPage() {
                   ADMIN CREDENTIALS
                 </CardTitle>
                 <CardDescription className="text-[11px] text-muted-foreground leading-normal">
-                  Configure the authorization credentials required to execute administrator commands on the backend.
+                  Configure the authorization credentials required to execute
+                  administrator commands on the backend.
                 </CardDescription>
               </CardHeader>
               <CardContent>
@@ -175,7 +203,8 @@ export function SettingsPage() {
                   SYSTEM CONTROLS
                 </CardTitle>
                 <CardDescription className="text-[11px] text-muted-foreground leading-normal">
-                  Admin commands to manage execution simulation and reset databases.
+                  Admin commands to manage execution simulation and reset
+                  databases.
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
@@ -192,8 +221,8 @@ export function SettingsPage() {
                           isPaused
                             ? "text-red-400 font-bold"
                             : isRunning
-                            ? "text-emerald-400 font-bold"
-                            : "text-muted-foreground"
+                              ? "text-emerald-400 font-bold"
+                              : "text-muted-foreground"
                         }
                       >
                         {isPaused ? "PAUSED" : isRunning ? "ACTIVE" : "IDLE"}
@@ -251,11 +280,17 @@ export function SettingsPage() {
                           CONFIRM WIPE ACTION
                         </DialogTitle>
                         <DialogDescription className="text-[11px] text-muted-foreground font-mono leading-normal">
-                          This action is highly destructive and completely irreversible. It will wipe all simulated trade positions (both open and closed) and reset the portfolio balance to initial starting capital.
+                          This action is highly destructive and completely
+                          irreversible. It will wipe all simulated trade
+                          positions (both open and closed) and reset the
+                          portfolio balance to initial starting capital.
                         </DialogDescription>
                       </DialogHeader>
 
-                      <form onSubmit={handleWipeSystem} className="space-y-4 pt-2">
+                      <form
+                        onSubmit={handleWipeSystem}
+                        className="space-y-4 pt-2"
+                      >
                         <div className="space-y-1.5">
                           <label className="text-[10px] text-muted-foreground uppercase tracking-wider">
                             Type Admin Password to Confirm:
@@ -265,7 +300,9 @@ export function SettingsPage() {
                             placeholder="Admin Password"
                             required
                             value={wipePasswordConfirm}
-                            onChange={(e) => setWipePasswordConfirm(e.target.value)}
+                            onChange={(e) =>
+                              setWipePasswordConfirm(e.target.value)
+                            }
                             className="bg-background border-border/40 focus:border-border/80 h-9 font-sans text-xs"
                           />
                         </div>
@@ -311,7 +348,8 @@ export function SettingsPage() {
                   SERVER CONFIGURATION
                 </CardTitle>
                 <CardDescription className="text-[11px] text-muted-foreground leading-normal">
-                  Read-only execution parameters. These values are configured via server config json / environment files.
+                  Read-only execution parameters. These values are configured
+                  via server config json / environment files.
                 </CardDescription>
               </CardHeader>
               <CardContent>
@@ -321,12 +359,27 @@ export function SettingsPage() {
                   </div>
                 ) : stats?.config ? (
                   <div className="divide-y divide-border/10 text-xs">
-                    <ConfigItem label="Initial Capital" value={`$${stats.config.startingCapital}`} />
-                    <ConfigItem label="Max Open Positions" value={stats.config.maxPositions?.toString() ?? "N/A"} />
-                    <ConfigItem label="Min NO Entry Price" value={`${(stats.config.minNoEntryPrice * 100).toFixed(1)}¢`} />
-                    <ConfigItem label="Max NO Entry Price" value={`${(stats.config.maxNoEntryPrice * 100).toFixed(1)}¢`} />
+                    <ConfigItem
+                      label="Initial Capital"
+                      value={`$${stats.config.startingCapital}`}
+                    />
+                    <ConfigItem
+                      label="Max Open Positions"
+                      value={stats.config.maxPositions?.toString() ?? "N/A"}
+                    />
+                    <ConfigItem
+                      label="Min NO Entry Price"
+                      value={`${(stats.config.minNoEntryPrice * 100).toFixed(1)}¢`}
+                    />
+                    <ConfigItem
+                      label="Max NO Entry Price"
+                      value={`${(stats.config.maxNoEntryPrice * 100).toFixed(1)}¢`}
+                    />
 
-                    <ConfigItem label="Min Expected Net Profit" value={`$${stats.config.minExpectedNetProfit}`} />
+                    <ConfigItem
+                      label="Min Expected Net Profit"
+                      value={`$${stats.config.minExpectedNetProfit}`}
+                    />
                   </div>
                 ) : (
                   <div className="text-center py-12 text-xs text-muted-foreground">
