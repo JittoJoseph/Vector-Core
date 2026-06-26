@@ -55,20 +55,22 @@ export function DashboardPage() {
     hasMore: hasMoreTrades,
     loadingMore: loadingMoreTrades,
     refetch: refetchTrades,
-  } = useTradeHistory();
+  } = useTradeHistory(activeTab === "history");
 
   const {
     campaigns: activeCampaigns,
     loading: activeLoading,
     refetch: refetchActive,
-  } = useCampaigns("active");
+  } = useCampaigns("active", activeTab === "campaigns");
   const {
     campaigns: historyCampaigns,
     loading: historyLoading,
     refetch: refetchHistory,
-  } = useCampaigns("history");
+  } = useCampaigns("history", activeTab === "campaign_history");
 
-  const { activities, loading: activitiesLoading } = useActivityLog();
+  const { activities, loading: activitiesLoading } = useActivityLog(
+    activeTab === "diagnostics",
+  );
   const { performance, refetch: refetchPerformance } =
     usePerformanceRealtime("ALL");
 
@@ -433,7 +435,7 @@ export function DashboardPage() {
                 <TradesTable
                   type="OPEN"
                   trades={openTrades}
-                  loading={tradesLoading}
+                  loading={positionsLoading}
                   livePrices={livePricesMap}
                   onTradeClick={setSelectedTrade}
                   onLoadMore={loadMoreTrades}
