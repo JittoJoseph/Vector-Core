@@ -17,46 +17,40 @@ export function Header() {
   }, []);
 
   const navItems = [
-    { href: "/", label: "DASHBOARD" },
-    { href: "/settings", label: "SETTINGS" },
+    { href: "/", label: "Dashboard" },
+    { href: "/settings", label: "Settings" },
   ];
 
-  // Don't render time until after hydration to prevent mismatch
   if (!mounted || !time) {
     return (
-      <header className="sticky top-0 z-50 backdrop-blur-md bg-background/80 border-b border-border/40">
-        <div className="container mx-auto px-4 py-3 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <h1 className="text-lg font-bold font-mono tracking-widest text-foreground">
-              VECTOR CORE
-            </h1>
-            <span className="text-xs font-mono text-muted-foreground hidden sm:block">
-              DEADLINE ENGINE
-            </span>
-          </div>
-          <div className="text-xs font-mono text-muted-foreground tabular-nums">
+      <div className="pt-4 px-4 max-w-7xl mx-auto w-full">
+        <header className="flex items-center justify-between w-full h-10 px-5 border border-border/30 bg-card/25 rounded-xl">
+          <h1 className="text-sm font-bold font-sans tracking-tight text-foreground">
+            Vector Core
+          </h1>
+          <div className="text-xs font-medium text-muted-foreground tabular-nums">
             Loading...
           </div>
-        </div>
-      </header>
+        </header>
+      </div>
     );
   }
 
   return (
-    <header className="sticky top-0 z-50 backdrop-blur-md bg-background/80 border-b border-border/40">
-      <div className="container mx-auto px-4 py-3 flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <h1 className="text-lg font-bold font-mono tracking-widest text-foreground">
-            VECTOR CORE
+    <div className="pt-4 px-4 max-w-7xl mx-auto w-full">
+      <header className="flex items-center justify-between w-full h-10 px-5 border border-border/30 bg-card/25 rounded-xl">
+        <div className="flex items-center gap-6">
+          <h1 className="text-sm font-bold font-sans tracking-tight text-foreground">
+            Vector Core
           </h1>
-          <nav className="hidden sm:flex items-center gap-1">
+          <nav className="flex items-center gap-4">
             {navItems.map((item) => (
               <Link
                 key={item.href}
                 href={item.href}
-                className={`text-[10px] font-mono tracking-wider px-2.5 py-1 rounded transition-colors ${
+                className={`text-xs font-medium font-sans transition-colors ${
                   pathname === item.href
-                    ? "bg-muted/40 text-foreground"
+                    ? "text-foreground"
                     : "text-muted-foreground hover:text-foreground"
                 }`}
               >
@@ -65,17 +59,20 @@ export function Header() {
             ))}
           </nav>
         </div>
-        <div className="text-xs font-mono text-muted-foreground tabular-nums">
+
+        <div className="text-[11px] font-medium font-sans text-muted-foreground tabular-nums flex items-center gap-2">
           <span className="hidden sm:inline">
             {time.toLocaleDateString("en-US", {
               weekday: "short",
               month: "short",
               day: "numeric",
-            })}{" "}
+            })}
           </span>
-          {time.toLocaleTimeString("en-US", { hour12: false })}
+          <span className="text-foreground/80">
+            {time.toLocaleTimeString("en-US", { hour12: false })}
+          </span>
         </div>
-      </div>
-    </header>
+      </header>
+    </div>
   );
 }
