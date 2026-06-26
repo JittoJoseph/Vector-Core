@@ -418,36 +418,6 @@ export class ApiServer {
       }
     });
 
-    this.app.get("/api/portfolio", async (_req, res) => {
-      try {
-        const portfolio = await getPortfolio();
-        if (!portfolio) {
-          res.status(404).json({ error: "Portfolio not initialised" });
-          return;
-        }
-        const openPositionsValue =
-          getMarketOrchestrator().computeOpenPositionsValue();
-        const cashBalance = parseFloat(portfolio.cashBalance);
-        const initialCapital = parseFloat(portfolio.initialCapital);
-        const portfolioValue = cashBalance + openPositionsValue;
-        res.json({
-          initialCapital,
-          cashBalance,
-          openPositionsValue,
-          portfolioValue,
-          roi:
-            initialCapital > 0
-              ? ((portfolioValue - initialCapital) / initialCapital) * 100
-              : 0,
-          createdAt: portfolio.createdAt,
-          updatedAt: portfolio.updatedAt,
-        });
-      } catch (error) {
-        logger.error({ error }, "Portfolio error");
-        res.status(500).json({ error: "Failed to get portfolio" });
-      }
-    });
-
     this.app.get("/api/audit", async (req, res) => {
       try {
         const db = getDb();
