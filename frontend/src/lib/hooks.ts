@@ -68,10 +68,7 @@ export function usePositions() {
         // Merge: keep any positions that were added via WS while fetching
         const existingIds = new Set(prev.map((t) => t.id));
         const missingFromWs = response.filter((t) => !existingIds.has(t.id));
-        return [...missingFromWs, ...prev].sort(
-          (a, b) =>
-            new Date(b.entryTs).getTime() - new Date(a.entryTs).getTime(),
-        );
+        return [...missingFromWs, ...prev];
       });
       setError(null);
     } catch (err) {
@@ -130,10 +127,7 @@ export function useTradeHistory(enabled: boolean = true) {
       setTrades((prev) => {
         const existingIds = new Set(prev.map((t) => t.id));
         const missingFromWs = response.filter((t) => !existingIds.has(t.id));
-        return [...prev, ...missingFromWs].sort(
-          (a, b) =>
-            new Date(b.entryTs).getTime() - new Date(a.entryTs).getTime(),
-        );
+        return [...prev, ...missingFromWs];
       });
       dbFetchedRef.current = response.length;
       setHasMore(response.length === PAGE_SIZE);
@@ -175,10 +169,7 @@ export function useTradeHistory(enabled: boolean = true) {
       if (!trade) return;
       setTrades((prev) => {
         if (prev.some((t) => t.id === trade.id)) return prev;
-        return [trade, ...prev].sort(
-          (a, b) =>
-            new Date(b.entryTs).getTime() - new Date(a.entryTs).getTime(),
-        );
+        return [trade, ...prev];
       });
     }, []),
   );
