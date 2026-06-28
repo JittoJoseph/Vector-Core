@@ -5,7 +5,7 @@ import express, {
 } from "express";
 import { createServer, type Server } from "http";
 import { WebSocket, WebSocketServer } from "ws";
-import { desc, eq, inArray, sql } from "drizzle-orm";
+import { desc, asc, eq, inArray, sql } from "drizzle-orm";
 import { createModuleLogger } from "../utils/logger.js";
 import { getConfig } from "../utils/config.js";
 import { getDb, getPortfolio, wipeAndResetPortfolio } from "../db/client.js";
@@ -344,7 +344,7 @@ export class ApiServer {
             ),
           )
           .where(eq(schema.simulatedTrades.status, "OPEN"))
-          .orderBy(desc(schema.simulatedTrades.entryTs));
+          .orderBy(asc(schema.distributionCampaigns.endDate));
 
         const openPositionsMap = new Map(
           orchestrator.getOpenPositions().map((p) => [p.tradeId, p]),
@@ -394,7 +394,7 @@ export class ApiServer {
             ),
           )
           .where(eq(schema.simulatedTrades.status, "SETTLED"))
-          .orderBy(desc(schema.simulatedTrades.entryTs))
+          .orderBy(desc(schema.simulatedTrades.exitTs))
           .limit(limit)
           .offset(offset);
 
