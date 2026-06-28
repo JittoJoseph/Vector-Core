@@ -1,7 +1,13 @@
 "use client";
 
 import type { SimulatedTrade, LiveMarketPrice } from "@/lib/types";
-import { polymarketMarketUrl, formatPnl, pnlColor, shortCampaignTitle, calculateTradeUnrealizedPnl } from "@/lib/utils";
+import {
+  polymarketMarketUrl,
+  formatPnl,
+  pnlColor,
+  shortCampaignTitle,
+  calculateTradeUnrealizedPnl,
+} from "@/lib/utils";
 import NumberFlow from "@number-flow/react";
 import { ExternalLink, Clock } from "lucide-react";
 
@@ -53,16 +59,6 @@ export function TradesTable({
   }
 
   const sortedTrades = [...trades];
-  if (type === "OPEN") {
-    sortedTrades.sort((a, b) => {
-      const aEnd = a.campaignEndDate;
-      const bEnd = b.campaignEndDate;
-      if (!aEnd && !bEnd) return 0;
-      if (!aEnd) return 1;
-      if (!bEnd) return -1;
-      return new Date(aEnd).getTime() - new Date(bEnd).getTime();
-    });
-  }
 
   return (
     <div className="overflow-x-auto">
@@ -131,7 +127,8 @@ export function TradesTable({
               const liveMid = livePrice?.mid ?? null;
               const liveCents =
                 liveMid !== null ? Math.round(liveMid * 100) : null;
-              const { pnl: unrealizedPnl, pnlPct: unrealizedPnlPct } = calculateTradeUnrealizedPnl(trade, livePrice);
+              const { pnl: unrealizedPnl, pnlPct: unrealizedPnlPct } =
+                calculateTradeUnrealizedPnl(trade, livePrice);
 
               const polyUrl = polymarketMarketUrl({
                 eventSlug: trade.campaignSlug,
@@ -216,7 +213,13 @@ export function TradesTable({
                           >
                             <NumberFlow
                               value={unrealizedPnl}
-                              format={{ style: "currency", currency: "USD", signDisplay: "always", minimumFractionDigits: 4, maximumFractionDigits: 4 }}
+                              format={{
+                                style: "currency",
+                                currency: "USD",
+                                signDisplay: "always",
+                                minimumFractionDigits: 4,
+                                maximumFractionDigits: 4,
+                              }}
                             />
                           </span>
                           <span
@@ -242,7 +245,10 @@ export function TradesTable({
                     {endDateStr ? (
                       <div className="flex items-center justify-end">
                         <span className="inline-flex items-center gap-1.5 text-muted-foreground font-mono text-[11px] font-medium tabular-nums">
-                          <Clock size={11} className="text-muted-foreground/50" />
+                          <Clock
+                            size={11}
+                            className="text-muted-foreground/50"
+                          />
                           <MarketCountdown endDate={endDateStr} />
                         </span>
                       </div>
@@ -337,11 +343,15 @@ export function TradesTable({
                         {entryCents}¢
                       </span>
                       <span className="text-muted-foreground/40">→</span>
-                      {trade.exitPrice !== null && trade.exitPrice !== undefined ? (
+                      {trade.exitPrice !== null &&
+                      trade.exitPrice !== undefined ? (
                         <span
                           className={`font-semibold ${pnlColor(Math.round(parseFloat(trade.exitPrice.toString()) * 100) - entryCents)}`}
                         >
-                          {Math.round(parseFloat(trade.exitPrice.toString()) * 100)}¢
+                          {Math.round(
+                            parseFloat(trade.exitPrice.toString()) * 100,
+                          )}
+                          ¢
                         </span>
                       ) : (
                         <span className="text-muted-foreground/40">—</span>
@@ -372,7 +382,13 @@ export function TradesTable({
                       >
                         <NumberFlow
                           value={realizedPnl}
-                          format={{ style: "currency", currency: "USD", signDisplay: "always", minimumFractionDigits: 4, maximumFractionDigits: 4 }}
+                          format={{
+                            style: "currency",
+                            currency: "USD",
+                            signDisplay: "always",
+                            minimumFractionDigits: 4,
+                            maximumFractionDigits: 4,
+                          }}
                         />
                       </span>
                       <span
@@ -416,7 +432,13 @@ export function TradesTable({
 // Inline MarketCountdown component for portability
 import { useEffect, useState } from "react";
 
-export function MarketCountdown({ endDate, showSeconds = false }: { endDate: string, showSeconds?: boolean }) {
+export function MarketCountdown({
+  endDate,
+  showSeconds = false,
+}: {
+  endDate: string;
+  showSeconds?: boolean;
+}) {
   const [timeLeft, setTimeLeft] = useState("");
 
   useEffect(() => {
