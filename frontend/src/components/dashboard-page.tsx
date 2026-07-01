@@ -356,11 +356,11 @@ export function DashboardPage() {
                     className={`text-[10px] font-bold tracking-widest uppercase ${
                       stats?.orchestrator?.polymarketStatus === "UP"
                         ? "text-emerald-400"
-                        : stats?.orchestrator?.polymarketStatus === "HAS_ISSUES"
+                        : stats?.orchestrator?.polymarketStatus === "HASISSUES"
                           ? "text-amber-500"
                           : stats?.orchestrator?.polymarketStatus ===
-                              "UNDER_MAINTENANCE"
-                            ? "text-red-400"
+                              "UNDERMAINTENANCE"
+                            ? "text-red-500"
                             : "text-muted-foreground"
                     }`}
                   >

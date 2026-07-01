@@ -109,7 +109,7 @@ export interface SystemStats {
       pausedByRiskGuard: boolean;
       riskPauseTriggeredAt: number | null;
     };
-    polymarketStatus?: "UNKNOWN" | "UP" | "HAS_ISSUES" | "UNDER_MAINTENANCE";
+    polymarketStatus?: "UNKNOWN" | "UP" | "HASISSUES" | "UNDERMAINTENANCE";
   };
   config: {
     minNoEntryPrice: number;
