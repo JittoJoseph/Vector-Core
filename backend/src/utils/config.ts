@@ -42,7 +42,7 @@ export function loadConfig(): Config {
     },
     strategy: {
       scanIntervalMs: envNum("SCAN_INTERVAL_MS", 60_000),
-      minNoEntryPrice: envNum("MIN_NO_ENTRY_PRICE", 0.90),
+      minNoEntryPrice: envNum("MIN_NO_ENTRY_PRICE", 0.9),
       maxNoEntryPrice: envNum("MAX_NO_ENTRY_PRICE", 0.96),
 
       minExpectedNetProfit: envNum("MIN_EXPECTED_NET_PROFIT_USDC", 0.1),
@@ -51,7 +51,7 @@ export function loadConfig(): Config {
       riskAutoResumeEnabled: envBool("RISK_AUTO_RESUME_ENABLED", false),
       riskAutoResumeCooldownMs: envNum("RISK_AUTO_RESUME_COOLDOWN_MS", 300_000),
       stopLossEnabled: envBool("STOP_LOSS_ENABLED", true),
-      stopLossNoPrice: envNum("STOP_LOSS_NO_PRICE", 0.65),
+      stopLossNoPrice: envNum("STOP_LOSS_NO_PRICE", 0.72),
     },
     admin: {
       password: env("ADMIN_PASSWORD", isTest ? "test-admin" : undefined),

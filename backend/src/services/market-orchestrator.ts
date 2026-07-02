@@ -50,6 +50,7 @@ interface TrackedBucket {
   lastPrices: Record<string, { bid: number; ask: number; mid: number }>;
   resolved: boolean;
   endDate: Date | null;
+  acceptingOrders: boolean;
 }
 
 interface OpenPosition {
@@ -66,6 +67,18 @@ interface OpenPosition {
 }
 
 export type MarketLifecycle = "OPEN" | "AWAITING_RESOLUTION" | "RESOLVED";
+
+interface Candidate {
+  bucket: typeof schema.distributionBuckets.$inferSelect;
+  campaign: typeof schema.distributionCampaigns.$inferSelect;
+  expectedNetProfit: number;
+  expectedReturnPercent: number;
+  budget: number;
+  execResult: any;
+  top: any;
+  depthAtLimit: number;
+  modalBucketTitle: string;
+}
 
 export class MarketOrchestrator extends EventEmitter {
   private client = getPolymarketClient();
@@ -85,6 +98,7 @@ export class MarketOrchestrator extends EventEmitter {
   private running = false;
   private paused = false;
   private cycleCount = 0;
+  private isEvaluating = false;
 
   private pausedByRiskGuard = false;
   private consecutiveLossCount = 0;
@@ -198,6 +212,17 @@ export class MarketOrchestrator extends EventEmitter {
 
   isPaused(): boolean {
     return this.paused;
+  }
+
+  private isMarketActivelyTrading(state: TrackedBucket): boolean {
+    return !state.resolved && state.acceptingOrders;
+  }
+
+  private getAuthoritativePriceSignal(bestAsk: number): number | null {
+    if (Number.isNaN(bestAsk) || bestAsk <= 0) {
+      return null;
+    }
+    return bestAsk;
   }
 
   public getOpenPositions(): OpenPosition[] {
@@ -438,6 +463,7 @@ export class MarketOrchestrator extends EventEmitter {
       lastPrices: {},
       resolved: false,
       endDate: market.endDate ? new Date(market.endDate) : null,
+      acceptingOrders: market.acceptingOrders ?? true,
     });
     this.tokenToBucket.set(noTokenId, market.id);
     if (market.conditionId)
@@ -445,9 +471,26 @@ export class MarketOrchestrator extends EventEmitter {
   }
 
   async evaluateOpportunities(): Promise<void> {
-    if (this.paused) return;
+    if (this.paused || this.isEvaluating) return;
+    this.isEvaluating = true;
     this.cycleCount++;
 
+    try {
+      const result = await this.findCandidateOpportunities();
+      if (!result) return;
+
+      const { allCandidates, requiredTokens } = result;
+      this.updateWsSubscriptions(requiredTokens);
+      await this.executeCandidates(allCandidates);
+    } finally {
+      this.isEvaluating = false;
+    }
+  }
+
+  private async findCandidateOpportunities(): Promise<{
+    allCandidates: Candidate[];
+    requiredTokens: Set<string>;
+  } | null> {
     const config = getConfig();
     const db = getDb();
 
@@ -456,24 +499,12 @@ export class MarketOrchestrator extends EventEmitter {
       .from(schema.distributionCampaigns)
       .where(eq(schema.distributionCampaigns.active, true));
 
-    if (campaigns.length === 0) return;
+    if (campaigns.length === 0) return null;
     const campaignIds = campaigns.map((c) => c.id);
     const allBuckets = await db
       .select()
       .from(schema.distributionBuckets)
       .where(inArray(schema.distributionBuckets.campaignId, campaignIds));
-
-    interface Candidate {
-      bucket: typeof schema.distributionBuckets.$inferSelect;
-      campaign: typeof schema.distributionCampaigns.$inferSelect;
-      expectedNetProfit: number;
-      expectedReturnPercent: number;
-      budget: number;
-      execResult: any;
-      top: any;
-      depthAtLimit: number;
-      modalBucketTitle: string;
-    }
 
     let allCandidates: Candidate[] = [];
     const requiredTokens = new Set<string>();
@@ -554,6 +585,8 @@ export class MarketOrchestrator extends EventEmitter {
             if (budget <= 0) continue;
 
             const state = this.trackedBuckets.get(bucket.id);
+            if (state && !this.isMarketActivelyTrading(state)) continue;
+
             const execResult = simulateLimitBuy(
               book,
               budget,
@@ -593,6 +626,10 @@ export class MarketOrchestrator extends EventEmitter {
       });
     }
 
+    return { allCandidates, requiredTokens };
+  }
+
+  private updateWsSubscriptions(requiredTokens: Set<string>): void {
     const currentlySubscribed = this.wsWatcher.getSubscribedTokens();
     const tokensToSubscribe = Array.from(requiredTokens).filter(
       (t) => !currentlySubscribed.has(t),
@@ -607,6 +644,10 @@ export class MarketOrchestrator extends EventEmitter {
     if (tokensToUnsubscribe.length > 0) {
       this.wsWatcher.unsubscribe(tokensToUnsubscribe);
     }
+  }
+
+  private async executeCandidates(allCandidates: Candidate[]): Promise<void> {
+    const config = getConfig();
 
     allCandidates.sort((a, b) => {
       if (b.expectedReturnPercent !== a.expectedReturnPercent)
@@ -662,18 +703,24 @@ export class MarketOrchestrator extends EventEmitter {
 
     for (const pos of this.openPositions.values()) {
       if (pos.tokenId === tokenId && pos.bucketId === bucketId) {
-        if (!state.endDate || new Date() <= state.endDate) {
-          const currentPrice = (bestBid + bestAsk) / 2;
-          if (
-            pos.minNoPriceDuringPosition === null ||
-            currentPrice < pos.minNoPriceDuringPosition
-          ) {
-            pos.minNoPriceDuringPosition = currentPrice;
+        if (this.isMarketActivelyTrading(state)) {
+          const currentPrice = this.getAuthoritativePriceSignal(bestAsk);
+          if (currentPrice !== null) {
+            if (
+              pos.minNoPriceDuringPosition === null ||
+              currentPrice < pos.minNoPriceDuringPosition
+            ) {
+              pos.minNoPriceDuringPosition = currentPrice;
+            }
           }
         }
 
         if (config.strategy.stopLossEnabled) {
-          if (bestAsk <= config.strategy.stopLossNoPrice) {
+          const currentPrice = this.getAuthoritativePriceSignal(bestAsk);
+          if (
+            currentPrice !== null &&
+            currentPrice <= config.strategy.stopLossNoPrice
+          ) {
             const now = Date.now();
             if (!pos.stopLossConditionFirstSeen) {
               pos.stopLossConditionFirstSeen = now;
@@ -850,7 +897,14 @@ export class MarketOrchestrator extends EventEmitter {
     );
     for (const bucketId of bucketIds) {
       const market = await this.client.getMarketById(bucketId);
-      if (!market?.closed) continue;
+      if (!market) continue;
+
+      const state = this.trackedBuckets.get(bucketId);
+      if (state && market.acceptingOrders === false) {
+        state.acceptingOrders = false;
+      }
+
+      if (!market.closed) continue;
       const outcomes = PolymarketClient.parseOutcomes(market);
       const tokens = PolymarketClient.parseClobTokenIds(market);
       const prices = PolymarketClient.parseOutcomePrices(market);
