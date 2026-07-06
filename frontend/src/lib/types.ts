@@ -119,7 +119,8 @@ export interface SystemStats {
     startingCapital: number;
     maxPositions: number;
     stopLossEnabled: boolean;
-    stopLossNoPrice: number;
+    stopLossBufferBelowLow: number;
+    stopLossAbsoluteFloor: number;
   };
   openPositionPrices?: Record<string, LiveMarketPrice>;
   portfolio?: {

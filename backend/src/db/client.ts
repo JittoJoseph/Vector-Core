@@ -141,6 +141,7 @@ export async function createSimulatedTrade(data: {
   noBestAskAtEntry?: string;
   depthAtLimit?: string;
   modalBucketAtEntry?: string | null;
+  stopNoPrice?: string | null;
   entryGateSnapshot?: unknown;
 }) {
   const database = getDb();
@@ -167,6 +168,7 @@ export async function createSimulatedTrade(data: {
       noBestAskAtEntry: data.noBestAskAtEntry ?? null,
       depthAtLimit: data.depthAtLimit ?? null,
       modalBucketAtEntry: data.modalBucketAtEntry ?? null,
+      stopNoPrice: data.stopNoPrice ?? null,
       entryGateSnapshot: (data.entryGateSnapshot as any) ?? null,
       status: "OPEN",
     })

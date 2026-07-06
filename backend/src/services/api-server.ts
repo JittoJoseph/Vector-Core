@@ -139,7 +139,8 @@ export class ApiServer {
           startingCapital: config.portfolio.startingCapital,
           maxPositions: config.strategy.maxSimultaneousPositions,
           stopLossEnabled: config.strategy.stopLossEnabled,
-          stopLossNoPrice: config.strategy.stopLossNoPrice,
+          stopLossBufferBelowLow: config.strategy.stopLossBufferBelowLow,
+          stopLossAbsoluteFloor: config.strategy.stopLossAbsoluteFloor,
         },
         openPositionPrices: orchestrator.getOpenPositionPrices(),
         portfolio: {
@@ -493,7 +494,8 @@ export class ApiServer {
           startingCapital: config.portfolio.startingCapital,
           maxPositions: config.strategy.maxSimultaneousPositions,
           stopLossEnabled: config.strategy.stopLossEnabled,
-          stopLossNoPrice: config.strategy.stopLossNoPrice,
+          stopLossBufferBelowLow: config.strategy.stopLossBufferBelowLow,
+          stopLossAbsoluteFloor: config.strategy.stopLossAbsoluteFloor,
         },
         openPositionPrices: orchestrator.getOpenPositionPrices(),
         portfolio: {

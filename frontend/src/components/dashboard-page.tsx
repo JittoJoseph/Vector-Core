@@ -771,10 +771,11 @@ export function DashboardPage() {
 
                 <div className="flex justify-between items-end">
                   <span className="text-[10px] text-muted-foreground uppercase tracking-widest">
-                    Stop Loss Trigger
+                    Stop Loss
                   </span>
                   <span className="text-[11px] font-mono text-foreground tabular-nums">
-                    {Math.round((stats?.config.stopLossNoPrice || 0) * 100)}¢
+                    low −{Math.round((stats?.config.stopLossBufferBelowLow || 0) * 100)}¢, floor{" "}
+                    {Math.round((stats?.config.stopLossAbsoluteFloor || 0) * 100)}¢
                   </span>
                 </div>
               </div>

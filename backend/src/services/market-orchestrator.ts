@@ -38,11 +38,13 @@ import {
   findModalBucket,
   isCandidateBucket,
   isRelevantBucket,
-  cumulativeYesMassAtOrBelow,
+  cumulativeYesMassBelow,
   modalMarginBelow,
   bucketDistanceBelowModal,
   campaignAgeFraction,
   analyzeDipRecovery,
+  isRecoveryEntryAllowed,
+  computeStopNoPrice,
   evaluateSyncEntryGates,
   ladderYesMap,
   type EntryGateMetrics,
@@ -72,6 +74,7 @@ interface OpenPosition {
   fees: number;
   actualCost: number;
   minNoPriceDuringPosition: number | null;
+  stopNoPrice: number;
   stopLossConditionFirstSeen?: number | null;
   isExiting?: boolean;
 }
@@ -629,7 +632,7 @@ export class MarketOrchestrator extends EventEmitter {
           bucket.groupItemTitle,
           modalBucket.groupItemTitle,
         ),
-        tailYesMass: cumulativeYesMassAtOrBelow(buckets, bucket.groupItemTitle),
+        tailYesMass: cumulativeYesMassBelow(buckets, bucket.groupItemTitle),
         modalMargin,
       };
       const gate = evaluateSyncEntryGates(gateMetrics, gateConfig);
@@ -732,14 +735,23 @@ export class MarketOrchestrator extends EventEmitter {
         "Failed to fetch price history; skipping candidate this scan",
       );
     }
-    // Fail closed: no history or mid-dip → re-evaluated next scan.
-    if (!dip || !dip.pass) {
-      if (dip) {
-        logger.debug(
-          { campaignId: campaign.id, bucket: bucket.groupItemTitle, dip },
-          "Trajectory gate rejected candidate",
-        );
-      }
+    // Recovery gate is primary: fail closed when we have no history, and below
+    // the high-confidence band demand a convincing recovery to justify the risk.
+    if (!dip) return "TRAJECTORY_REJECTED";
+    const recovery = isRecoveryEntryAllowed(dip, top.bestAsk, {
+      highConfidenceNoPrice: config.strategy.entryHighConfidenceNoPrice,
+      minReboundFromLow: config.strategy.entryMinReboundFromLow,
+    });
+    if (!recovery.pass) {
+      logger.debug(
+        {
+          campaignId: campaign.id,
+          bucket: bucket.groupItemTitle,
+          reason: recovery.reason,
+          dip,
+        },
+        "Recovery gate rejected candidate",
+      );
       return "TRAJECTORY_REJECTED";
     }
 
@@ -861,10 +873,7 @@ export class MarketOrchestrator extends EventEmitter {
         }
 
         if (config.strategy.stopLossEnabled) {
-          if (
-            currentPrice !== null &&
-            currentPrice <= config.strategy.stopLossNoPrice
-          ) {
+          if (currentPrice !== null && currentPrice <= pos.stopNoPrice) {
             const now = Date.now();
             if (!pos.stopLossConditionFirstSeen) {
               pos.stopLossConditionFirstSeen = now;
@@ -891,8 +900,17 @@ export class MarketOrchestrator extends EventEmitter {
       return;
     }
 
+    const config = getConfig();
+
     try {
       const execResult = cand.execResult;
+
+      // Context-relative stop anchored to the recovery low we entered on.
+      const stopNoPrice = computeStopNoPrice(
+        cand.dip.recentLow,
+        config.strategy.stopLossBufferBelowLow,
+        config.strategy.stopLossAbsoluteFloor,
+      );
 
       const trade = await createSimulatedTrade({
         campaignId: cand.campaign.id,
@@ -915,9 +933,11 @@ export class MarketOrchestrator extends EventEmitter {
         noBestAskAtEntry: cand.top.bestAsk?.toFixed(8),
         depthAtLimit: cand.depthAtLimit.toFixed(8),
         modalBucketAtEntry: cand.modalBucketTitle,
+        stopNoPrice: stopNoPrice.toFixed(8),
         entryGateSnapshot: {
           ...cand.gateMetrics,
           dip: cand.dip,
+          stopNoPrice,
           ladderYes: cand.ladderYes,
         },
       });
@@ -932,6 +952,7 @@ export class MarketOrchestrator extends EventEmitter {
           fees: execResult.fees,
           actualCost: execResult.netCost,
           minNoPriceDuringPosition: null,
+          stopNoPrice,
         });
         await logAudit(
           "info",
@@ -1165,8 +1186,9 @@ export class MarketOrchestrator extends EventEmitter {
   }
 
   private async loadOpenPositions(): Promise<void> {
+    const config = getConfig();
     const rows = await loadOpenTradesWithBuckets();
-    for (const { trade, bucket } of rows) {
+    for (const { trade } of rows) {
       this.openPositions.set(trade.id, {
         tradeId: trade.id,
         bucketId: trade.bucketId ?? "",
@@ -1180,6 +1202,11 @@ export class MarketOrchestrator extends EventEmitter {
           trade.minNoPriceDuringPosition !== undefined
             ? parseFloat(trade.minNoPriceDuringPosition)
             : null,
+        // Fall back to the absolute floor for positions opened before the
+        // context-relative stop existed.
+        stopNoPrice: trade.stopNoPrice
+          ? parseFloat(trade.stopNoPrice)
+          : config.strategy.stopLossAbsoluteFloor,
       });
     }
   }

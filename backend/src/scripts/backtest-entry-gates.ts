@@ -18,11 +18,13 @@ import { getConfig } from "../utils/config.js";
 import {
   parseBucketMinMax,
   isCandidateBucket,
-  cumulativeYesMassAtOrBelow,
+  cumulativeYesMassBelow,
   modalMarginBelow,
   bucketDistanceBelowModal,
   campaignAgeFraction,
   analyzeDipRecovery,
+  isRecoveryEntryAllowed,
+  computeStopNoPrice,
   evaluateSyncEntryGates,
 } from "../utils/distribution-logic.js";
 
@@ -38,10 +40,26 @@ interface SimTrade {
   bucketTitle: string;
   entryT: number;
   entryNoPrice: number;
+  stopNoPrice: number;
   outcome: "WIN" | "STOP" | "OPEN_AT_END";
   exitNoPrice: number;
   pnlPerShare: number;
   maxDrawdown: number;
+}
+
+interface GateConfig {
+  minCampaignAgeFraction: number;
+  minBucketDistance: number;
+  maxTailYesMass: number;
+  minModalMargin: number;
+  dipLookbackHours: number;
+  dipThreshold: number;
+  reboundDelta: number;
+  highConfidenceNoPrice: number;
+  minReboundFromLow: number;
+  stopBufferBelowLow: number;
+  stopAbsoluteFloor: number;
+  disabled?: string; // gate key to ablate: age|distance|tail|margin|trajectory
 }
 
 function yesAt(series: BucketSeries, t: number): number | null {
@@ -57,18 +75,8 @@ function yesAt(series: BucketSeries, t: number): number | null {
 function replayCampaign(
   campaign: typeof schema.distributionCampaigns.$inferSelect,
   series: BucketSeries[],
-  gates: {
-    minCampaignAgeFraction: number;
-    minBucketDistance: number;
-    maxTailYesMass: number;
-    minModalMargin: number;
-    dipLookbackHours: number;
-    dipThreshold: number;
-    reboundDelta: number;
-    disabled?: string; // gate key to ablate: age|distance|tail|margin|trajectory
-  },
+  gates: GateConfig,
   entryBand: { min: number; max: number },
-  stopLossNoPrice: number,
 ): SimTrade[] {
   const allT = series.flatMap((s) => s.history.map((h) => h.t));
   if (allT.length === 0) return [];
@@ -102,11 +110,11 @@ function replayCampaign(
       const noPrice = 1 - b.yesPrice!;
       const title = b.groupItemTitle;
 
-      // Track open positions: stop-loss + drawdown.
+      // Track open positions: context-relative stop + drawdown.
       const pos = open.get(title);
       if (pos) {
         pos.maxDrawdown = Math.min(pos.maxDrawdown, noPrice - pos.entryNoPrice);
-        if (noPrice <= stopLossNoPrice) {
+        if (noPrice <= pos.stopNoPrice) {
           pos.outcome = "STOP";
           pos.exitNoPrice = noPrice;
           pos.pnlPerShare = noPrice - pos.entryNoPrice;
@@ -127,25 +135,28 @@ function replayCampaign(
           title,
           modal.groupItemTitle,
         ),
-        tailYesMass: cumulativeYesMassAtOrBelow(ladder, title),
+        tailYesMass: cumulativeYesMassBelow(ladder, title),
         modalMargin,
       };
       const gate = evaluateSyncEntryGates(metrics, gates);
       const failed = gate.failed.filter((f) => f !== gates.disabled);
       if (failed.length > 0) continue;
 
+      // Recovery gate (primary). recentLow also anchors the stop.
+      const noHistory = b.series.history
+        .filter((h) => h.t <= t)
+        .map((h) => ({ t: h.t, p: 1 - h.p }));
+      const dip = analyzeDipRecovery(
+        noHistory,
+        t,
+        gates.dipLookbackHours,
+        gates.dipThreshold,
+        gates.reboundDelta,
+      );
+      if (!dip) continue;
       if (gates.disabled !== "trajectory") {
-        const noHistory = b.series.history
-          .filter((h) => h.t <= t)
-          .map((h) => ({ t: h.t, p: 1 - h.p }));
-        const dip = analyzeDipRecovery(
-          noHistory,
-          t,
-          gates.dipLookbackHours,
-          gates.dipThreshold,
-          gates.reboundDelta,
-        );
-        if (!dip || !dip.pass) continue;
+        const recovery = isRecoveryEntryAllowed(dip, noPrice, gates);
+        if (!recovery.pass) continue;
       }
 
       open.set(title, {
@@ -153,6 +164,11 @@ function replayCampaign(
         bucketTitle: title,
         entryT: t,
         entryNoPrice: noPrice,
+        stopNoPrice: computeStopNoPrice(
+          dip.recentLow,
+          gates.stopBufferBelowLow,
+          gates.stopAbsoluteFloor,
+        ),
         outcome: "OPEN_AT_END",
         exitNoPrice: noPrice,
         pnlPerShare: 0,
@@ -216,7 +232,7 @@ async function main(): Promise<void> {
       ),
     );
 
-  const gateCfg = {
+  const gateCfg: Omit<GateConfig, "disabled"> = {
     minCampaignAgeFraction: config.strategy.entryMinCampaignAgeFraction,
     minBucketDistance: config.strategy.entryMinBucketDistance,
     maxTailYesMass: config.strategy.entryMaxTailYesMass,
@@ -224,6 +240,10 @@ async function main(): Promise<void> {
     dipLookbackHours: config.strategy.entryDipLookbackHours,
     dipThreshold: config.strategy.entryDipThreshold,
     reboundDelta: config.strategy.entryReboundDelta,
+    highConfidenceNoPrice: config.strategy.entryHighConfidenceNoPrice,
+    minReboundFromLow: config.strategy.entryMinReboundFromLow,
+    stopBufferBelowLow: config.strategy.stopLossBufferBelowLow,
+    stopAbsoluteFloor: config.strategy.stopLossAbsoluteFloor,
   };
   const entryBand = {
     min: config.strategy.minNoEntryPrice,
@@ -270,7 +290,6 @@ async function main(): Promise<void> {
             series,
             { ...gateCfg, disabled: v.disabled },
             entryBand,
-            config.strategy.stopLossNoPrice,
           ),
         );
     }

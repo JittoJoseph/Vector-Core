@@ -122,6 +122,7 @@ export const simulatedTrades = pgTable(
     status: text("status").default("OPEN").notNull(),
     modalBucketAtEntry: text("modal_bucket_at_entry"),
     minNoPriceDuringPosition: decimal("min_no_price_during_position", { precision: 18, scale: 8 }),
+    stopNoPrice: decimal("stop_no_price", { precision: 18, scale: 8 }),
     entryGateSnapshot: jsonb("entry_gate_snapshot"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),

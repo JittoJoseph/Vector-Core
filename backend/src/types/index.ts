@@ -27,7 +27,8 @@ export const ConfigSchema = z.object({
     riskAutoResumeEnabled: z.boolean(),
     riskAutoResumeCooldownMs: z.number().int().positive(),
     stopLossEnabled: z.boolean(),
-    stopLossNoPrice: z.number().min(0).max(1),
+    stopLossBufferBelowLow: z.number().min(0).max(1),
+    stopLossAbsoluteFloor: z.number().min(0).max(1),
 
     entryMinCampaignAgeFraction: z.number().min(0).max(1),
     entryMinBucketDistance: z.number().int().min(1),
@@ -36,6 +37,8 @@ export const ConfigSchema = z.object({
     entryDipLookbackHours: z.number().positive(),
     entryDipThreshold: z.number().min(0).max(1),
     entryReboundDelta: z.number().min(0).max(1),
+    entryHighConfidenceNoPrice: z.number().min(0).max(1),
+    entryMinReboundFromLow: z.number().min(0).max(1),
   }),
   admin: z.object({
     password: z.string().min(1),
