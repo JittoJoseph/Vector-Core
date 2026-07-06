@@ -28,6 +28,14 @@ export const ConfigSchema = z.object({
     riskAutoResumeCooldownMs: z.number().int().positive(),
     stopLossEnabled: z.boolean(),
     stopLossNoPrice: z.number().min(0).max(1),
+
+    entryMinCampaignAgeFraction: z.number().min(0).max(1),
+    entryMinBucketDistance: z.number().int().min(1),
+    entryMaxTailYesMass: z.number().min(0).max(1),
+    entryMinModalMargin: z.number().min(0).max(1),
+    entryDipLookbackHours: z.number().positive(),
+    entryDipThreshold: z.number().min(0).max(1),
+    entryReboundDelta: z.number().min(0).max(1),
   }),
   admin: z.object({
     password: z.string().min(1),
@@ -165,3 +173,8 @@ export type OrderbookLevel = z.infer<typeof OrderbookLevelSchema>;
 
 export const MidpointResponseSchema = z.object({ mid: z.string() });
 export type MidpointResponse = z.infer<typeof MidpointResponseSchema>;
+
+export const PricesHistoryResponseSchema = z.object({
+  history: z.array(z.object({ t: z.number(), p: z.number() })),
+});
+export type PricesHistoryResponse = z.infer<typeof PricesHistoryResponseSchema>;

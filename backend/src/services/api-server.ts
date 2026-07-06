@@ -212,6 +212,7 @@ export class ApiServer {
               candidateCount: metrics.candidateCount,
               trackedCount: metrics.trackedCount,
               positionCount: metrics.positionCount,
+              gateRejectedCount: metrics.gateRejectedCount,
             };
           });
           res.json(results);

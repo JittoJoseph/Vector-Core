@@ -52,6 +52,14 @@ export function loadConfig(): Config {
       riskAutoResumeCooldownMs: envNum("RISK_AUTO_RESUME_COOLDOWN_MS", 300_000),
       stopLossEnabled: envBool("STOP_LOSS_ENABLED", true),
       stopLossNoPrice: envNum("STOP_LOSS_NO_PRICE", 0.72),
+
+      entryMinCampaignAgeFraction: envNum("ENTRY_MIN_CAMPAIGN_AGE_FRACTION", 0.3),
+      entryMinBucketDistance: envNum("ENTRY_MIN_BUCKET_DISTANCE", 1),
+      entryMaxTailYesMass: envNum("ENTRY_MAX_TAIL_YES_MASS", 0.15),
+      entryMinModalMargin: envNum("ENTRY_MIN_MODAL_MARGIN", 0.10),
+      entryDipLookbackHours: envNum("ENTRY_DIP_LOOKBACK_HOURS", 24),
+      entryDipThreshold: envNum("ENTRY_DIP_THRESHOLD", 0.02),
+      entryReboundDelta: envNum("ENTRY_REBOUND_DELTA", 0.02),
     },
     admin: {
       password: env("ADMIN_PASSWORD", isTest ? "test-admin" : undefined),

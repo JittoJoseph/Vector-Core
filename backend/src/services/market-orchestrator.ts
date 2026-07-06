@@ -21,6 +21,7 @@ import {
   getTopOfBook,
   simulateTakerSell,
   simulateLimitBuy,
+  type ExecutionResult,
 } from "./execution-simulator.js";
 import {
   getMarketWebSocketWatcher,
@@ -37,6 +38,15 @@ import {
   findModalBucket,
   isCandidateBucket,
   isRelevantBucket,
+  cumulativeYesMassAtOrBelow,
+  modalMarginBelow,
+  bucketDistanceBelowModal,
+  campaignAgeFraction,
+  analyzeDipRecovery,
+  evaluateSyncEntryGates,
+  ladderYesMap,
+  type EntryGateMetrics,
+  type DipRecoveryAnalysis,
 } from "../utils/distribution-logic.js";
 
 interface TrackedBucket {
@@ -68,16 +78,22 @@ interface OpenPosition {
 
 export type MarketLifecycle = "OPEN" | "AWAITING_RESOLUTION" | "RESOLVED";
 
+type BucketRow = typeof schema.distributionBuckets.$inferSelect;
+type CampaignRow = typeof schema.distributionCampaigns.$inferSelect;
+
 interface Candidate {
-  bucket: typeof schema.distributionBuckets.$inferSelect;
-  campaign: typeof schema.distributionCampaigns.$inferSelect;
+  bucket: BucketRow;
+  campaign: CampaignRow;
   expectedNetProfit: number;
   expectedReturnPercent: number;
   budget: number;
-  execResult: any;
-  top: any;
+  execResult: ExecutionResult;
+  top: ReturnType<typeof getTopOfBook>;
   depthAtLimit: number;
   modalBucketTitle: string;
+  gateMetrics: EntryGateMetrics;
+  dip: DipRecoveryAnalysis;
+  ladderYes: Record<string, number>;
 }
 
 export class MarketOrchestrator extends EventEmitter {
@@ -105,7 +121,12 @@ export class MarketOrchestrator extends EventEmitter {
   private riskAutoResumeTimer: NodeJS.Timeout | null = null;
   private activeCampaignMetrics = new Map<
     string,
-    { candidateCount: number; trackedCount: number; positionCount: number }
+    {
+      candidateCount: number;
+      trackedCount: number;
+      positionCount: number;
+      gateRejectedCount: number;
+    }
   >();
 
   async start(): Promise<void> {
@@ -118,23 +139,30 @@ export class MarketOrchestrator extends EventEmitter {
     executionPolicy.start();
     await this.syncCampaigns();
     await this.evaluateOpportunities();
-    const config = getConfig();
-    this.syncTimer = setInterval(() => {
-      this.syncCampaigns().catch((error) =>
-        logger.error({ error }, "Distribution sync failed"),
-      );
-    }, 60_000);
-    this.evaluateTimer = setInterval(() => {
-      this.evaluateOpportunities().catch((error) =>
-        logger.error({ error }, "Distribution evaluate failed"),
-      );
-    }, config.strategy.scanIntervalMs);
-    this.settlementTimer = setInterval(() => {
-      this.pollOpenPositionSettlements().catch((error) =>
-        logger.error({ error }, "Settlement polling failed"),
-      );
-    }, 60_000);
+    this.startTimers();
     logger.info("Distribution market orchestrator started");
+  }
+
+  private startTimers(): void {
+    const config = getConfig();
+    if (!this.syncTimer)
+      this.syncTimer = setInterval(() => {
+        this.syncCampaigns().catch((error) =>
+          logger.error({ error }, "Distribution sync failed"),
+        );
+      }, 60_000);
+    if (!this.evaluateTimer)
+      this.evaluateTimer = setInterval(() => {
+        this.evaluateOpportunities().catch((error) =>
+          logger.error({ error }, "Distribution evaluate failed"),
+        );
+      }, config.strategy.scanIntervalMs);
+    if (!this.settlementTimer)
+      this.settlementTimer = setInterval(() => {
+        this.pollOpenPositionSettlements().catch((error) =>
+          logger.error({ error }, "Settlement polling failed"),
+        );
+      }, 60_000);
   }
 
   stop(): void {
@@ -177,22 +205,7 @@ export class MarketOrchestrator extends EventEmitter {
     await this.portfolioManager.reload();
     await this.syncCampaigns();
     await this.evaluateOpportunities();
-    const config = getConfig();
-    if (!this.syncTimer)
-      this.syncTimer = setInterval(
-        () => this.syncCampaigns().catch(console.error),
-        60_000,
-      );
-    if (!this.evaluateTimer)
-      this.evaluateTimer = setInterval(
-        () => this.evaluateOpportunities().catch(console.error),
-        config.strategy.scanIntervalMs,
-      );
-    if (!this.settlementTimer)
-      this.settlementTimer = setInterval(
-        () => this.pollOpenPositionSettlements().catch(console.error),
-        60_000,
-      );
+    this.startTimers();
   }
 
   async wipe(): Promise<void> {
@@ -273,6 +286,7 @@ export class MarketOrchestrator extends EventEmitter {
         candidateCount: 0,
         trackedCount: 0,
         positionCount: 0,
+        gateRejectedCount: 0,
       }
     );
   }
@@ -491,7 +505,6 @@ export class MarketOrchestrator extends EventEmitter {
     allCandidates: Candidate[];
     requiredTokens: Set<string>;
   } | null> {
-    const config = getConfig();
     const db = getDb();
 
     const campaigns = await db
@@ -506,10 +519,12 @@ export class MarketOrchestrator extends EventEmitter {
       .from(schema.distributionBuckets)
       .where(inArray(schema.distributionBuckets.campaignId, campaignIds));
 
-    let allCandidates: Candidate[] = [];
+    const allCandidates: Candidate[] = [];
     const requiredTokens = new Set<string>();
+    const positionedBucketIds = new Set<string>();
 
     for (const p of this.openPositions.values()) {
+      positionedBucketIds.add(p.bucketId);
       const b = this.trackedBuckets.get(p.bucketId);
       if (b) {
         requiredTokens.add(b.noTokenId);
@@ -521,112 +536,238 @@ export class MarketOrchestrator extends EventEmitter {
 
     for (const campaign of campaigns) {
       const buckets = allBuckets.filter((b) => b.campaignId === campaign.id);
-      if (buckets.length === 0) continue;
-
-      const modalBucket = findModalBucket(buckets);
-      if (!modalBucket) continue;
-
-      const [modalMin] = parseBucketMinMax(modalBucket.groupItemTitle);
-
-      requiredTokens.add(modalBucket.noTokenId);
-      requiredTokens.add(modalBucket.yesTokenId);
-
-      let candidateCount = 0;
-      let trackedCount = 0;
-      let positionCount = 0;
-
-      for (const bucket of buckets) {
-        const isCandidate = isCandidateBucket(bucket.groupItemTitle, modalMin);
-
-        if (isCandidate) {
-          candidateCount++;
-          const noPrice = parseFloat(bucket.noPrice?.toString() ?? "1");
-          const bucketHasPosition = Array.from(
-            this.openPositions.values(),
-          ).some((p) => p.bucketId === bucket.id);
-
-          if (bucketHasPosition) positionCount++;
-
-          const isRelevant = isRelevantBucket(
-            isCandidate,
-            false,
-            noPrice,
-            config.strategy.maxNoEntryPrice,
-            bucketHasPosition,
-          );
-
-          if (isRelevant) {
-            trackedCount++;
-            requiredTokens.add(bucket.noTokenId);
-            requiredTokens.add(bucket.yesTokenId);
-          }
-
-          if (
-            noPrice >= config.strategy.minNoEntryPrice &&
-            noPrice <= config.strategy.maxNoEntryPrice
-          ) {
-            if (bucketHasPosition) continue;
-            if (this.inFlightTokens.has(bucket.noTokenId)) continue;
-
-            const { data: book } = await this.client.getOrderbook(
-              bucket.noTokenId,
-            );
-            const top = getTopOfBook(book);
-            if (
-              top.bestAsk == null ||
-              top.bestAsk < config.strategy.minNoEntryPrice ||
-              top.bestAsk > config.strategy.maxNoEntryPrice
-            )
-              continue;
-
-            const budget = this.portfolioManager.computePositionBudget(
-              this.computeOpenPositionsValue(),
-            );
-            if (budget <= 0) continue;
-
-            const state = this.trackedBuckets.get(bucket.id);
-            if (state && !this.isMarketActivelyTrading(state)) continue;
-
-            const execResult = simulateLimitBuy(
-              book,
-              budget,
-              config.strategy.maxNoEntryPrice,
-              state?.feeSchedule ?? null,
-            );
-            if (execResult.totalCost < 5) continue;
-
-            const actualCost = execResult.netCost;
-            const shares = execResult.totalShares;
-            const expectedNetProfit = shares - actualCost;
-
-            if (expectedNetProfit < config.strategy.minExpectedNetProfit)
-              continue;
-
-            const expectedReturnPercent = expectedNetProfit / actualCost;
-
-            allCandidates.push({
-              bucket,
-              campaign,
-              expectedNetProfit,
-              expectedReturnPercent,
-              budget: actualCost,
-              execResult,
-              top,
-              depthAtLimit: 0,
-              modalBucketTitle: modalBucket.groupItemTitle,
-            });
-          }
-        }
-      }
-
-      this.activeCampaignMetrics.set(campaign.id, {
-        candidateCount,
-        trackedCount,
-        positionCount,
-      });
+      allCandidates.push(
+        ...(await this.evaluateCampaign(
+          campaign,
+          buckets,
+          positionedBucketIds,
+          requiredTokens,
+        )),
+      );
     }
 
     return { allCandidates, requiredTokens };
+  }
+
+  private async evaluateCampaign(
+    campaign: CampaignRow,
+    buckets: BucketRow[],
+    positionedBucketIds: Set<string>,
+    requiredTokens: Set<string>,
+  ): Promise<Candidate[]> {
+    const config = getConfig();
+    const modalBucket = findModalBucket(buckets);
+    if (!modalBucket) return [];
+
+    const [modalMin] = parseBucketMinMax(modalBucket.groupItemTitle);
+    requiredTokens.add(modalBucket.noTokenId);
+    requiredTokens.add(modalBucket.yesTokenId);
+
+    const ageFraction = campaignAgeFraction(
+      campaign.startDate,
+      campaign.endDate,
+      new Date(),
+    );
+    if (ageFraction === null) {
+      logger.warn(
+        { campaignId: campaign.id },
+        "Campaign missing start/end date; age gate passes open",
+      );
+    }
+    const modalMargin = modalMarginBelow(buckets, modalBucket.groupItemTitle);
+    const ladderYes = ladderYesMap(buckets);
+    const gateConfig = {
+      minCampaignAgeFraction: config.strategy.entryMinCampaignAgeFraction,
+      minBucketDistance: config.strategy.entryMinBucketDistance,
+      maxTailYesMass: config.strategy.entryMaxTailYesMass,
+      minModalMargin: config.strategy.entryMinModalMargin,
+    };
+
+    const candidates: Candidate[] = [];
+    const counts = {
+      candidateCount: 0,
+      trackedCount: 0,
+      positionCount: 0,
+      gateRejectedCount: 0,
+      inBandCount: 0,
+    };
+
+    for (const bucket of buckets) {
+      if (!isCandidateBucket(bucket.groupItemTitle, modalMin)) continue;
+      counts.candidateCount++;
+
+      const noPrice = parseFloat(bucket.noPrice?.toString() ?? "1");
+      const hasPosition = positionedBucketIds.has(bucket.id);
+      if (hasPosition) counts.positionCount++;
+
+      if (
+        isRelevantBucket(
+          true,
+          false,
+          noPrice,
+          config.strategy.maxNoEntryPrice,
+          hasPosition,
+        )
+      ) {
+        counts.trackedCount++;
+        requiredTokens.add(bucket.noTokenId);
+        requiredTokens.add(bucket.yesTokenId);
+      }
+
+      if (
+        noPrice < config.strategy.minNoEntryPrice ||
+        noPrice > config.strategy.maxNoEntryPrice
+      )
+        continue;
+      if (hasPosition || this.inFlightTokens.has(bucket.noTokenId)) continue;
+      counts.inBandCount++;
+
+      const gateMetrics: EntryGateMetrics = {
+        campaignAgeFraction: ageFraction,
+        bucketDistance: bucketDistanceBelowModal(
+          buckets,
+          bucket.groupItemTitle,
+          modalBucket.groupItemTitle,
+        ),
+        tailYesMass: cumulativeYesMassAtOrBelow(buckets, bucket.groupItemTitle),
+        modalMargin,
+      };
+      const gate = evaluateSyncEntryGates(gateMetrics, gateConfig);
+      if (!gate.pass) {
+        counts.gateRejectedCount++;
+        logger.debug(
+          {
+            campaignId: campaign.id,
+            bucket: bucket.groupItemTitle,
+            failed: gate.failed,
+            gateMetrics,
+          },
+          "Entry gate rejected candidate",
+        );
+        continue;
+      }
+
+      const result = await this.buildEntryCandidate(
+        campaign,
+        bucket,
+        modalBucket.groupItemTitle,
+        gateMetrics,
+        ladderYes,
+      );
+      if (result === "TRAJECTORY_REJECTED") {
+        counts.gateRejectedCount++;
+        continue;
+      }
+      if (result) candidates.push(result);
+    }
+
+    this.activeCampaignMetrics.set(campaign.id, {
+      candidateCount: counts.candidateCount,
+      trackedCount: counts.trackedCount,
+      positionCount: counts.positionCount,
+      gateRejectedCount: counts.gateRejectedCount,
+    });
+
+    if (counts.inBandCount > 0) {
+      logger.info(
+        {
+          campaignId: campaign.id,
+          band: counts.inBandCount,
+          gateRejected: counts.gateRejectedCount,
+          candidates: candidates.length,
+        },
+        "Entry gate scan summary",
+      );
+    }
+
+    return candidates;
+  }
+
+  /**
+   * Final, non-free entry stages for a bucket that already passed the
+   * ladder gates: live orderbook band check, budget, trajectory gate
+   * (fail-closed), and execution simulation. Returns "TRAJECTORY_REJECTED"
+   * when the dip-recovery gate blocks so the caller can count it as a
+   * gate rejection; null for ordinary filtering.
+   */
+  private async buildEntryCandidate(
+    campaign: CampaignRow,
+    bucket: BucketRow,
+    modalBucketTitle: string,
+    gateMetrics: EntryGateMetrics,
+    ladderYes: Record<string, number>,
+  ): Promise<Candidate | "TRAJECTORY_REJECTED" | null> {
+    const config = getConfig();
+
+    const { data: book } = await this.client.getOrderbook(bucket.noTokenId);
+    const top = getTopOfBook(book);
+    if (
+      top.bestAsk == null ||
+      top.bestAsk < config.strategy.minNoEntryPrice ||
+      top.bestAsk > config.strategy.maxNoEntryPrice
+    )
+      return null;
+
+    const budget = this.portfolioManager.computePositionBudget(
+      this.computeOpenPositionsValue(),
+    );
+    if (budget <= 0) return null;
+
+    const state = this.trackedBuckets.get(bucket.id);
+    if (state && !this.isMarketActivelyTrading(state)) return null;
+
+    let dip: DipRecoveryAnalysis | null = null;
+    try {
+      const { history } = await this.client.getPricesHistory(bucket.noTokenId);
+      dip = analyzeDipRecovery(
+        history,
+        Date.now() / 1000,
+        config.strategy.entryDipLookbackHours,
+        config.strategy.entryDipThreshold,
+        config.strategy.entryReboundDelta,
+      );
+    } catch (err) {
+      logger.warn(
+        { err, bucket: bucket.groupItemTitle },
+        "Failed to fetch price history; skipping candidate this scan",
+      );
+    }
+    // Fail closed: no history or mid-dip → re-evaluated next scan.
+    if (!dip || !dip.pass) {
+      if (dip) {
+        logger.debug(
+          { campaignId: campaign.id, bucket: bucket.groupItemTitle, dip },
+          "Trajectory gate rejected candidate",
+        );
+      }
+      return "TRAJECTORY_REJECTED";
+    }
+
+    const execResult = simulateLimitBuy(
+      book,
+      budget,
+      config.strategy.maxNoEntryPrice,
+      state?.feeSchedule ?? null,
+    );
+    if (execResult.totalCost < 5) return null;
+
+    const expectedNetProfit = execResult.totalShares - execResult.netCost;
+    if (expectedNetProfit < config.strategy.minExpectedNetProfit) return null;
+
+    return {
+      bucket,
+      campaign,
+      expectedNetProfit,
+      expectedReturnPercent: expectedNetProfit / execResult.netCost,
+      budget: execResult.netCost,
+      execResult,
+      top,
+      depthAtLimit: estimateDepthAtOrBelow(book, config.strategy.maxNoEntryPrice),
+      modalBucketTitle,
+      gateMetrics,
+      dip,
+      ladderYes,
+    };
   }
 
   private updateWsSubscriptions(requiredTokens: Set<string>): void {
@@ -649,7 +790,11 @@ export class MarketOrchestrator extends EventEmitter {
   private async executeCandidates(allCandidates: Candidate[]): Promise<void> {
     const config = getConfig();
 
+    // Within the entry band the return spread is narrow, so lower tail risk
+    // (probability the NO actually loses) outranks expected return.
     allCandidates.sort((a, b) => {
+      if (a.gateMetrics.tailYesMass !== b.gateMetrics.tailYesMass)
+        return a.gateMetrics.tailYesMass - b.gateMetrics.tailYesMass;
       if (b.expectedReturnPercent !== a.expectedReturnPercent)
         return b.expectedReturnPercent - a.expectedReturnPercent;
       return (
@@ -700,11 +845,11 @@ export class MarketOrchestrator extends EventEmitter {
     };
 
     const config = getConfig();
+    const currentPrice = this.getAuthoritativePriceSignal(bestAsk);
 
     for (const pos of this.openPositions.values()) {
       if (pos.tokenId === tokenId && pos.bucketId === bucketId) {
         if (this.isMarketActivelyTrading(state)) {
-          const currentPrice = this.getAuthoritativePriceSignal(bestAsk);
           if (currentPrice !== null) {
             if (
               pos.minNoPriceDuringPosition === null ||
@@ -716,7 +861,6 @@ export class MarketOrchestrator extends EventEmitter {
         }
 
         if (config.strategy.stopLossEnabled) {
-          const currentPrice = this.getAuthoritativePriceSignal(bestAsk);
           if (
             currentPrice !== null &&
             currentPrice <= config.strategy.stopLossNoPrice
@@ -739,7 +883,7 @@ export class MarketOrchestrator extends EventEmitter {
     }
   }
 
-  private async executeMarketEntry(cand: any) {
+  private async executeMarketEntry(cand: Candidate) {
     if (!executionPolicy.canOpenNewPositions()) {
       logger.info(
         "Skipping market entry: Polymarket status restricts new positions.",
@@ -771,6 +915,11 @@ export class MarketOrchestrator extends EventEmitter {
         noBestAskAtEntry: cand.top.bestAsk?.toFixed(8),
         depthAtLimit: cand.depthAtLimit.toFixed(8),
         modalBucketAtEntry: cand.modalBucketTitle,
+        entryGateSnapshot: {
+          ...cand.gateMetrics,
+          dip: cand.dip,
+          ladderYes: cand.ladderYes,
+        },
       });
 
       if (trade) {

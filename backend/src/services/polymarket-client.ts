@@ -9,10 +9,12 @@ import {
   GammaMarketSchema,
   OrderbookSchema,
   MidpointResponseSchema,
+  PricesHistoryResponseSchema,
   type GammaEvent,
   type GammaMarket,
   type Orderbook,
   type MidpointResponse,
+  type PricesHistoryResponse,
 } from "../types/index.js";
 import { logAudit } from "../db/client.js";
 
@@ -157,6 +159,28 @@ export class PolymarketClient {
         return MidpointResponseSchema.parse(response.data);
       },
       { maxRetries: 3, retryOn: isRateLimitError },
+    );
+  }
+
+  async getPricesHistory(
+    tokenId: string,
+    opts: {
+      interval?: "1h" | "6h" | "1d" | "1w" | "max";
+      fidelity?: number;
+    } = {},
+  ): Promise<PricesHistoryResponse> {
+    return withRetry(
+      async () => {
+        const response = await this.clobApi.get("/prices-history", {
+          params: {
+            market: tokenId,
+            interval: opts.interval ?? "1d",
+            fidelity: opts.fidelity ?? 10,
+          },
+        });
+        return PricesHistoryResponseSchema.parse(response.data);
+      },
+      { maxRetries: 2, retryOn: isRateLimitError },
     );
   }
 
