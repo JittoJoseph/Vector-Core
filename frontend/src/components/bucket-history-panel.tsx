@@ -114,6 +114,7 @@ function Sparkline({
   recentLow: number | null;
 }) {
   const last = history[history.length - 1]!;
+  const lowPoint = history.reduce((m, h) => (h.p < m.p ? h : m), history[0]!);
   const pct = (p: number) => `${(p * 100).toFixed(1)}¢`;
 
   return (
@@ -121,14 +122,15 @@ function Sparkline({
       <PriceChart
         history={history}
         height={76}
-        markers={[{ t: last.t, p: last.p, className: "fill-blue-400" }]}
-        hlines={recentLow != null ? [{ p: recentLow, className: "stroke-amber-400/50" }] : []}
+        markers={[
+          { t: lowPoint.t, p: lowPoint.p, className: "fill-amber-400", label: "Low" },
+          { t: last.t, p: last.p, className: "fill-blue-400", label: "Now" }
+        ]}
+        hlines={[]}
       />
       <ChartLegend
         items={[
-          ...(recentLow != null
-            ? [{ variant: "dash" as const, swatchClass: "border-amber-400/70", label: "Low", value: pct(recentLow) }]
-            : []),
+          { variant: "dot", swatchClass: "bg-amber-400", label: "Low", value: pct(recentLow ?? lowPoint.p) },
           { variant: "dot", swatchClass: "bg-blue-400", label: "Now", value: pct(last.p) },
         ]}
       />

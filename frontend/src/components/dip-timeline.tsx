@@ -44,15 +44,19 @@ export function DipTimeline({
       : { fill: "fill-red-400", bg: "bg-red-400" }
     : { fill: "fill-blue-400", bg: "bg-blue-400" };
 
+  const preEntry = history.filter((h) => h.t <= entryT);
+  const lowSource = preEntry.length ? preEntry : history;
+  const lowPoint = lowSource.reduce((m, h) => (h.p < m.p ? h : m), lowSource[0]!);
+
   const markers: ChartMarker[] = [
-    { t: entryT, p: entryPrice, className: "fill-blue-400" },
-    { t: endT, p: endP, className: end.fill },
+    { t: lowPoint.t, p: lowPoint.p, className: "fill-amber-400", label: "Low" },
+    { t: entryT, p: entryPrice, className: "fill-purple-400", label: "Entry" },
+    { t: endT, p: endP, className: end.fill, label: isClosed ? (isWin ? "Win" : "Loss") : "Now" },
   ];
   const hlines: ChartHLine[] = [
-    ...(recoveryLow != null ? [{ p: recoveryLow, className: "stroke-amber-400/50" }] : []),
     ...(stopNoPrice != null ? [{ p: stopNoPrice, className: "stroke-red-400/40" }] : []),
   ];
-  const vlines: ChartVLine[] = [{ t: entryT, className: "stroke-blue-400/30" }];
+  const vlines: ChartVLine[] = [{ t: entryT, className: "stroke-purple-400/30" }];
 
   const pct = (p: number) => `${(p * 100).toFixed(1)}¢`;
 
@@ -61,10 +65,8 @@ export function DipTimeline({
       <PriceChart history={history} height={84} markers={markers} hlines={hlines} vlines={vlines} />
       <ChartLegend
         items={[
-          ...(recoveryLow != null
-            ? [{ variant: "dash" as const, swatchClass: "border-amber-400/70", label: "Low", value: pct(recoveryLow) }]
-            : []),
-          { variant: "dot", swatchClass: "bg-blue-400", label: "Entry", value: pct(entryPrice) },
+          { variant: "dot", swatchClass: "bg-amber-400", label: "Low", value: pct(recoveryLow ?? lowPoint.p) },
+          { variant: "dot", swatchClass: "bg-purple-400", label: "Entry", value: pct(entryPrice) },
           ...(stopNoPrice != null
             ? [{ variant: "dash" as const, swatchClass: "border-red-400/70", label: "Stop", value: pct(stopNoPrice) }]
             : []),
