@@ -26,12 +26,11 @@ import {
   campaignAgeFraction,
   buildEntryGateMetrics,
   evaluateSyncEntryGates,
+  analyzeDipRecovery,
 } from "../utils/distribution-logic.js";
 
 // Point cap for lazily-served price-history curves (compact chart, small payload).
 const PRICE_HISTORY_POINTS = 80;
-// Context shown before entry on the dip-timeline chart.
-const PRICE_HISTORY_PRE_ENTRY_SEC = 3 * 3600;
 
 const logger = createModuleLogger("api-server");
 
@@ -574,7 +573,10 @@ export class ApiServer {
           const entrySec = trade.entryTs
             ? Math.floor(new Date(trade.entryTs).getTime() / 1000)
             : nowSec - config.strategy.entryDipLookbackHours * 3600;
-          fromSec = entrySec - PRICE_HISTORY_PRE_ENTRY_SEC;
+          // Span the SAME window the recovery analysis used (lookback before
+          // entry), so the dip the strategy saw is visible and the chart's low
+          // matches the stored recentLow.
+          fromSec = entrySec - config.strategy.entryDipLookbackHours * 3600;
           toSec = trade.exitTs
             ? Math.floor(new Date(trade.exitTs).getTime() / 1000)
             : nowSec;
@@ -605,10 +607,22 @@ export class ApiServer {
           tokenId,
           { startTs: fromSec, endTs: toSec, fidelity: 10 },
         );
+        // For a live candidate bucket there is no frozen snapshot, so the
+        // recovery low is derived here with the SAME function the scan uses.
+        // (Trades carry the authoritative recentLow in their entryGateSnapshot.)
+        const recentLow = bucketId
+          ? (analyzeDipRecovery(
+              history,
+              nowSec,
+              config.strategy.entryDipLookbackHours,
+              config.strategy.entryReboundEpsilon,
+            )?.recentLow ?? null)
+          : null;
         res.json({
           history: downsamplePriceHistory(history, PRICE_HISTORY_POINTS),
           entryTs,
           exitTs,
+          recentLow,
         });
       } catch (error) {
         logger.error({ error }, "Price history error");

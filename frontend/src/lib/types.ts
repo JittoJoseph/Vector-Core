@@ -134,6 +134,9 @@ export interface PriceHistoryResponse {
   history: PricePoint[];
   entryTs?: string | null;
   exitTs?: string | null;
+  // Authoritative recovery low for a candidate bucket (from analyzeDipRecovery).
+  // Null for trades, which carry the frozen value in entryGateSnapshot.dip.
+  recentLow?: number | null;
 }
 
 export interface StrategyBucket {
