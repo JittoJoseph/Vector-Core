@@ -122,6 +122,47 @@ export interface DipRecoveryAnalysis {
   pass: boolean;
 }
 
+/** Points at or after `nowSec - lookbackHours`, in original order. */
+export function windowPriceHistory(
+  history: Array<{ t: number; p: number }>,
+  nowSec: number,
+  lookbackHours: number,
+): Array<{ t: number; p: number }> {
+  const cutoff = nowSec - lookbackHours * 3600;
+  return history.filter((h) => h.t >= cutoff);
+}
+
+/**
+ * Caps a price series to at most maxPoints for compact display/storage while
+ * always preserving the first point, last point, and the global min/max —
+ * so a rendered sparkline never loses the recovery low or high it's meant
+ * to show, even after thinning.
+ */
+export function downsamplePriceHistory(
+  history: Array<{ t: number; p: number }>,
+  maxPoints: number,
+): Array<{ t: number; p: number }> {
+  if (history.length <= maxPoints) return history;
+
+  let minIdx = 0;
+  let maxIdx = 0;
+  for (let i = 1; i < history.length; i++) {
+    if (history[i]!.p < history[minIdx]!.p) minIdx = i;
+    if (history[i]!.p > history[maxIdx]!.p) maxIdx = i;
+  }
+  const keep = new Set([0, history.length - 1, minIdx, maxIdx]);
+  const remaining = maxPoints - keep.size;
+  if (remaining > 0) {
+    const stride = history.length / (remaining + 1);
+    for (let i = 1; i <= remaining; i++) {
+      keep.add(Math.min(history.length - 1, Math.round(i * stride)));
+    }
+  }
+  return Array.from(keep)
+    .sort((a, b) => a - b)
+    .map((i) => history[i]!);
+}
+
 export function analyzeDipRecovery(
   history: Array<{ t: number; p: number }>,
   nowSec: number,
@@ -129,8 +170,7 @@ export function analyzeDipRecovery(
   dipThreshold: number,
   reboundDelta: number,
 ): DipRecoveryAnalysis | null {
-  const cutoff = nowSec - lookbackHours * 3600;
-  const window = history.filter((h) => h.t >= cutoff);
+  const window = windowPriceHistory(history, nowSec, lookbackHours);
   if (window.length === 0) return null;
 
   let recentLow = Infinity;

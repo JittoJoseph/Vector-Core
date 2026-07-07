@@ -5,6 +5,8 @@ import {
   bucketDistanceBelowModal,
   campaignAgeFraction,
   analyzeDipRecovery,
+  windowPriceHistory,
+  downsamplePriceHistory,
   isRecoveryEntryAllowed,
   computeStopNoPrice,
   evaluateSyncEntryGates,
@@ -150,6 +152,60 @@ describe("analyzeDipRecovery", () => {
     ];
     const result = analyzeDipRecovery(history, now, 24, 0.02, 0.02);
     expect(result).toMatchObject({ recentLow: 0.95, dipped: false, pass: true });
+  });
+});
+
+describe("windowPriceHistory", () => {
+  const now = 1_000_000;
+  const history = [
+    { t: now - 30 * 3600, p: 0.7 },
+    { t: now - 20 * 3600, p: 0.8 },
+    { t: now - 1 * 3600, p: 0.95 },
+  ];
+
+  it("keeps only points at or after the cutoff", () => {
+    expect(windowPriceHistory(history, now, 24)).toEqual([
+      { t: now - 20 * 3600, p: 0.8 },
+      { t: now - 1 * 3600, p: 0.95 },
+    ]);
+  });
+
+  it("returns everything when the lookback covers the whole series", () => {
+    expect(windowPriceHistory(history, now, 48)).toEqual(history);
+  });
+});
+
+describe("downsamplePriceHistory", () => {
+  it("returns the series unchanged when under the cap", () => {
+    const short = [
+      { t: 1, p: 0.9 },
+      { t: 2, p: 0.85 },
+    ];
+    expect(downsamplePriceHistory(short, 10)).toBe(short);
+  });
+
+  it("caps the series while preserving first, last, min, and max", () => {
+    const long = Array.from({ length: 200 }, (_, i) => ({
+      t: i,
+      p: 0.9 - Math.sin(i / 10) * 0.1,
+    }));
+    const result = downsamplePriceHistory(long, 20);
+    expect(result.length).toBeLessThanOrEqual(20);
+    expect(result[0]).toEqual(long[0]);
+    expect(result[result.length - 1]).toEqual(long[long.length - 1]);
+
+    const min = long.reduce((m, h) => (h.p < m.p ? h : m), long[0]!);
+    const max = long.reduce((m, h) => (h.p > m.p ? h : m), long[0]!);
+    expect(result).toContainEqual(min);
+    expect(result).toContainEqual(max);
+  });
+
+  it("keeps points sorted by time", () => {
+    const long = Array.from({ length: 100 }, (_, i) => ({ t: i, p: i % 7 }));
+    const result = downsamplePriceHistory(long, 15);
+    for (let i = 1; i < result.length; i++) {
+      expect(result[i]!.t).toBeGreaterThan(result[i - 1]!.t);
+    }
   });
 });
 

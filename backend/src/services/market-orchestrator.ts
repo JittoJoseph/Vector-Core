@@ -43,6 +43,8 @@ import {
   bucketDistanceBelowModal,
   campaignAgeFraction,
   analyzeDipRecovery,
+  windowPriceHistory,
+  downsamplePriceHistory,
   isRecoveryEntryAllowed,
   computeStopNoPrice,
   evaluateSyncEntryGates,
@@ -50,6 +52,10 @@ import {
   type EntryGateMetrics,
   type DipRecoveryAnalysis,
 } from "../utils/distribution-logic.js";
+
+// Cap on points kept per trade for the dip-timeline chart: enough resolution
+// for a compact sparkline, small enough for a one-time jsonb write.
+const ENTRY_PRICE_HISTORY_POINTS = 48;
 
 interface TrackedBucket {
   bucketId: string;
@@ -97,6 +103,7 @@ interface Candidate {
   gateMetrics: EntryGateMetrics;
   dip: DipRecoveryAnalysis;
   ladderYes: Record<string, number>;
+  priceHistory: Array<{ t: number; p: number }>;
 }
 
 export class MarketOrchestrator extends EventEmitter {
@@ -113,6 +120,7 @@ export class MarketOrchestrator extends EventEmitter {
   private conditionIdToBucket = new Map<string, string>();
   private openPositions = new Map<string, OpenPosition>();
   private inFlightTokens: Set<string> = new Set();
+  private warnedMissingDateCampaigns = new Set<string>();
 
   private running = false;
   private paused = false;
@@ -220,6 +228,7 @@ export class MarketOrchestrator extends EventEmitter {
     this.conditionIdToBucket.clear();
     this.openPositions.clear();
     this.inFlightTokens.clear();
+    this.warnedMissingDateCampaigns.clear();
     this.wsWatcher.clear();
     this.cycleCount = 0;
     this.consecutiveLossCount = 0;
@@ -397,6 +406,10 @@ export class MarketOrchestrator extends EventEmitter {
           title: event.title ?? eventId,
           active: isActive,
           closed: isClosed,
+          // Backfill dates once Gamma exposes them; never clobber a good
+          // value with a later null (keeps the age gate working).
+          startDate: sql`COALESCE(excluded.start_date, ${schema.distributionCampaigns.startDate})`,
+          endDate: sql`COALESCE(excluded.end_date, ${schema.distributionCampaigns.endDate})`,
           lastFetchedAt: new Date(),
           updatedAt: new Date(),
         },
@@ -572,10 +585,15 @@ export class MarketOrchestrator extends EventEmitter {
       new Date(),
     );
     if (ageFraction === null) {
-      logger.warn(
-        { campaignId: campaign.id },
-        "Campaign missing start/end date; age gate passes open",
-      );
+      if (!this.warnedMissingDateCampaigns.has(campaign.id)) {
+        this.warnedMissingDateCampaigns.add(campaign.id);
+        logger.warn(
+          { campaignId: campaign.id },
+          "Campaign missing start/end date; age gate passes open until backfilled",
+        );
+      }
+    } else {
+      this.warnedMissingDateCampaigns.delete(campaign.id);
     }
     const modalMargin = modalMarginBelow(buckets, modalBucket.groupItemTitle);
     const ladderYes = ladderYesMap(buckets);
@@ -720,14 +738,20 @@ export class MarketOrchestrator extends EventEmitter {
     if (state && !this.isMarketActivelyTrading(state)) return null;
 
     let dip: DipRecoveryAnalysis | null = null;
+    let priceHistory: Array<{ t: number; p: number }> = [];
     try {
       const { history } = await this.client.getPricesHistory(bucket.noTokenId);
+      const nowSec = Date.now() / 1000;
       dip = analyzeDipRecovery(
         history,
-        Date.now() / 1000,
+        nowSec,
         config.strategy.entryDipLookbackHours,
         config.strategy.entryDipThreshold,
         config.strategy.entryReboundDelta,
+      );
+      priceHistory = downsamplePriceHistory(
+        windowPriceHistory(history, nowSec, config.strategy.entryDipLookbackHours),
+        ENTRY_PRICE_HISTORY_POINTS,
       );
     } catch (err) {
       logger.warn(
@@ -779,6 +803,7 @@ export class MarketOrchestrator extends EventEmitter {
       gateMetrics,
       dip,
       ladderYes,
+      priceHistory,
     };
   }
 
@@ -939,6 +964,7 @@ export class MarketOrchestrator extends EventEmitter {
           dip: cand.dip,
           stopNoPrice,
           ladderYes: cand.ladderYes,
+          priceHistory: cand.priceHistory,
         },
       });
 

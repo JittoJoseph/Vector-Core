@@ -54,6 +54,25 @@ export interface LiveMarketInfo {
   status: "OPEN" | "AWAITING_RESOLUTION" | "RESOLVED";
 }
 
+export interface DipRecoveryAnalysis {
+  recentLow: number;
+  lastPrice: number;
+  dipped: boolean;
+  recovered: boolean;
+  pass: boolean;
+}
+
+export interface EntryGateSnapshot {
+  campaignAgeFraction: number | null;
+  bucketDistance: number;
+  tailYesMass: number;
+  modalMargin: number;
+  dip: DipRecoveryAnalysis | null;
+  stopNoPrice?: number;
+  ladderYes?: Record<string, number>;
+  priceHistory?: Array<{ t: number; p: number }>;
+}
+
 export interface SimulatedTrade {
   id: string;
   campaignId?: string | null;
@@ -86,6 +105,8 @@ export interface SimulatedTrade {
   status: string;
   modalBucketAtEntry?: string | null;
   minNoPriceDuringPosition?: string | null;
+  stopNoPrice?: string | null;
+  entryGateSnapshot?: EntryGateSnapshot | null;
   createdAt: string;
   updatedAt: string;
 }

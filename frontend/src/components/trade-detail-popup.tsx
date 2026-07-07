@@ -5,6 +5,7 @@ import { formatPnl, pnlColor, polymarketMarketUrl, calculateTradeUnrealizedPnl }
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { ExternalLink, X } from "lucide-react";
 import NumberFlow from "@number-flow/react";
+import { DipTimeline } from "./dip-timeline";
 
 interface TradeDetailPopupProps {
   trade: SimulatedTrade | null;
@@ -42,6 +43,14 @@ export function TradeDetailPopup({
 
   const returnPct = actualCost > 0 ? (pnl / actualCost) * 100 : 0;
   const exitReason = trade.exitReason;
+
+  const snap = trade.entryGateSnapshot ?? null;
+  const stopNoPrice = trade.stopNoPrice ? parseFloat(trade.stopNoPrice) : null;
+  const minPrice = trade.minNoPriceDuringPosition
+    ? parseFloat(trade.minNoPriceDuringPosition)
+    : null;
+  const recentLow = snap?.dip?.recentLow ?? null;
+  const aboveLow = recentLow != null ? entryPrice - recentLow : null;
 
   const statusBadgeCls = !isClosed
     ? "text-blue-400 border-blue-400/25 bg-blue-400/5"
@@ -152,14 +161,87 @@ export function TradeDetailPopup({
                   ) : "—"
                 } 
               />
-              {trade.minNoPriceDuringPosition && (
-                <Cell 
-                  label="MIN PRICE (DURING POS)" 
-                  value={`${(parseFloat(trade.minNoPriceDuringPosition) * 100).toFixed(1)}¢`} 
-                />
-              )}
             </Row2>
           </Section>
+
+          {/* ── DIP TIMELINE ── */}
+          {snap?.priceHistory && snap.priceHistory.length >= 2 && (
+            <Section title="DIP TIMELINE">
+              <DipTimeline
+                history={snap.priceHistory}
+                entryTs={trade.entryTs}
+                entryPrice={entryPrice}
+                recoveryLow={recentLow}
+                stopNoPrice={stopNoPrice}
+                exitTs={isClosed ? trade.exitTs : null}
+                exitPrice={isClosed ? exitPrice : null}
+                isWin={isWin}
+              />
+            </Section>
+          )}
+
+          {/* ── RECOVERY / RISK ── */}
+          {(snap || stopNoPrice !== null || minPrice !== null) && (
+            <Section title="RECOVERY / RISK">
+              <div className="px-4 pt-1 pb-3 space-y-2">
+                {(recentLow !== null || aboveLow !== null || snap?.dip) && (
+                  <StatGroup label="RECOVERY">
+                    <Stat
+                      label="LOW"
+                      value={recentLow !== null ? `${(recentLow * 100).toFixed(1)}¢` : "—"}
+                      tone="warning"
+                      emphasis
+                    />
+                    <Stat
+                      label="ABOVE LOW"
+                      value={aboveLow !== null ? signedCents(aboveLow) : "—"}
+                      tone={aboveLow !== null && aboveLow < 0 ? "negative" : "positive"}
+                      emphasis
+                    />
+                    <Stat
+                      label="DIP"
+                      value={snap?.dip ? (snap.dip.dipped ? "Yes" : "No") : "—"}
+                      tone="muted"
+                    />
+                  </StatGroup>
+                )}
+
+                {(stopNoPrice !== null || minPrice !== null) && (
+                  <StatGroup label="RISK">
+                    <Stat
+                      label="STOP"
+                      value={stopNoPrice !== null ? `${(stopNoPrice * 100).toFixed(1)}¢` : "—"}
+                      tone="negative"
+                      emphasis
+                    />
+                    <Stat
+                      label="STOP DIST"
+                      value={stopNoPrice !== null ? signedCents(stopNoPrice - entryPrice) : "—"}
+                      tone="muted"
+                    />
+                    <Stat
+                      label="MIN HELD"
+                      value={minPrice !== null ? `${(minPrice * 100).toFixed(1)}¢` : "—"}
+                      tone="muted"
+                    />
+                  </StatGroup>
+                )}
+
+                {snap && (
+                  <StatGroup label="LADDER">
+                    <Stat label="TAIL MASS" value={`${(snap.tailYesMass * 100).toFixed(1)}%`} tone="muted" />
+                    <Stat label="MODAL MARGIN" value={`${(snap.modalMargin * 100).toFixed(1)}¢`} tone="muted" />
+                    <Stat label="DIST MODAL" value={`${snap.bucketDistance} bkt`} tone="muted" />
+                    <Stat
+                      label="AGE"
+                      value={snap.campaignAgeFraction != null ? `${(snap.campaignAgeFraction * 100).toFixed(0)}%` : "—"}
+                      tone="muted"
+                    />
+                  </StatGroup>
+                )}
+              </div>
+            </Section>
+          )}
 
 
           {/* ── RESOLUTION & RESULT (only if settled) ── */}
@@ -233,6 +315,52 @@ function Row2({ children }: { children: React.ReactNode }) {
   );
 }
 
+function StatGroup({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex items-start gap-2.5">
+      <span className="w-14 shrink-0 pt-0.5 text-[8px] font-mono font-bold uppercase tracking-[0.15em] text-muted-foreground/25">
+        {label}
+      </span>
+      <div className="flex-1 grid grid-cols-3 sm:grid-cols-4 gap-x-3 gap-y-1.5 min-w-0">
+        {children}
+      </div>
+    </div>
+  );
+}
+
+const STAT_TONE_CLS = {
+  default: "text-foreground/85",
+  positive: "text-emerald-400",
+  negative: "text-red-400",
+  warning: "text-amber-400",
+  muted: "text-muted-foreground/70",
+} as const;
+
+function Stat({
+  label,
+  value,
+  tone = "default",
+  emphasis = false,
+}: {
+  label: string;
+  value: React.ReactNode;
+  tone?: keyof typeof STAT_TONE_CLS;
+  emphasis?: boolean;
+}) {
+  return (
+    <div className="flex flex-col gap-0.5 min-w-0">
+      <span className="text-[8.5px] font-mono uppercase tracking-wide text-muted-foreground/40 truncate">
+        {label}
+      </span>
+      <span
+        className={`font-mono tabular-nums leading-none ${emphasis ? "text-[13px] font-bold" : "text-[11px] font-semibold"} ${STAT_TONE_CLS[tone]}`}
+      >
+        {value}
+      </span>
+    </div>
+  );
+}
+
 function Cell({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div className="px-4 py-2.5 flex flex-col gap-0.5">
@@ -247,6 +375,11 @@ function Cell({ label, value }: { label: string; value: React.ReactNode }) {
 }
 
 /* ─────────────── Formatters ─────────────── */
+
+function signedCents(delta: number): string {
+  const c = delta * 100;
+  return `${c >= 0 ? "+" : ""}${c.toFixed(1)}¢`;
+}
 
 function formatTs(iso: string): string {
   return new Date(iso).toLocaleString("en-US", {
