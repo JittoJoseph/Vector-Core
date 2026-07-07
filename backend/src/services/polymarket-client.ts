@@ -167,17 +167,25 @@ export class PolymarketClient {
     opts: {
       interval?: "1h" | "6h" | "1d" | "1w" | "max";
       fidelity?: number;
+      startTs?: number;
+      endTs?: number;
     } = {},
   ): Promise<PricesHistoryResponse> {
     return withRetry(
       async () => {
-        const response = await this.clobApi.get("/prices-history", {
-          params: {
-            market: tokenId,
-            interval: opts.interval ?? "1d",
-            fidelity: opts.fidelity ?? 10,
-          },
-        });
+        // startTs/endTs and interval are mutually exclusive on the CLOB API;
+        // an explicit range wins when provided.
+        const params: Record<string, string | number> = {
+          market: tokenId,
+          fidelity: opts.fidelity ?? 10,
+        };
+        if (opts.startTs != null && opts.endTs != null) {
+          params.startTs = Math.floor(opts.startTs);
+          params.endTs = Math.floor(opts.endTs);
+        } else {
+          params.interval = opts.interval ?? "1d";
+        }
+        const response = await this.clobApi.get("/prices-history", { params });
         return PricesHistoryResponseSchema.parse(response.data);
       },
       { maxRetries: 2, retryOn: isRateLimitError },

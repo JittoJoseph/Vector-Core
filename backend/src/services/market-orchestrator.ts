@@ -39,13 +39,10 @@ import {
   findModalBucket,
   isCandidateBucket,
   isRelevantBucket,
-  cumulativeYesMassBelow,
   modalMarginBelow,
-  bucketDistanceBelowModal,
+  buildEntryGateMetrics,
   campaignAgeFraction,
   analyzeDipRecovery,
-  windowPriceHistory,
-  downsamplePriceHistory,
   isRecoveryEntryAllowed,
   computeStopNoPrice,
   evaluateSyncEntryGates,
@@ -56,7 +53,6 @@ import {
 
 // Cap on points kept per trade for the dip-timeline chart: enough resolution
 // for a compact sparkline, small enough for a one-time jsonb write.
-const ENTRY_PRICE_HISTORY_POINTS = 48;
 
 interface TrackedBucket {
   bucketId: string;
@@ -104,7 +100,34 @@ interface Candidate {
   gateMetrics: EntryGateMetrics;
   dip: DipRecoveryAnalysis;
   ladderYes: Record<string, number>;
-  priceHistory: Array<{ t: number; p: number }>;
+}
+
+// Why an in-band candidate did not become a position, grouped for the
+// dashboard "decision flow" view. "band" = candidate priced outside the entry
+// band; age/tail/margin = ladder gates; recovery = the dip-recovery gate;
+// other = live-book/budget/size/profit filters.
+type RejectionReason = "band" | "age" | "tail" | "margin" | "recovery" | "other";
+
+interface ScanTelemetry {
+  scanAt: number | null;
+  candidates: number; // candidate buckets considered
+  inBand: number; // candidates priced within the entry band
+  entered: number; // positions actually opened this scan
+  rejected: Record<RejectionReason, number>;
+}
+
+function emptyRejected(): Record<RejectionReason, number> {
+  return { band: 0, age: 0, tail: 0, margin: 0, recovery: 0, other: 0 };
+}
+
+function emptyScanTelemetry(): ScanTelemetry {
+  return {
+    scanAt: null,
+    candidates: 0,
+    inBand: 0,
+    entered: 0,
+    rejected: emptyRejected(),
+  };
 }
 
 export class MarketOrchestrator extends EventEmitter {
@@ -137,9 +160,11 @@ export class MarketOrchestrator extends EventEmitter {
       candidateCount: number;
       trackedCount: number;
       positionCount: number;
-      gateRejectedCount: number;
+      inBand: number;
+      rejected: Record<RejectionReason, number>;
     }
   >();
+  private lastScanTelemetry: ScanTelemetry = emptyScanTelemetry();
 
   async start(): Promise<void> {
     if (this.running) return;
@@ -268,6 +293,7 @@ export class MarketOrchestrator extends EventEmitter {
         pausedByRiskGuard: this.pausedByRiskGuard,
       },
       polymarketStatus: executionPolicy.getStatus(),
+      lastScan: this.lastScanTelemetry,
     };
   }
 
@@ -299,7 +325,8 @@ export class MarketOrchestrator extends EventEmitter {
         candidateCount: 0,
         trackedCount: 0,
         positionCount: 0,
-        gateRejectedCount: 0,
+        inBand: 0,
+        rejected: emptyRejected(),
       }
     );
   }
@@ -505,6 +532,10 @@ export class MarketOrchestrator extends EventEmitter {
     if (this.paused || this.isEvaluating) return;
     this.isEvaluating = true;
     this.cycleCount++;
+    // Fresh per-scan decision funnel; accumulated across campaigns below and
+    // when entries actually execute. Scans never overlap (isEvaluating guard).
+    this.lastScanTelemetry = emptyScanTelemetry();
+    this.lastScanTelemetry.scanAt = Date.now();
 
     try {
       const result = await this.findCandidateOpportunities();
@@ -600,23 +631,28 @@ export class MarketOrchestrator extends EventEmitter {
     const ladderYes = ladderYesMap(buckets);
     const gateConfig = {
       minCampaignAgeFraction: config.strategy.entryMinCampaignAgeFraction,
-      minBucketDistance: config.strategy.entryMinBucketDistance,
       maxTailYesMass: config.strategy.entryMaxTailYesMass,
       minModalMargin: config.strategy.entryMinModalMargin,
     };
 
     const candidates: Candidate[] = [];
+    const scan = this.lastScanTelemetry;
     const counts = {
       candidateCount: 0,
       trackedCount: 0,
       positionCount: 0,
-      gateRejectedCount: 0,
-      inBandCount: 0,
+      inBand: 0,
+      rejected: emptyRejected(),
+    };
+    const reject = (reason: RejectionReason) => {
+      counts.rejected[reason]++;
+      scan.rejected[reason]++;
     };
 
     for (const bucket of buckets) {
       if (!isCandidateBucket(bucket.groupItemTitle, modalMin)) continue;
       counts.candidateCount++;
+      scan.candidates++;
 
       const noPrice = parseFloat(bucket.noPrice?.toString() ?? "1");
       const hasPosition = positionedBucketIds.has(bucket.id);
@@ -636,27 +672,28 @@ export class MarketOrchestrator extends EventEmitter {
         requiredTokens.add(bucket.yesTokenId);
       }
 
+      if (hasPosition || this.inFlightTokens.has(bucket.noTokenId)) continue;
+
       if (
         noPrice < config.strategy.minNoEntryPrice ||
         noPrice > config.strategy.maxNoEntryPrice
-      )
+      ) {
+        reject("band");
         continue;
-      if (hasPosition || this.inFlightTokens.has(bucket.noTokenId)) continue;
-      counts.inBandCount++;
+      }
+      counts.inBand++;
+      scan.inBand++;
 
-      const gateMetrics: EntryGateMetrics = {
-        campaignAgeFraction: ageFraction,
-        bucketDistance: bucketDistanceBelowModal(
-          buckets,
-          bucket.groupItemTitle,
-          modalBucket.groupItemTitle,
-        ),
-        tailYesMass: cumulativeYesMassBelow(buckets, bucket.groupItemTitle),
+      const gateMetrics = buildEntryGateMetrics(
+        buckets,
+        bucket.groupItemTitle,
+        modalBucket.groupItemTitle,
+        ageFraction,
         modalMargin,
-      };
+      );
       const gate = evaluateSyncEntryGates(gateMetrics, gateConfig);
       if (!gate.pass) {
-        counts.gateRejectedCount++;
+        reject(gate.failed[0] as RejectionReason);
         logger.debug(
           {
             campaignId: campaign.id,
@@ -676,26 +713,27 @@ export class MarketOrchestrator extends EventEmitter {
         gateMetrics,
         ladderYes,
       );
-      if (result === "TRAJECTORY_REJECTED") {
-        counts.gateRejectedCount++;
+      if ("reject" in result) {
+        reject(result.reject);
         continue;
       }
-      if (result) candidates.push(result);
+      candidates.push(result);
     }
 
     this.activeCampaignMetrics.set(campaign.id, {
       candidateCount: counts.candidateCount,
       trackedCount: counts.trackedCount,
       positionCount: counts.positionCount,
-      gateRejectedCount: counts.gateRejectedCount,
+      inBand: counts.inBand,
+      rejected: counts.rejected,
     });
 
-    if (counts.inBandCount > 0) {
+    if (counts.inBand > 0) {
       logger.info(
         {
           campaignId: campaign.id,
-          band: counts.inBandCount,
-          gateRejected: counts.gateRejectedCount,
+          inBand: counts.inBand,
+          rejected: counts.rejected,
           candidates: candidates.length,
         },
         "Entry gate scan summary",
@@ -706,11 +744,11 @@ export class MarketOrchestrator extends EventEmitter {
   }
 
   /**
-   * Final, non-free entry stages for a bucket that already passed the
-   * ladder gates: live orderbook band check, budget, trajectory gate
-   * (fail-closed), and execution simulation. Returns "TRAJECTORY_REJECTED"
-   * when the dip-recovery gate blocks so the caller can count it as a
-   * gate rejection; null for ordinary filtering.
+   * Final, non-free entry stages for a bucket that already passed the ladder
+   * gates: live orderbook band check, budget, dip-recovery gate (fail-closed),
+   * and execution simulation. Returns the built Candidate, or a rejection tag
+   * classifying why it did not qualify ("recovery" for the dip-recovery gate,
+   * "other" for live-book/budget/size/profit filters).
    */
   private async buildEntryCandidate(
     campaign: CampaignRow,
@@ -718,7 +756,7 @@ export class MarketOrchestrator extends EventEmitter {
     modalBucketTitle: string,
     gateMetrics: EntryGateMetrics,
     ladderYes: Record<string, number>,
-  ): Promise<Candidate | "TRAJECTORY_REJECTED" | null> {
+  ): Promise<Candidate | { reject: RejectionReason }> {
     const config = getConfig();
 
     const { data: book } = await this.client.getOrderbook(bucket.noTokenId);
@@ -728,31 +766,24 @@ export class MarketOrchestrator extends EventEmitter {
       top.bestAsk < config.strategy.minNoEntryPrice ||
       top.bestAsk > config.strategy.maxNoEntryPrice
     )
-      return null;
+      return { reject: "other" };
 
     const budget = this.portfolioManager.computePositionBudget(
       this.computeOpenPositionsValue(),
     );
-    if (budget <= 0) return null;
+    if (budget <= 0) return { reject: "other" };
 
     const state = this.trackedBuckets.get(bucket.id);
-    if (state && !this.isMarketActivelyTrading(state)) return null;
+    if (state && !this.isMarketActivelyTrading(state)) return { reject: "other" };
 
     let dip: DipRecoveryAnalysis | null = null;
-    let priceHistory: Array<{ t: number; p: number }> = [];
     try {
       const { history } = await this.client.getPricesHistory(bucket.noTokenId);
-      const nowSec = Date.now() / 1000;
       dip = analyzeDipRecovery(
         history,
-        nowSec,
+        Date.now() / 1000,
         config.strategy.entryDipLookbackHours,
-        config.strategy.entryDipThreshold,
-        config.strategy.entryReboundDelta,
-      );
-      priceHistory = downsamplePriceHistory(
-        windowPriceHistory(history, nowSec, config.strategy.entryDipLookbackHours),
-        ENTRY_PRICE_HISTORY_POINTS,
+        config.strategy.entryReboundEpsilon,
       );
     } catch (err) {
       logger.warn(
@@ -762,10 +793,10 @@ export class MarketOrchestrator extends EventEmitter {
     }
     // Recovery gate is primary: fail closed when we have no history, and below
     // the high-confidence band demand a convincing recovery to justify the risk.
-    if (!dip) return "TRAJECTORY_REJECTED";
+    if (!dip) return { reject: "recovery" };
     const recovery = isRecoveryEntryAllowed(dip, top.bestAsk, {
       highConfidenceNoPrice: config.strategy.entryHighConfidenceNoPrice,
-      minReboundFromLow: config.strategy.entryMinReboundFromLow,
+      reboundEpsilon: config.strategy.entryReboundEpsilon,
     });
     if (!recovery.pass) {
       logger.debug(
@@ -777,7 +808,7 @@ export class MarketOrchestrator extends EventEmitter {
         },
         "Recovery gate rejected candidate",
       );
-      return "TRAJECTORY_REJECTED";
+      return { reject: "recovery" };
     }
 
     const execResult = simulateLimitBuy(
@@ -786,10 +817,11 @@ export class MarketOrchestrator extends EventEmitter {
       config.strategy.maxNoEntryPrice,
       state?.feeSchedule ?? null,
     );
-    if (execResult.totalCost < 5) return null;
+    if (execResult.totalCost < 5) return { reject: "other" };
 
     const expectedNetProfit = execResult.totalShares - execResult.netCost;
-    if (expectedNetProfit < config.strategy.minExpectedNetProfit) return null;
+    if (expectedNetProfit < config.strategy.minExpectedNetProfit)
+      return { reject: "other" };
 
     return {
       bucket,
@@ -804,7 +836,6 @@ export class MarketOrchestrator extends EventEmitter {
       gateMetrics,
       dip,
       ladderYes,
-      priceHistory,
     };
   }
 
@@ -965,7 +996,6 @@ export class MarketOrchestrator extends EventEmitter {
           dip: cand.dip,
           stopNoPrice,
           ladderYes: cand.ladderYes,
-          priceHistory: cand.priceHistory,
         },
       });
 
@@ -995,6 +1025,7 @@ export class MarketOrchestrator extends EventEmitter {
           },
           "Taker entry executed",
         );
+        this.lastScanTelemetry.entered++;
         this.emit("tradeOpened", { trade });
         notifyDiscordEntry({
           campaignTitle: cand.campaign.title,

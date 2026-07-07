@@ -49,17 +49,14 @@ interface SimTrade {
 
 interface GateConfig {
   minCampaignAgeFraction: number;
-  minBucketDistance: number;
   maxTailYesMass: number;
   minModalMargin: number;
   dipLookbackHours: number;
-  dipThreshold: number;
-  reboundDelta: number;
   highConfidenceNoPrice: number;
-  minReboundFromLow: number;
+  reboundEpsilon: number;
   stopBufferBelowLow: number;
   stopAbsoluteFloor: number;
-  disabled?: string; // gate key to ablate: age|distance|tail|margin|trajectory
+  disabled?: string; // gate key to ablate: age|tail|margin|trajectory
 }
 
 function yesAt(series: BucketSeries, t: number): number | null {
@@ -150,8 +147,7 @@ function replayCampaign(
         noHistory,
         t,
         gates.dipLookbackHours,
-        gates.dipThreshold,
-        gates.reboundDelta,
+        gates.reboundEpsilon,
       );
       if (!dip) continue;
       if (gates.disabled !== "trajectory") {
@@ -234,14 +230,11 @@ async function main(): Promise<void> {
 
   const gateCfg: Omit<GateConfig, "disabled"> = {
     minCampaignAgeFraction: config.strategy.entryMinCampaignAgeFraction,
-    minBucketDistance: config.strategy.entryMinBucketDistance,
     maxTailYesMass: config.strategy.entryMaxTailYesMass,
     minModalMargin: config.strategy.entryMinModalMargin,
     dipLookbackHours: config.strategy.entryDipLookbackHours,
-    dipThreshold: config.strategy.entryDipThreshold,
-    reboundDelta: config.strategy.entryReboundDelta,
     highConfidenceNoPrice: config.strategy.entryHighConfidenceNoPrice,
-    minReboundFromLow: config.strategy.entryMinReboundFromLow,
+    reboundEpsilon: config.strategy.entryReboundEpsilon,
     stopBufferBelowLow: config.strategy.stopLossBufferBelowLow,
     stopAbsoluteFloor: config.strategy.stopLossAbsoluteFloor,
   };
@@ -253,7 +246,6 @@ async function main(): Promise<void> {
   const variants: Array<{ label: string; disabled?: string }> = [
     { label: "all gates" },
     { label: "ablate: age", disabled: "age" },
-    { label: "ablate: distance", disabled: "distance" },
     { label: "ablate: tail", disabled: "tail" },
     { label: "ablate: margin", disabled: "margin" },
     { label: "ablate: trajectory", disabled: "trajectory" },
