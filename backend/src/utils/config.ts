@@ -57,17 +57,15 @@ export function loadConfig(): Config {
       stopLossAbsoluteFloor: envNum("STOP_LOSS_ABSOLUTE_FLOOR", 0.6),
 
       entryMinCampaignAgeFraction: envNum("ENTRY_MIN_CAMPAIGN_AGE_FRACTION", 0.3),
-      entryMinBucketDistance: envNum("ENTRY_MIN_BUCKET_DISTANCE", 1),
       // Secondary sanity bounds (mass strictly below candidate; modal stability).
       entryMaxTailYesMass: envNum("ENTRY_MAX_TAIL_YES_MASS", 0.25),
       entryMinModalMargin: envNum("ENTRY_MIN_MODAL_MARGIN", 0.05),
       entryDipLookbackHours: envNum("ENTRY_DIP_LOOKBACK_HOURS", 24),
-      entryDipThreshold: envNum("ENTRY_DIP_THRESHOLD", 0.02),
-      entryReboundDelta: envNum("ENTRY_REBOUND_DELTA", 0.02),
-      // Recovery gate: at/above high-confidence, a stable price is enough;
-      // below it, entry must sit this far above the recovery low.
+      // Recovery gate: at/above high-confidence a stable price is enough; below
+      // it, entry must sit at least one rebound-epsilon above the recovery low.
+      // The same epsilon defines what counts as a dip and as a recovery.
       entryHighConfidenceNoPrice: envNum("ENTRY_HIGH_CONFIDENCE_NO_PRICE", 0.9),
-      entryMinReboundFromLow: envNum("ENTRY_MIN_REBOUND_FROM_LOW", 0.03),
+      entryReboundEpsilon: envNum("ENTRY_REBOUND_EPSILON", 0.03),
     },
     admin: {
       password: env("ADMIN_PASSWORD", isTest ? "test-admin" : undefined),

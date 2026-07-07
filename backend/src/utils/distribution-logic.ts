@@ -163,12 +163,16 @@ export function downsamplePriceHistory(
     .map((i) => history[i]!);
 }
 
+/**
+ * `reboundEpsilon` is the single "meaningful move around the recovery low"
+ * scale: a drop of at least epsilon counts as a dip, and a rise of at least
+ * epsilon back off the low counts as a recovery.
+ */
 export function analyzeDipRecovery(
   history: Array<{ t: number; p: number }>,
   nowSec: number,
   lookbackHours: number,
-  dipThreshold: number,
-  reboundDelta: number,
+  reboundEpsilon: number,
 ): DipRecoveryAnalysis | null {
   const window = windowPriceHistory(history, nowSec, lookbackHours);
   if (window.length === 0) return null;
@@ -180,8 +184,8 @@ export function analyzeDipRecovery(
     if (h.p > recentHigh) recentHigh = h.p;
   }
   const lastPrice = window[window.length - 1]!.p;
-  const dipped = recentHigh - recentLow >= dipThreshold;
-  const recovered = lastPrice >= recentLow + reboundDelta;
+  const dipped = recentHigh - recentLow >= reboundEpsilon;
+  const recovered = lastPrice >= recentLow + reboundEpsilon;
   return { recentLow, lastPrice, dipped, recovered, pass: !dipped || recovered };
 }
 
@@ -189,24 +193,22 @@ export function analyzeDipRecovery(
  * Primary entry decision for the recovery strategy. High-confidence prices
  * (a stable or fully-recovered NO near the top of the band) may enter on the
  * lenient dip-recovery pass. Below that threshold we are taking real loss risk,
- * so we demand a convincing recovery: an actual dip, a confirmed rebound, and
- * an entry price sitting clearly above the recovery low (not still hugging it).
+ * so we demand the entry sit at least one rebound-epsilon above the recovery
+ * low — which already implies a real dip happened (a flat low price leaves no
+ * room above it) and that price has turned back up, not still hugging the low.
  */
 export function isRecoveryEntryAllowed(
   analysis: DipRecoveryAnalysis,
   entryPrice: number,
-  cfg: { highConfidenceNoPrice: number; minReboundFromLow: number },
+  cfg: { highConfidenceNoPrice: number; reboundEpsilon: number },
 ): { pass: boolean; reason: string | null } {
   if (entryPrice >= cfg.highConfidenceNoPrice) {
     return analysis.pass
       ? { pass: true, reason: null }
       : { pass: false, reason: "highband-unrecovered" };
   }
-  if (!analysis.dipped) return { pass: false, reason: "lowband-no-dip" };
-  if (!analysis.recovered)
-    return { pass: false, reason: "lowband-not-recovered" };
-  if (entryPrice < analysis.recentLow + cfg.minReboundFromLow)
-    return { pass: false, reason: "lowband-too-close-to-low" };
+  if (entryPrice < analysis.recentLow + cfg.reboundEpsilon)
+    return { pass: false, reason: "lowband-no-recovery" };
   return { pass: true, reason: null };
 }
 
@@ -225,16 +227,34 @@ export function computeStopNoPrice(
 
 export interface EntryGateMetrics {
   campaignAgeFraction: number | null;
+  // Retained for display/analysis only; no longer a gate (was a no-op at the
+  // default distance of 1, which candidate selection already guarantees).
   bucketDistance: number;
   tailYesMass: number;
   modalMargin: number;
+}
+
+/** Builds the ladder-gate metric tuple for a candidate bucket (one definition,
+ * shared by the scan loop and the strategy view). */
+export function buildEntryGateMetrics(
+  buckets: Array<{ groupItemTitle: string; yesPrice?: any }>,
+  candidateTitle: string,
+  modalTitle: string,
+  ageFraction: number | null,
+  modalMargin: number,
+): EntryGateMetrics {
+  return {
+    campaignAgeFraction: ageFraction,
+    bucketDistance: bucketDistanceBelowModal(buckets, candidateTitle, modalTitle),
+    tailYesMass: cumulativeYesMassBelow(buckets, candidateTitle),
+    modalMargin,
+  };
 }
 
 export function evaluateSyncEntryGates(
   metrics: EntryGateMetrics,
   cfg: {
     minCampaignAgeFraction: number;
-    minBucketDistance: number;
     maxTailYesMass: number;
     minModalMargin: number;
   },
@@ -246,7 +266,6 @@ export function evaluateSyncEntryGates(
     metrics.campaignAgeFraction < cfg.minCampaignAgeFraction
   )
     failed.push("age");
-  if (metrics.bucketDistance < cfg.minBucketDistance) failed.push("distance");
   if (metrics.tailYesMass > cfg.maxTailYesMass) failed.push("tail");
   if (metrics.modalMargin < cfg.minModalMargin) failed.push("margin");
   return { pass: failed.length === 0, failed };

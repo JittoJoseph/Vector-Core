@@ -112,36 +112,35 @@ describe("analyzeDipRecovery", () => {
     prices.map((p, i) => ({ t: now - (prices.length - 1 - i) * 600, p }));
 
   it("passes a flat series (no meaningful dip)", () => {
-    const result = analyzeDipRecovery(series([0.95, 0.95, 0.951]), now, 24, 0.02, 0.02);
+    const result = analyzeDipRecovery(series([0.95, 0.95, 0.951]), now, 24, 0.03);
     expect(result).toMatchObject({ dipped: false, pass: true });
   });
 
   it("fails mid-fall (dipped, not recovered)", () => {
-    const result = analyzeDipRecovery(series([0.95, 0.92, 0.89]), now, 24, 0.02, 0.02);
+    const result = analyzeDipRecovery(series([0.95, 0.92, 0.89]), now, 24, 0.03);
     expect(result).toMatchObject({ dipped: true, recovered: false, pass: false });
   });
 
   it("passes a V-shape recovery", () => {
     const result = analyzeDipRecovery(
-      series([0.95, 0.9, 0.88, 0.9, 0.92]),
+      series([0.95, 0.9, 0.87, 0.9, 0.92]),
       now,
       24,
-      0.02,
-      0.02,
+      0.03,
     );
     expect(result).toMatchObject({
       dipped: true,
       recovered: true,
       pass: true,
-      recentLow: 0.88,
+      recentLow: 0.87,
       lastPrice: 0.92,
     });
   });
 
   it("returns null on empty or fully-stale history", () => {
-    expect(analyzeDipRecovery([], now, 24, 0.02, 0.02)).toBeNull();
+    expect(analyzeDipRecovery([], now, 24, 0.03)).toBeNull();
     const stale = [{ t: now - 48 * 3600, p: 0.9 }];
-    expect(analyzeDipRecovery(stale, now, 24, 0.02, 0.02)).toBeNull();
+    expect(analyzeDipRecovery(stale, now, 24, 0.03)).toBeNull();
   });
 
   it("ignores points outside the lookback window", () => {
@@ -150,7 +149,7 @@ describe("analyzeDipRecovery", () => {
       { t: now - 3600, p: 0.95 },
       { t: now - 600, p: 0.95 },
     ];
-    const result = analyzeDipRecovery(history, now, 24, 0.02, 0.02);
+    const result = analyzeDipRecovery(history, now, 24, 0.03);
     expect(result).toMatchObject({ recentLow: 0.95, dipped: false, pass: true });
   });
 });
@@ -210,7 +209,7 @@ describe("downsamplePriceHistory", () => {
 });
 
 describe("isRecoveryEntryAllowed", () => {
-  const cfg = { highConfidenceNoPrice: 0.9, minReboundFromLow: 0.03 };
+  const cfg = { highConfidenceNoPrice: 0.9, reboundEpsilon: 0.03 };
   const analysis = (
     over: Partial<Parameters<typeof isRecoveryEntryAllowed>[0]>,
   ) => ({
@@ -232,22 +231,15 @@ describe("isRecoveryEntryAllowed", () => {
   });
 
   it("admits a convincing low-band recovery", () => {
-    // entry 0.80, low 0.75 → 5¢ above low, over the 3¢ minimum.
+    // entry 0.80, low 0.75 → 5¢ above low, over the 3¢ epsilon.
     expect(isRecoveryEntryAllowed(analysis({}), 0.8, cfg).pass).toBe(true);
   });
 
-  it("rejects a flat low bucket with no dip", () => {
-    const res = isRecoveryEntryAllowed(analysis({ dipped: false }), 0.8, cfg);
-    expect(res).toMatchObject({ pass: false, reason: "lowband-no-dip" });
-  });
-
   it("rejects a low entry still hugging the recovery low", () => {
-    // entry 0.76, low 0.75 → only 1¢ above, under the 3¢ minimum.
+    // entry 0.76, low 0.75 → only 1¢ above, under the 3¢ epsilon.
+    // A flat low bucket lands here too: recentLow ≈ entry ⇒ no room above.
     const res = isRecoveryEntryAllowed(analysis({}), 0.76, cfg);
-    expect(res).toMatchObject({
-      pass: false,
-      reason: "lowband-too-close-to-low",
-    });
+    expect(res).toMatchObject({ pass: false, reason: "lowband-no-recovery" });
   });
 });
 
@@ -264,7 +256,6 @@ describe("computeStopNoPrice", () => {
 describe("evaluateSyncEntryGates", () => {
   const cfg = {
     minCampaignAgeFraction: 0.3,
-    minBucketDistance: 1,
     maxTailYesMass: 0.25,
     minModalMargin: 0.05,
   };
@@ -287,9 +278,6 @@ describe("evaluateSyncEntryGates", () => {
       evaluateSyncEntryGates({ ...passing, campaignAgeFraction: 0.1 }, cfg)
         .failed,
     ).toEqual(["age"]);
-    expect(
-      evaluateSyncEntryGates({ ...passing, bucketDistance: 0 }, cfg).failed,
-    ).toEqual(["distance"]);
     expect(
       evaluateSyncEntryGates({ ...passing, tailYesMass: 0.3 }, cfg).failed,
     ).toEqual(["tail"]);

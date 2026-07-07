@@ -31,14 +31,11 @@ export const ConfigSchema = z.object({
     stopLossAbsoluteFloor: z.number().min(0).max(1),
 
     entryMinCampaignAgeFraction: z.number().min(0).max(1),
-    entryMinBucketDistance: z.number().int().min(1),
     entryMaxTailYesMass: z.number().min(0).max(1),
     entryMinModalMargin: z.number().min(0).max(1),
     entryDipLookbackHours: z.number().positive(),
-    entryDipThreshold: z.number().min(0).max(1),
-    entryReboundDelta: z.number().min(0).max(1),
     entryHighConfidenceNoPrice: z.number().min(0).max(1),
-    entryMinReboundFromLow: z.number().min(0).max(1),
+    entryReboundEpsilon: z.number().min(0).max(1),
   }),
   admin: z.object({
     password: z.string().min(1),
