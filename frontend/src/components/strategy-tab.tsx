@@ -184,6 +184,9 @@ function CampaignRow({ campaign }: { campaign: StrategyCampaign }) {
                 className={`flex items-center gap-1.5 px-2 py-1 rounded border text-[10px] font-mono transition-colors cursor-pointer hover:brightness-125 ${STATUS_COLOR[b.status]} ${isOpen ? "ring-1 ring-foreground/40" : ""}`}
                 title={b.status}
               >
+                {b.status === "held" && (
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.5)]" />
+                )}
                 <span className="font-semibold">{b.groupItemTitle}</span>
                 {b.noPrice && (
                   <span className="opacity-70 tabular-nums">
