@@ -11,23 +11,56 @@ import { getConfig } from "../utils/config.js";
 import { getDb, getPortfolio, wipeAndResetPortfolio } from "../db/client.js";
 import * as schema from "../db/schema.js";
 import { getMarketOrchestrator } from "./market-orchestrator.js";
+import { getPolymarketClient } from "./polymarket-client.js";
 import {
   calculatePortfolioPerformance,
   type TimePeriod,
 } from "./performance-calculator.js";
 import {
-  calculateExpectedNetProfit,
-  calculateLossAmount,
-  calculateWinProfit,
-} from "./execution-simulator.js";
-import {
   parseBucketMinMax,
   findModalBucket,
   isCandidateBucket,
   isRelevantBucket,
+  downsamplePriceHistory,
+  modalMarginBelow,
+  campaignAgeFraction,
+  buildEntryGateMetrics,
+  evaluateSyncEntryGates,
 } from "../utils/distribution-logic.js";
 
+// Point cap for lazily-served price-history curves (compact chart, small payload).
+const PRICE_HISTORY_POINTS = 80;
+// Context shown before entry on the dip-timeline chart.
+const PRICE_HISTORY_PRE_ENTRY_SEC = 3 * 3600;
+
 const logger = createModuleLogger("api-server");
+
+// Single source of truth for the system-state payload shared by the /api/stats
+// route and the WebSocket broadcast.
+function buildSystemState() {
+  const orchestrator = getMarketOrchestrator();
+  const config = getConfig();
+  const pm = orchestrator.portfolioManager;
+  return {
+    orchestrator: orchestrator.getStats(),
+    config: {
+      minNoEntryPrice: config.strategy.minNoEntryPrice,
+      maxNoEntryPrice: config.strategy.maxNoEntryPrice,
+      minExpectedNetProfit: config.strategy.minExpectedNetProfit,
+      startingCapital: config.portfolio.startingCapital,
+      maxPositions: config.strategy.maxSimultaneousPositions,
+      stopLossEnabled: config.strategy.stopLossEnabled,
+      stopLossBufferBelowLow: config.strategy.stopLossBufferBelowLow,
+      stopLossAbsoluteFloor: config.strategy.stopLossAbsoluteFloor,
+    },
+    openPositionPrices: orchestrator.getOpenPositionPrices(),
+    portfolio: {
+      cashBalance: pm.getCashBalance(),
+      initialCapital: pm.getInitialCapital(),
+      openPositionsValue: orchestrator.computeOpenPositionsValue(),
+    },
+  };
+}
 
 export class ApiServer {
   private app: express.Application;
@@ -127,28 +160,7 @@ export class ApiServer {
     });
 
     this.app.get(["/api/system/stats", "/api/stats"], (_req, res) => {
-      const orchestrator = getMarketOrchestrator();
-      const config = getConfig();
-      const pm = orchestrator.portfolioManager;
-      res.json({
-        orchestrator: orchestrator.getStats(),
-        config: {
-          minNoEntryPrice: config.strategy.minNoEntryPrice,
-          maxNoEntryPrice: config.strategy.maxNoEntryPrice,
-          minExpectedNetProfit: config.strategy.minExpectedNetProfit,
-          startingCapital: config.portfolio.startingCapital,
-          maxPositions: config.strategy.maxSimultaneousPositions,
-          stopLossEnabled: config.strategy.stopLossEnabled,
-          stopLossBufferBelowLow: config.strategy.stopLossBufferBelowLow,
-          stopLossAbsoluteFloor: config.strategy.stopLossAbsoluteFloor,
-        },
-        openPositionPrices: orchestrator.getOpenPositionPrices(),
-        portfolio: {
-          cashBalance: pm.getCashBalance(),
-          initialCapital: pm.getInitialCapital(),
-          openPositionsValue: orchestrator.computeOpenPositionsValue(),
-        },
-      });
+      res.json(buildSystemState());
     });
 
     this.app.get("/api/campaigns", async (req, res) => {
@@ -213,7 +225,8 @@ export class ApiServer {
               candidateCount: metrics.candidateCount,
               trackedCount: metrics.trackedCount,
               positionCount: metrics.positionCount,
-              gateRejectedCount: metrics.gateRejectedCount,
+              inBand: metrics.inBand,
+              rejected: metrics.rejected,
             };
           });
           res.json(results);
@@ -327,6 +340,122 @@ export class ApiServer {
       }
     });
 
+    // Strategy observability: what the engine is currently seeing and why it is
+    // (or isn't) entering. Per-bucket status reuses buildEntryGateMetrics — the
+    // same metric definition the scan loop uses — so there is one source of truth.
+    this.app.get("/api/strategy", async (_req, res) => {
+      try {
+        const db = getDb();
+        const config = getConfig();
+        const orchestrator = getMarketOrchestrator();
+        const lastScan = orchestrator.getStats().lastScan;
+
+        const campaigns = await db
+          .select()
+          .from(schema.distributionCampaigns)
+          .where(eq(schema.distributionCampaigns.active, true));
+
+        if (campaigns.length === 0) {
+          res.json({ lastScan, campaigns: [] });
+          return;
+        }
+
+        const allBuckets = await db
+          .select()
+          .from(schema.distributionBuckets)
+          .where(
+            inArray(
+              schema.distributionBuckets.campaignId,
+              campaigns.map((c) => c.id),
+            ),
+          );
+        const heldBucketIds = new Set(
+          orchestrator.getOpenPositions().map((p) => p.bucketId),
+        );
+        const gateCfg = {
+          minCampaignAgeFraction: config.strategy.entryMinCampaignAgeFraction,
+          maxTailYesMass: config.strategy.entryMaxTailYesMass,
+          minModalMargin: config.strategy.entryMinModalMargin,
+        };
+        const band = {
+          min: config.strategy.minNoEntryPrice,
+          max: config.strategy.maxNoEntryPrice,
+        };
+
+        const out = campaigns.map((c) => {
+          const buckets = allBuckets.filter((b) => b.campaignId === c.id);
+          const metrics = orchestrator.getActiveCampaignMetrics(c.id);
+          const modal = findModalBucket(buckets);
+          if (!modal) {
+            return {
+              id: c.id,
+              title: c.title,
+              slug: c.slug,
+              modalBucketTitle: null,
+              inBand: metrics.inBand,
+              rejected: metrics.rejected,
+              buckets: [],
+            };
+          }
+          const [modalMin] = parseBucketMinMax(modal.groupItemTitle);
+          const ageFraction = campaignAgeFraction(
+            c.startDate,
+            c.endDate,
+            new Date(),
+          );
+          const modalMargin = modalMarginBelow(buckets, modal.groupItemTitle);
+
+          const candidateBuckets = buckets
+            .filter((b) => isCandidateBucket(b.groupItemTitle, modalMin))
+            .map((b) => {
+              const noPrice = parseFloat(b.noPrice?.toString() ?? "1");
+              const gateMetrics = buildEntryGateMetrics(
+                buckets,
+                b.groupItemTitle,
+                modal.groupItemTitle,
+                ageFraction,
+                modalMargin,
+              );
+              let status: string;
+              if (heldBucketIds.has(b.id)) status = "held";
+              else if (noPrice < band.min || noPrice > band.max) status = "band";
+              else {
+                const gate = evaluateSyncEntryGates(gateMetrics, gateCfg);
+                status = gate.pass ? "eligible" : gate.failed[0]!;
+              }
+              return {
+                id: b.id,
+                groupItemTitle: b.groupItemTitle,
+                noPrice: b.noPrice,
+                noTokenId: b.noTokenId,
+                status,
+                gateMetrics,
+              };
+            })
+            .sort(
+              (a, b) =>
+                parseBucketMinMax(a.groupItemTitle)[0] -
+                parseBucketMinMax(b.groupItemTitle)[0],
+            );
+
+          return {
+            id: c.id,
+            title: c.title,
+            slug: c.slug,
+            modalBucketTitle: modal.groupItemTitle,
+            inBand: metrics.inBand,
+            rejected: metrics.rejected,
+            buckets: candidateBuckets,
+          };
+        });
+
+        res.json({ lastScan, campaigns: out });
+      } catch (error) {
+        logger.error({ error }, "Strategy view error");
+        res.status(500).json({ error: "Failed to build strategy view" });
+      }
+    });
+
     this.app.get("/api/positions", async (req, res) => {
       try {
         const db = getDb();
@@ -412,6 +541,81 @@ export class ApiServer {
       }
     });
 
+    // Lazy, stateless NO-price history for a trade or a bucket. Reuses
+    // Polymarket's /prices-history at request time — nothing is stored, and
+    // this is fetched once when a detail view opens (never polled).
+    this.app.get("/api/price-history", async (req, res) => {
+      try {
+        const db = getDb();
+        const config = getConfig();
+        const tradeId = req.query.tradeId as string | undefined;
+        const bucketId = req.query.bucketId as string | undefined;
+
+        let tokenId: string | null = null;
+        let entryTs: string | null = null;
+        let exitTs: string | null = null;
+        let fromSec: number;
+        let toSec: number;
+        const nowSec = Math.floor(Date.now() / 1000);
+
+        if (tradeId) {
+          const [trade] = await db
+            .select()
+            .from(schema.simulatedTrades)
+            .where(eq(schema.simulatedTrades.id, tradeId))
+            .limit(1);
+          if (!trade) {
+            res.status(404).json({ error: "Trade not found" });
+            return;
+          }
+          tokenId = trade.tokenId;
+          entryTs = trade.entryTs ? new Date(trade.entryTs).toISOString() : null;
+          exitTs = trade.exitTs ? new Date(trade.exitTs).toISOString() : null;
+          const entrySec = trade.entryTs
+            ? Math.floor(new Date(trade.entryTs).getTime() / 1000)
+            : nowSec - config.strategy.entryDipLookbackHours * 3600;
+          fromSec = entrySec - PRICE_HISTORY_PRE_ENTRY_SEC;
+          toSec = trade.exitTs
+            ? Math.floor(new Date(trade.exitTs).getTime() / 1000)
+            : nowSec;
+        } else if (bucketId) {
+          const [bucket] = await db
+            .select()
+            .from(schema.distributionBuckets)
+            .where(eq(schema.distributionBuckets.id, bucketId))
+            .limit(1);
+          if (!bucket) {
+            res.status(404).json({ error: "Bucket not found" });
+            return;
+          }
+          tokenId = bucket.noTokenId;
+          fromSec = nowSec - config.strategy.entryDipLookbackHours * 3600;
+          toSec = nowSec;
+        } else {
+          res.status(400).json({ error: "tradeId or bucketId required" });
+          return;
+        }
+
+        if (!tokenId) {
+          res.json({ history: [], entryTs, exitTs });
+          return;
+        }
+
+        const { history } = await getPolymarketClient().getPricesHistory(
+          tokenId,
+          { startTs: fromSec, endTs: toSec, fidelity: 10 },
+        );
+        res.json({
+          history: downsamplePriceHistory(history, PRICE_HISTORY_POINTS),
+          entryTs,
+          exitTs,
+        });
+      } catch (error) {
+        logger.error({ error }, "Price history error");
+        res.status(502).json({ error: "Failed to fetch price history" });
+      }
+    });
+
     this.app.get("/api/performance", async (req, res) => {
       try {
         const period = (req.query.period as TimePeriod) || "ALL";
@@ -480,31 +684,9 @@ export class ApiServer {
   }
 
   private broadcastState(): void {
-    const orchestrator = getMarketOrchestrator();
-    const config = getConfig();
-    const pm = orchestrator.portfolioManager;
     this.broadcast({
       type: "systemState",
-      data: {
-        orchestrator: orchestrator.getStats(),
-        config: {
-          minNoEntryPrice: config.strategy.minNoEntryPrice,
-          maxNoEntryPrice: config.strategy.maxNoEntryPrice,
-          minExpectedNetProfit: config.strategy.minExpectedNetProfit,
-          startingCapital: config.portfolio.startingCapital,
-          maxPositions: config.strategy.maxSimultaneousPositions,
-          stopLossEnabled: config.strategy.stopLossEnabled,
-          stopLossBufferBelowLow: config.strategy.stopLossBufferBelowLow,
-          stopLossAbsoluteFloor: config.strategy.stopLossAbsoluteFloor,
-        },
-        openPositionPrices: orchestrator.getOpenPositionPrices(),
-        portfolio: {
-          cashBalance: pm.getCashBalance(),
-          initialCapital: pm.getInitialCapital(),
-          openPositionsValue: orchestrator.computeOpenPositionsValue(),
-        },
-        timestamp: Date.now(),
-      },
+      data: { ...buildSystemState(), timestamp: Date.now() },
     });
   }
 }

@@ -5,10 +5,10 @@
 import type {
   SimulatedTrade,
   SystemStats,
-  LiveMarketInfo,
-  DistributionBucket,
   DistributionCampaign,
   PerformanceMetrics,
+  PriceHistoryResponse,
+  StrategyView,
   AuditLog,
   WsMessage,
 } from "./types";
@@ -82,8 +82,25 @@ export class ApiClient {
     return fetchWithRetry(`${this.baseUrl}/api/positions`);
   }
 
+  /** Lazy NO-price history for a trade (entry→now/exit) or a bucket. */
+  async getPriceHistory(params: {
+    tradeId?: string;
+    bucketId?: string;
+  }): Promise<PriceHistoryResponse> {
+    const searchParams = new URLSearchParams();
+    if (params.tradeId) searchParams.set("tradeId", params.tradeId);
+    if (params.bucketId) searchParams.set("bucketId", params.bucketId);
+    return fetchWithRetry(
+      `${this.baseUrl}/api/price-history?${searchParams.toString()}`,
+    );
+  }
+
   async getSystemStats(): Promise<SystemStats> {
     return fetchWithRetry(`${this.baseUrl}/api/system/stats`);
+  }
+
+  async getStrategyView(): Promise<StrategyView> {
+    return fetchWithRetry(`${this.baseUrl}/api/strategy`);
   }
 
   async getTradeHistory(params?: {

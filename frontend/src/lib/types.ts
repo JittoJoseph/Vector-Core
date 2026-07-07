@@ -70,7 +70,6 @@ export interface EntryGateSnapshot {
   dip: DipRecoveryAnalysis | null;
   stopNoPrice?: number;
   ladderYes?: Record<string, number>;
-  priceHistory?: Array<{ t: number; p: number }>;
 }
 
 export interface SimulatedTrade {
@@ -111,6 +110,61 @@ export interface SimulatedTrade {
   updatedAt: string;
 }
 
+export interface ScanTelemetry {
+  scanAt: number | null;
+  candidates: number;
+  inBand: number;
+  entered: number;
+  rejected: {
+    band: number;
+    age: number;
+    tail: number;
+    margin: number;
+    recovery: number;
+    other: number;
+  };
+}
+
+export interface PricePoint {
+  t: number;
+  p: number;
+}
+
+export interface PriceHistoryResponse {
+  history: PricePoint[];
+  entryTs?: string | null;
+  exitTs?: string | null;
+}
+
+export interface StrategyBucket {
+  id: string;
+  groupItemTitle: string;
+  noPrice: string | null;
+  noTokenId: string;
+  status: "held" | "band" | "age" | "tail" | "margin" | "eligible";
+  gateMetrics: {
+    campaignAgeFraction: number | null;
+    bucketDistance: number;
+    tailYesMass: number;
+    modalMargin: number;
+  };
+}
+
+export interface StrategyCampaign {
+  id: string;
+  title: string;
+  slug: string;
+  modalBucketTitle: string | null;
+  inBand: number;
+  rejected: ScanTelemetry["rejected"];
+  buckets: StrategyBucket[];
+}
+
+export interface StrategyView {
+  lastScan?: ScanTelemetry;
+  campaigns: StrategyCampaign[];
+}
+
 export interface SystemStats {
   orchestrator: {
     running: boolean;
@@ -118,6 +172,7 @@ export interface SystemStats {
     activeBuckets: number;
     openPositions: number;
     cycleCount: number;
+    lastScan?: ScanTelemetry;
     ws: {
       connected: boolean;
       subscribedTokens: number;

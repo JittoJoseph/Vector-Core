@@ -1,15 +1,14 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { getApiClient, getWsClient } from "./api-client";
 import { formatPnl } from "./utils";
 import type {
   SimulatedTrade,
   SystemStats,
-  LiveMarketInfo,
-  DistributionBucket,
   DistributionCampaign,
   PerformanceMetrics,
+  StrategyView,
   AuditLog,
   ActivityEntry,
   WsMessage,
@@ -248,6 +247,36 @@ export function useCampaigns(
   useFetchOnce(enabled, fetchCampaigns, [fetchCampaigns, status]);
 
   return { campaigns, loading, error, refetch: fetchCampaigns };
+}
+
+/**
+ * Strategy observability view. Fetches only while the Strategy tab is active,
+ * with a light refresh matched to the ~60s scan cadence. No polling when the
+ * tab is not open.
+ */
+export function useStrategyView(enabled: boolean) {
+  const [view, setView] = useState<StrategyView | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  const fetchView = useCallback(async () => {
+    try {
+      setLoading(true);
+      setView(await getApiClient().getStrategyView());
+    } catch {
+      // transient; keep prior view
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!enabled) return;
+    fetchView();
+    const id = setInterval(fetchView, 15000);
+    return () => clearInterval(id);
+  }, [enabled, fetchView]);
+
+  return { view, loading, refetch: fetchView };
 }
 
 export function useCampaignDetails(id: string | null) {
