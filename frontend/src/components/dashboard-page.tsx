@@ -6,6 +6,7 @@ import { TradesTable, MarketCountdown } from "./trades-table";
 import { TradeDetailPopup } from "./trade-detail-popup";
 import { ActivityPanel } from "./activity-panel";
 import { CampaignsTable } from "./campaigns-table";
+import { StrategyTab } from "./strategy-tab";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { getApiClient } from "@/lib/api-client";
 import {
@@ -20,6 +21,7 @@ import {
   useTradeHistory,
   useSystemStats,
   useCampaigns,
+  useStrategyView,
   usePerformanceRealtime,
   useActivityLog,
 } from "@/lib/hooks";
@@ -67,6 +69,10 @@ export function DashboardPage() {
     loading: historyLoading,
     refetch: refetchHistory,
   } = useCampaigns("history", activeTab === "campaign_history");
+
+  const { view: strategyView, loading: strategyLoading } = useStrategyView(
+    activeTab === "strategy",
+  );
 
   const { activities, loading: activitiesLoading } = useActivityLog(
     activeTab === "diagnostics",
@@ -411,6 +417,7 @@ export function DashboardPage() {
                     id: "history",
                     label: `TRADE HISTORY`,
                   },
+                  { id: "strategy", label: "STRATEGY" },
                   { id: "campaigns", label: "ACTIVE CAMPAIGNS" },
                   { id: "campaign_history", label: "CAMPAIGN HISTORY" },
                   { id: "diagnostics", label: "DIAGNOSTICS" },
@@ -442,6 +449,11 @@ export function DashboardPage() {
                   hasMore={hasMoreTrades}
                   loadingMore={loadingMoreTrades}
                 />
+              </TabsContent>
+
+              {/* STRATEGY TAB */}
+              <TabsContent value="strategy" className="mt-0 flex-1 p-0">
+                <StrategyTab view={strategyView} loading={strategyLoading} />
               </TabsContent>
 
               {/* TRADE HISTORY TAB */}

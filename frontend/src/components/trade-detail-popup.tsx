@@ -1,7 +1,9 @@
 "use client";
 
-import type { SimulatedTrade, LiveMarketPrice } from "@/lib/types";
-import { formatPnl, pnlColor, polymarketMarketUrl, calculateTradeUnrealizedPnl } from "@/lib/utils";
+import { useEffect, useState } from "react";
+import type { SimulatedTrade, LiveMarketPrice, PricePoint } from "@/lib/types";
+import { formatPnl, polymarketMarketUrl, calculateTradeUnrealizedPnl } from "@/lib/utils";
+import { getApiClient } from "@/lib/api-client";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { ExternalLink, X } from "lucide-react";
 import NumberFlow from "@number-flow/react";
@@ -20,6 +22,32 @@ export function TradeDetailPopup({
   onClose,
   livePrice,
 }: TradeDetailPopupProps) {
+  const tradeId = trade?.id;
+  const [history, setHistory] = useState<PricePoint[] | null>(null);
+  const [histLoading, setHistLoading] = useState(false);
+
+  // Lazily pull the NO-price curve (entry−3h → now/exit) once the popup opens.
+  // Stateless on the server; nothing is stored or polled.
+  useEffect(() => {
+    if (!open || !tradeId) return;
+    let cancelled = false;
+    (async () => {
+      setHistory(null);
+      setHistLoading(true);
+      try {
+        const r = await getApiClient().getPriceHistory({ tradeId });
+        if (!cancelled) setHistory(r.history ?? []);
+      } catch {
+        if (!cancelled) setHistory([]);
+      } finally {
+        if (!cancelled) setHistLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, tradeId]);
+
   if (!trade) return null;
 
   const isClosed = trade.status === "SETTLED";
@@ -30,7 +58,6 @@ export function TradeDetailPopup({
   const expectedProfit = parseFloat(trade.expectedNetProfit || "0");
   
   const shares = parseFloat(trade.entryShares);
-  const budget = parseFloat(trade.positionBudget);
   const actualCost = parseFloat(trade.actualCost);
 
   const outcome = trade.exitOutcome;
@@ -126,57 +153,78 @@ export function TradeDetailPopup({
           
           {/* ── FINANCIALS ── */}
           <Section title="POSITION FINANCIALS">
-            <Row2>
-              <Cell label="COST BASIS" value={`$${actualCost.toFixed(2)}`} />
-              <Cell label="SHARES" value={shares.toFixed(2)} />
-              <Cell label="ENTRY PRICE" value={`${(entryPrice * 100).toFixed(1)}¢`} />
-              <Cell label="ENTRY FEES" value={`$${entryFees.toFixed(4)}`} />
-              <Cell 
-                label={isClosed ? "EXIT PRICE" : "EXPECTED PNL (IF 100¢)"} 
-                value={
-                  isClosed 
-                    ? (exitPrice !== null ? `${(exitPrice * 100).toFixed(1)}¢` : "—")
-                    : (expectedProfit > 0 ? <span className="text-emerald-400">{formatPnl(expectedProfit)}</span> : "—")
-                } 
-              />
-              <Cell 
-                label={isClosed ? "REALIZED PNL" : "UNREALIZED PNL"} 
-                value={
-                  isClosed ? (
-                    <span className={pnlColor(pnl)}>
-                      {formatPnl(pnl)} ({returnPct >= 0 ? "+" : ""}{returnPct.toFixed(1)}%)
-                    </span>
-                  ) : unrealizedPnl !== null ? (
-                    <div className="flex items-center gap-1.5">
-                      <span className={`font-bold tabular-nums tracking-tight ${pnlColor(unrealizedPnl)}`}>
-                        <NumberFlow
-                          value={unrealizedPnl}
-                          format={{ style: "currency", currency: "USD", signDisplay: "always", minimumFractionDigits: 4, maximumFractionDigits: 4 }}
-                        />
-                      </span>
-                      <span className={`text-[10px] tracking-tight tabular-nums font-bold ${pnlColor(unrealizedPnlPct!, "80")}`}>
-                        ({unrealizedPnlPct! >= 0 ? "+" : ""}{unrealizedPnlPct!.toFixed(1)}%)
-                      </span>
-                    </div>
-                  ) : "—"
-                } 
-              />
-            </Row2>
+            <div className="px-4 pt-1 pb-3 space-y-2">
+              <StatGroup label="POSITION">
+                <Stat label="ENTRY" value={`${(entryPrice * 100).toFixed(1)}¢`} emphasis />
+                <Stat label="COST" value={`$${actualCost.toFixed(2)}`} />
+                <Stat label="SHARES" value={shares.toFixed(1)} tone="muted" />
+                <Stat label="FEES" value={`$${entryFees.toFixed(3)}`} tone="muted" />
+              </StatGroup>
+
+              <StatGroup label="P&L">
+                {isClosed ? (
+                  <>
+                    <Stat
+                      label="EXIT"
+                      value={exitPrice !== null ? `${(exitPrice * 100).toFixed(1)}¢` : "—"}
+                    />
+                    <Stat
+                      label="REALIZED"
+                      value={`${formatPnl(pnl)} (${returnPct >= 0 ? "+" : ""}${returnPct.toFixed(1)}%)`}
+                      tone={pnl >= 0 ? "positive" : "negative"}
+                      emphasis
+                    />
+                  </>
+                ) : (
+                  <>
+                    <Stat
+                      label="EXP @100¢"
+                      value={expectedProfit > 0 ? formatPnl(expectedProfit) : "—"}
+                      tone="positive"
+                    />
+                    <Stat
+                      label="UNREALIZED"
+                      tone={unrealizedPnl != null && unrealizedPnl < 0 ? "negative" : "positive"}
+                      emphasis
+                      value={
+                        unrealizedPnl !== null ? (
+                          <span className="inline-flex items-baseline gap-1">
+                            <NumberFlow
+                              value={unrealizedPnl}
+                              format={{ style: "currency", currency: "USD", signDisplay: "always", minimumFractionDigits: 4, maximumFractionDigits: 4 }}
+                            />
+                            <span className="text-[9px] opacity-70">
+                              ({unrealizedPnlPct! >= 0 ? "+" : ""}{unrealizedPnlPct!.toFixed(1)}%)
+                            </span>
+                          </span>
+                        ) : "—"
+                      }
+                    />
+                  </>
+                )}
+              </StatGroup>
+            </div>
           </Section>
 
           {/* ── DIP TIMELINE ── */}
-          {snap?.priceHistory && snap.priceHistory.length >= 2 && (
+          {snap?.dip && (
             <Section title="DIP TIMELINE">
-              <DipTimeline
-                history={snap.priceHistory}
-                entryTs={trade.entryTs}
-                entryPrice={entryPrice}
-                recoveryLow={recentLow}
-                stopNoPrice={stopNoPrice}
-                exitTs={isClosed ? trade.exitTs : null}
-                exitPrice={isClosed ? exitPrice : null}
-                isWin={isWin}
-              />
+              {histLoading ? (
+                <TimelinePlaceholder text="loading price history…" />
+              ) : history && history.length >= 2 ? (
+                <DipTimeline
+                  history={history}
+                  entryTs={trade.entryTs}
+                  entryPrice={entryPrice}
+                  stopNoPrice={stopNoPrice}
+                  exitTs={isClosed ? trade.exitTs : null}
+                  exitPrice={isClosed ? exitPrice : null}
+                  isClosed={isClosed}
+                  isWin={isWin}
+                />
+              ) : (
+                <TimelinePlaceholder text="price history unavailable" />
+              )}
             </Section>
           )}
 
@@ -271,12 +319,24 @@ export function TradeDetailPopup({
 
           {/* ── TIMESTAMPS ── */}
           <Section title="TIMESTAMPS">
-            <Row2>
-              <Cell label="ENTERED" value={formatTs(trade.entryTs)} />
-              <Cell label="MARKET DEADLINE" value={trade.campaignEndDate ? formatTs(trade.campaignEndDate) : "—"} />
-              <Cell label="CLOSED" value={trade.exitTs ? formatTs(trade.exitTs) : "—"} />
-              <Cell label="HOLD DURATION" value={trade.exitTs ? formatDuration(trade.entryTs, trade.exitTs) : "—"} />
-            </Row2>
+            <div className="px-4 pt-1 pb-3 space-y-2">
+              <StatGroup label="ENTRY">
+                <Stat label="ENTERED" value={formatTs(trade.entryTs)} />
+                <Stat
+                  label="DEADLINE"
+                  value={trade.campaignEndDate ? formatTs(trade.campaignEndDate) : "—"}
+                  tone="muted"
+                />
+              </StatGroup>
+              <StatGroup label="EXIT">
+                <Stat label="CLOSED" value={trade.exitTs ? formatTs(trade.exitTs) : "—"} tone="muted" />
+                <Stat
+                  label="HELD"
+                  value={trade.exitTs ? formatDuration(trade.entryTs, trade.exitTs) : "—"}
+                  tone="muted"
+                />
+              </StatGroup>
+            </div>
           </Section>
         </div>
       </DialogContent>
@@ -307,10 +367,12 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
-function Row2({ children }: { children: React.ReactNode }) {
+function TimelinePlaceholder({ text }: { text: string }) {
   return (
-    <div className="grid grid-cols-2 divide-x divide-y divide-border/[0.08]">
-      {children}
+    <div className="px-4 pb-3 h-[88px] flex items-center justify-center">
+      <span className="text-[10px] font-mono tracking-wide text-muted-foreground/35">
+        {text}
+      </span>
     </div>
   );
 }
@@ -355,19 +417,6 @@ function Stat({
       <span
         className={`font-mono tabular-nums leading-none ${emphasis ? "text-[13px] font-bold" : "text-[11px] font-semibold"} ${STAT_TONE_CLS[tone]}`}
       >
-        {value}
-      </span>
-    </div>
-  );
-}
-
-function Cell({ label, value }: { label: string; value: React.ReactNode }) {
-  return (
-    <div className="px-4 py-2.5 flex flex-col gap-0.5">
-      <span className="text-[9px] font-mono tracking-[0.15em] text-muted-foreground/40 uppercase">
-        {label}
-      </span>
-      <span className="text-[12px] font-mono tabular-nums text-foreground/80 leading-tight">
         {value}
       </span>
     </div>

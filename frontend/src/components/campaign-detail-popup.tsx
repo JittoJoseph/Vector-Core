@@ -10,7 +10,6 @@ import type {
 import {
   formatPnl,
   pnlColor,
-  polymarketMarketUrl,
   calculateTradeUnrealizedPnl,
 } from "@/lib/utils";
 import NumberFlow from "@number-flow/react";
@@ -374,27 +373,6 @@ function Section({
         </span>
       </div>
       <div>{children}</div>
-    </div>
-  );
-}
-
-function Row2({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="grid grid-cols-2 divide-x divide-y divide-border/10 border-b border-border/10 bg-card/20">
-      {children}
-    </div>
-  );
-}
-
-function Cell({ label, value }: { label: string; value: React.ReactNode }) {
-  return (
-    <div className="px-4 py-3 flex flex-col gap-1.5">
-      <span className="text-[9px] font-mono tracking-widest text-muted-foreground/60 uppercase font-bold">
-        {label}
-      </span>
-      <div className="text-[12px] font-mono text-foreground/90 font-medium">
-        {value}
-      </div>
     </div>
   );
 }

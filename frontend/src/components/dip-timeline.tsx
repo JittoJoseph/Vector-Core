@@ -1,34 +1,27 @@
 "use client";
 
-interface PricePoint {
-  t: number;
-  p: number;
-}
+import type { PricePoint } from "@/lib/types";
+import { PriceChart, ChartLegend, type ChartMarker, type ChartHLine, type ChartVLine } from "./price-chart";
 
 interface DipTimelineProps {
   history: PricePoint[];
   entryTs: string;
   entryPrice: number;
-  recoveryLow: number | null;
   stopNoPrice: number | null;
   exitTs?: string | null;
   exitPrice?: number | null;
+  isClosed: boolean;
   isWin?: boolean;
 }
-
-const W = 400;
-const H = 88;
-const PAD_X = 4;
-const PAD_Y = 10;
 
 export function DipTimeline({
   history,
   entryTs,
   entryPrice,
-  recoveryLow,
   stopNoPrice,
   exitTs,
   exitPrice,
+  isClosed,
   isWin,
 }: DipTimelineProps) {
   if (!history || history.length < 2) return null;
@@ -36,150 +29,50 @@ export function DipTimeline({
   const entryT = Date.parse(entryTs) / 1000;
   const exitT = exitTs ? Date.parse(exitTs) / 1000 : null;
 
-  const xs = [...history.map((h) => h.t), entryT, ...(exitT ? [exitT] : [])];
-  const xMin = Math.min(...xs);
-  const xMax = Math.max(...xs);
-  const xSpan = xMax - xMin || 1;
+  // Recovery low = the dip bottom BEFORE entry (never a later post-entry low).
+  const preEntry = history.filter((h) => h.t <= entryT);
+  const lowSource = preEntry.length ? preEntry : history;
+  const lowPoint = lowSource.reduce((m, h) => (h.p < m.p ? h : m), lowSource[0]!);
 
-  const ys = [
-    ...history.map((h) => h.p),
-    entryPrice,
-    ...(recoveryLow != null ? [recoveryLow] : []),
-    ...(stopNoPrice != null ? [stopNoPrice] : []),
-    ...(exitPrice != null ? [exitPrice] : []),
+  const last = history[history.length - 1]!;
+  const endT = exitT ?? last.t;
+  const endP = exitPrice != null ? exitPrice : last.p;
+  // Static class strings (Tailwind can't see interpolated class names).
+  const end = isClosed
+    ? isWin
+      ? { fill: "fill-emerald-400", bg: "bg-emerald-400" }
+      : { fill: "fill-red-400", bg: "bg-red-400" }
+    : { fill: "fill-blue-400", bg: "bg-blue-400" };
+
+  const markers: ChartMarker[] = [
+    { t: lowPoint.t, p: lowPoint.p, className: "fill-amber-400" },
+    { t: entryT, p: entryPrice, className: "fill-blue-400" },
+    { t: endT, p: endP, className: end.fill },
   ];
-  const yMinRaw = Math.min(...ys);
-  const yMaxRaw = Math.max(...ys);
-  const yPad = (yMaxRaw - yMinRaw) * 0.18 || 0.015;
-  const yMin = yMinRaw - yPad;
-  const yMax = yMaxRaw + yPad;
-  const ySpan = yMax - yMin || 1;
-
-  const scaleX = (t: number) => PAD_X + ((t - xMin) / xSpan) * (W - PAD_X * 2);
-  const scaleY = (p: number) =>
-    PAD_Y + (1 - (p - yMin) / ySpan) * (H - PAD_Y * 2);
-
-  const linePoints = history
-    .map((h) => `${scaleX(h.t).toFixed(1)},${scaleY(h.p).toFixed(1)}`)
-    .join(" ");
-  const baseline = H - PAD_Y;
-  const areaPath = `M ${scaleX(history[0]!.t).toFixed(1)},${baseline} L ${linePoints} L ${scaleX(
-    history[history.length - 1]!.t,
-  ).toFixed(1)},${baseline} Z`;
-
-  const lowPoint = history.reduce((min, h) => (h.p < min.p ? h : min), history[0]!);
-
-  const entryX = scaleX(entryT);
-  const entryY = scaleY(entryPrice);
-  const stopY = stopNoPrice != null ? scaleY(stopNoPrice) : null;
-  const exitX = exitT != null ? scaleX(exitT) : null;
-  const exitY = exitPrice != null ? scaleY(exitPrice) : null;
+  const hlines: ChartHLine[] =
+    stopNoPrice != null ? [{ p: stopNoPrice, className: "stroke-red-400/40" }] : [];
+  const vlines: ChartVLine[] = [{ t: entryT, className: "stroke-blue-400/30" }];
 
   const pct = (p: number) => `${(p * 100).toFixed(1)}¢`;
 
   return (
     <div className="px-4 pb-3">
-      <svg
-        viewBox={`0 0 ${W} ${H}`}
-        preserveAspectRatio="none"
-        className="w-full block"
-        style={{ height: 84 }}
-      >
-        {stopY != null && (
-          <line
-            x1={PAD_X}
-            x2={W - PAD_X}
-            y1={stopY}
-            y2={stopY}
-            className="stroke-red-400/40"
-            strokeWidth={1}
-            strokeDasharray="3 3"
-          />
-        )}
-
-        <path d={areaPath} className="fill-foreground/5" stroke="none" />
-        <polyline
-          points={linePoints}
-          fill="none"
-          className="stroke-foreground/45"
-          strokeWidth={1.4}
-          strokeLinejoin="round"
-          strokeLinecap="round"
-        />
-
-        <line
-          x1={entryX}
-          x2={entryX}
-          y1={PAD_Y}
-          y2={H - PAD_Y}
-          className="stroke-blue-400/25"
-          strokeWidth={1}
-          strokeDasharray="2 2"
-        />
-
-        {exitX != null && exitY != null && (
-          <line
-            x1={entryX}
-            y1={entryY}
-            x2={exitX}
-            y2={exitY}
-            className={isWin ? "stroke-emerald-400/35" : "stroke-red-400/35"}
-            strokeWidth={1.25}
-            strokeDasharray="1 3"
-            strokeLinecap="round"
-          />
-        )}
-
-        <circle cx={scaleX(lowPoint.t)} cy={scaleY(lowPoint.p)} r={2.5} className="fill-amber-400" />
-        <circle cx={entryX} cy={entryY} r={2.75} className="fill-blue-400" />
-        {exitX != null && exitY != null && (
-          <circle cx={exitX} cy={exitY} r={2.75} className={isWin ? "fill-emerald-400" : "fill-red-400"} />
-        )}
-      </svg>
-
-      <div className="flex items-center gap-3 mt-1.5 flex-wrap">
-        <Legend variant="dot" swatchClass="bg-amber-400" label="Low" value={pct(lowPoint.p)} />
-        <Legend variant="dot" swatchClass="bg-blue-400" label="Entry" value={pct(entryPrice)} />
-        {stopNoPrice != null && (
-          <Legend variant="dash" swatchClass="border-red-400/70" label="Stop" value={pct(stopNoPrice)} />
-        )}
-        {exitPrice != null && (
-          <Legend
-            variant="dot"
-            swatchClass={isWin ? "bg-emerald-400" : "bg-red-400"}
-            label="Exit"
-            value={pct(exitPrice)}
-          />
-        )}
-      </div>
-    </div>
-  );
-}
-
-function Legend({
-  variant,
-  swatchClass,
-  label,
-  value,
-}: {
-  variant: "dot" | "dash";
-  swatchClass: string;
-  label: string;
-  value: string;
-}) {
-  return (
-    <div className="flex items-center gap-1">
-      {variant === "dot" ? (
-        <span className={`inline-block w-1.5 h-1.5 rounded-full ${swatchClass}`} />
-      ) : (
-        <span className={`inline-block w-2.5 border-t border-dashed ${swatchClass}`} />
-      )}
-      <span className="text-[9px] font-mono uppercase tracking-wide text-muted-foreground/45">
-        {label}
-      </span>
-      <span className="text-[10px] font-mono tabular-nums text-foreground/75 font-medium">
-        {value}
-      </span>
+      <PriceChart history={history} height={84} markers={markers} hlines={hlines} vlines={vlines} />
+      <ChartLegend
+        items={[
+          { variant: "dot", swatchClass: "bg-amber-400", label: "Low", value: pct(lowPoint.p) },
+          { variant: "dot", swatchClass: "bg-blue-400", label: "Entry", value: pct(entryPrice) },
+          ...(stopNoPrice != null
+            ? [{ variant: "dash" as const, swatchClass: "border-red-400/70", label: "Stop", value: pct(stopNoPrice) }]
+            : []),
+          {
+            variant: "dot",
+            swatchClass: end.bg,
+            label: isClosed ? "Exit" : "Now",
+            value: pct(endP),
+          },
+        ]}
+      />
     </div>
   );
 }
