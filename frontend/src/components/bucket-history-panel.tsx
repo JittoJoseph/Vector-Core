@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import type { PricePoint } from "@/lib/types";
 import { getApiClient } from "@/lib/api-client";
-import { PriceChart, ChartLegend, type ChartMarker } from "./price-chart";
+import { PriceChart, ChartLegend } from "./price-chart";
 
 // Minimal bucket shape this panel needs — decoupled from the full bucket type
 // so any candidate-bucket source can render it.
@@ -30,16 +30,21 @@ const STATUS_META: Record<string, { label: string; cls: string }> = {
 
 export function BucketHistoryPanel({ bucket }: { bucket: BucketPanelInfo }) {
   const [history, setHistory] = useState<PricePoint[] | null>(null);
+  const [recentLow, setRecentLow] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       setHistory(null);
+      setRecentLow(null);
       setLoading(true);
       try {
         const r = await getApiClient().getPriceHistory({ bucketId: bucket.id });
-        if (!cancelled) setHistory(r.history ?? []);
+        if (!cancelled) {
+          setHistory(r.history ?? []);
+          setRecentLow(r.recentLow ?? null);
+        }
       } catch {
         if (!cancelled) setHistory([]);
       } finally {
@@ -79,7 +84,7 @@ export function BucketHistoryPanel({ bucket }: { bucket: BucketPanelInfo }) {
           loading price history…
         </div>
       ) : history && history.length >= 2 ? (
-        <Sparkline history={history} />
+        <Sparkline history={history} recentLow={recentLow} />
       ) : (
         <div className="h-[82px] flex items-center justify-center text-[10px] font-mono text-muted-foreground/35">
           price history unavailable
@@ -101,21 +106,29 @@ export function BucketHistoryPanel({ bucket }: { bucket: BucketPanelInfo }) {
   );
 }
 
-function Sparkline({ history }: { history: PricePoint[] }) {
-  const low = history.reduce((m, h) => (h.p < m.p ? h : m), history[0]!);
+function Sparkline({
+  history,
+  recentLow,
+}: {
+  history: PricePoint[];
+  recentLow: number | null;
+}) {
   const last = history[history.length - 1]!;
   const pct = (p: number) => `${(p * 100).toFixed(1)}¢`;
-  const markers: ChartMarker[] = [
-    { t: low.t, p: low.p, className: "fill-amber-400" },
-    { t: last.t, p: last.p, className: "fill-blue-400" },
-  ];
 
   return (
     <div>
-      <PriceChart history={history} height={76} markers={markers} />
+      <PriceChart
+        history={history}
+        height={76}
+        markers={[{ t: last.t, p: last.p, className: "fill-blue-400" }]}
+        hlines={recentLow != null ? [{ p: recentLow, className: "stroke-amber-400/50" }] : []}
+      />
       <ChartLegend
         items={[
-          { variant: "dot", swatchClass: "bg-amber-400", label: "Low", value: pct(low.p) },
+          ...(recentLow != null
+            ? [{ variant: "dash" as const, swatchClass: "border-amber-400/70", label: "Low", value: pct(recentLow) }]
+            : []),
           { variant: "dot", swatchClass: "bg-blue-400", label: "Now", value: pct(last.p) },
         ]}
       />

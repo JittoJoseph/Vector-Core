@@ -216,6 +216,7 @@ export function TradeDetailPopup({
                   history={history}
                   entryTs={trade.entryTs}
                   entryPrice={entryPrice}
+                  recoveryLow={recentLow}
                   stopNoPrice={stopNoPrice}
                   exitTs={isClosed ? trade.exitTs : null}
                   exitPrice={isClosed ? exitPrice : null}

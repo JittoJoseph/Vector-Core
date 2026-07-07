@@ -7,6 +7,10 @@ interface DipTimelineProps {
   history: PricePoint[];
   entryTs: string;
   entryPrice: number;
+  // Authoritative recovery low (entryGateSnapshot.dip.recentLow). Rendered as a
+  // reference level — never recomputed from the curve, so it always agrees with
+  // the RECOVERY / RISK section.
+  recoveryLow: number | null;
   stopNoPrice: number | null;
   exitTs?: string | null;
   exitPrice?: number | null;
@@ -18,6 +22,7 @@ export function DipTimeline({
   history,
   entryTs,
   entryPrice,
+  recoveryLow,
   stopNoPrice,
   exitTs,
   exitPrice,
@@ -28,11 +33,6 @@ export function DipTimeline({
 
   const entryT = Date.parse(entryTs) / 1000;
   const exitT = exitTs ? Date.parse(exitTs) / 1000 : null;
-
-  // Recovery low = the dip bottom BEFORE entry (never a later post-entry low).
-  const preEntry = history.filter((h) => h.t <= entryT);
-  const lowSource = preEntry.length ? preEntry : history;
-  const lowPoint = lowSource.reduce((m, h) => (h.p < m.p ? h : m), lowSource[0]!);
 
   const last = history[history.length - 1]!;
   const endT = exitT ?? last.t;
@@ -45,12 +45,13 @@ export function DipTimeline({
     : { fill: "fill-blue-400", bg: "bg-blue-400" };
 
   const markers: ChartMarker[] = [
-    { t: lowPoint.t, p: lowPoint.p, className: "fill-amber-400" },
     { t: entryT, p: entryPrice, className: "fill-blue-400" },
     { t: endT, p: endP, className: end.fill },
   ];
-  const hlines: ChartHLine[] =
-    stopNoPrice != null ? [{ p: stopNoPrice, className: "stroke-red-400/40" }] : [];
+  const hlines: ChartHLine[] = [
+    ...(recoveryLow != null ? [{ p: recoveryLow, className: "stroke-amber-400/50" }] : []),
+    ...(stopNoPrice != null ? [{ p: stopNoPrice, className: "stroke-red-400/40" }] : []),
+  ];
   const vlines: ChartVLine[] = [{ t: entryT, className: "stroke-blue-400/30" }];
 
   const pct = (p: number) => `${(p * 100).toFixed(1)}¢`;
@@ -60,7 +61,9 @@ export function DipTimeline({
       <PriceChart history={history} height={84} markers={markers} hlines={hlines} vlines={vlines} />
       <ChartLegend
         items={[
-          { variant: "dot", swatchClass: "bg-amber-400", label: "Low", value: pct(lowPoint.p) },
+          ...(recoveryLow != null
+            ? [{ variant: "dash" as const, swatchClass: "border-amber-400/70", label: "Low", value: pct(recoveryLow) }]
+            : []),
           { variant: "dot", swatchClass: "bg-blue-400", label: "Entry", value: pct(entryPrice) },
           ...(stopNoPrice != null
             ? [{ variant: "dash" as const, swatchClass: "border-red-400/70", label: "Stop", value: pct(stopNoPrice) }]
