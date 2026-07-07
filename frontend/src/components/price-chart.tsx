@@ -6,6 +6,7 @@ export interface ChartMarker {
   t: number; // unix seconds
   p: number; // 0..1 price
   className: string; // fill-* tailwind class
+  label?: string;
 }
 
 export interface ChartHLine {
@@ -63,61 +64,130 @@ export function PriceChart({
   const sx = (t: number) => PAD_X + ((t - xMin) / xSpan) * (W - PAD_X * 2);
   const sy = (p: number) => PAD_Y + (1 - (p - yMin) / ySpan) * (H - PAD_Y * 2);
 
-  const points = history
-    .map((h) => `${sx(h.t).toFixed(1)},${sy(h.p).toFixed(1)}`)
-    .join(" ");
+  // Inject exact marker coordinates into the sequence so the SVG curve hits them perfectly
+  const injectedHistory = [...history];
+  for (const m of markers) {
+    injectedHistory.push({ t: m.t, p: m.p });
+  }
+  // Remove exact duplicates and sort
+  injectedHistory.sort((a, b) => a.t - b.t);
+
+  const rawPoints = injectedHistory.map((h) => ({ x: sx(h.t), y: sy(h.p) }));
+  
+  let linePath = "";
+  if (rawPoints.length > 0) {
+    linePath = `M ${rawPoints[0]!.x.toFixed(1)},${rawPoints[0]!.y.toFixed(1)}`;
+    for (let i = 0; i < rawPoints.length - 1; i++) {
+      const curr = rawPoints[i]!;
+      const next = rawPoints[i + 1]!;
+      const midX = (curr.x + next.x) / 2;
+      linePath += ` C ${midX.toFixed(1)},${curr.y.toFixed(1)} ${midX.toFixed(1)},${next.y.toFixed(1)} ${next.x.toFixed(1)},${next.y.toFixed(1)}`;
+    }
+  }
+
   const baseline = H - PAD_Y;
-  const area = `M ${sx(history[0]!.t).toFixed(1)},${baseline} L ${points} L ${sx(
-    history[history.length - 1]!.t,
-  ).toFixed(1)},${baseline} Z`;
+  const areaPath = linePath
+    ? `${linePath} L ${rawPoints[rawPoints.length - 1]!.x.toFixed(1)},${baseline} L ${rawPoints[0]!.x.toFixed(1)},${baseline} Z`
+    : "";
+
+  const formatTime = (t: number) => {
+    return new Date(t * 1000).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+  };
 
   return (
-    <svg
-      viewBox={`0 0 ${W} ${H}`}
-      preserveAspectRatio="none"
-      className="w-full block"
-      style={{ height }}
-    >
-      {hlines.map((l, i) => (
-        <line
-          key={`h${i}`}
-          x1={PAD_X}
-          x2={W - PAD_X}
-          y1={sy(l.p)}
-          y2={sy(l.p)}
-          className={l.className}
-          strokeWidth={1}
-          strokeDasharray="3 3"
+    <div className="relative w-full mb-5" style={{ height }}>
+      <svg
+        viewBox={`0 0 ${W} ${H}`}
+        preserveAspectRatio="none"
+        className="absolute inset-0 w-full h-full block overflow-visible pointer-events-none"
+      >
+        {hlines.map((l, i) => (
+          <line
+            key={`h${i}`}
+            x1={PAD_X}
+            x2={W - PAD_X}
+            y1={sy(l.p)}
+            y2={sy(l.p)}
+            className={l.className}
+            strokeWidth={1}
+            strokeDasharray="3 3"
+          />
+        ))}
+
+        <path d={areaPath} className="fill-foreground/5" stroke="none" />
+        <path
+          d={linePath}
+          fill="none"
+          className="stroke-foreground/45"
+          strokeWidth={1.4}
+          strokeLinejoin="round"
+          strokeLinecap="round"
         />
-      ))}
 
-      <path d={area} className="fill-foreground/5" stroke="none" />
-      <polyline
-        points={points}
-        fill="none"
-        className="stroke-foreground/45"
-        strokeWidth={1.4}
-        strokeLinejoin="round"
-        strokeLinecap="round"
-      />
+        {vlines.map((v, i) => (
+          <line
+            key={`v${i}`}
+            x1={sx(v.t)}
+            x2={sx(v.t)}
+            y1={PAD_Y - 4}
+            y2={H - PAD_Y + 4}
+            className={v.className}
+            strokeWidth={1}
+            strokeDasharray="2 2"
+          />
+        ))}
+      </svg>
 
-      {vlines.map((v, i) => (
-        <line
-          key={`v${i}`}
-          x1={sx(v.t)}
-          x2={sx(v.t)}
-          y1={PAD_Y - 4}
-          y2={H - PAD_Y + 4}
-          className={v.className}
-          strokeWidth={1}
-          strokeDasharray="2 2"
-        />
-      ))}
+      {/* HTML DOM Overlays for markers and tooltips */}
+      {markers.map((m, i) => {
+        const leftPct = (sx(m.t) / W) * 100;
+        const topPct = (sy(m.p) / H) * 100;
+        return (
+          <div
+            key={`html-m${i}`}
+            className="absolute group z-10"
+            style={{ left: `${leftPct}%`, top: `${topPct}%` }}
+          >
+            {/* Hit area for hovering */}
+            <div className="absolute -inset-3 rounded-full cursor-default" />
+            
+            {/* The actual dot marker, converted to Tailwind classes */}
+            <div
+              className={`absolute -ml-[2.6px] -mt-[2.6px] w-[5.2px] h-[5.2px] rounded-full pointer-events-none ${
+                m.className.replace("fill-", "bg-") // convert SVG fill to HTML bg
+              }`}
+            />
 
-      {markers.map((m, i) => (
-        <circle key={`m${i}`} cx={sx(m.t)} cy={sy(m.p)} r={2.6} className={m.className} />
-      ))}
-    </svg>
+            {/* NextJS HTML Tooltip Card */}
+            {m.label && (
+              <div
+                className={`absolute bottom-full mb-1.5 flex flex-col items-center justify-center bg-zinc-900 border border-white/10 rounded shadow-2xl pointer-events-none w-max px-2 py-1 opacity-0 transition-opacity duration-200 group-hover:opacity-100 ${
+                  leftPct > 85
+                    ? "right-0 translate-x-1"
+                    : leftPct < 15
+                    ? "left-0 -translate-x-1"
+                    : "left-1/2 -translate-x-1/2"
+                }`}
+              >
+                <span className="text-[9px] font-medium text-white/70 tracking-widest uppercase leading-none mb-0.5">
+                  {m.label}
+                </span>
+                <span className="text-[11px] font-mono font-medium text-white leading-none">
+                  {(m.p * 100).toFixed(1)}¢
+                </span>
+              </div>
+            )}
+          </div>
+        );
+      })}
+
+      {/* Subtle X-axis Timestamps */}
+      <div className="absolute left-0 right-0 top-full mt-0.5 flex justify-between px-1 text-[8px] font-mono text-muted-foreground/30 pointer-events-none">
+        <span>{formatTime(xMin)}</span>
+        <span>{formatTime(xMin + xSpan / 2)}</span>
+        <span>{formatTime(xMax)}</span>
+      </div>
+    </div>
   );
 }
 
