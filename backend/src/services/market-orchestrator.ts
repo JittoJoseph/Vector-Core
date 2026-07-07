@@ -32,6 +32,7 @@ import type { MarketResolvedEvent } from "../interfaces/websocket-types.js";
 import { executionPolicy } from "./execution-policy.js";
 
 const logger = createModuleLogger("distribution-orchestrator");
+import { notifyDiscordEntry } from "../utils/discord.js";
 
 import {
   parseBucketMinMax,
@@ -995,6 +996,13 @@ export class MarketOrchestrator extends EventEmitter {
           "Taker entry executed",
         );
         this.emit("tradeOpened", { trade });
+        notifyDiscordEntry({
+          campaignTitle: cand.campaign.title,
+          bucketTitle: cand.bucket.groupItemTitle,
+          entryPrice: execResult.averagePrice.toFixed(8),
+          shares: execResult.totalShares.toFixed(8),
+          cost: execResult.netCost.toFixed(8),
+        });
       }
     } catch (err) {
       logger.error({ err }, "Simulated trade creation failed");

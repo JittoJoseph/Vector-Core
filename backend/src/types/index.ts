@@ -50,6 +50,9 @@ export const ConfigSchema = z.object({
   logging: z.object({
     level: z.enum(["trace", "debug", "info", "warn", "error", "fatal"]),
   }),
+  notifications: z.object({
+    discordWebhookUrl: z.string().optional(),
+  }),
   env: z.enum(["development", "production", "test"]),
 });
 

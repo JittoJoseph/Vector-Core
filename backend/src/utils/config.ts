@@ -79,6 +79,9 @@ export function loadConfig(): Config {
     logging: {
       level: env("LOG_LEVEL", "info"),
     },
+    notifications: {
+      discordWebhookUrl: process.env.DISCORD_WEBHOOK_URL,
+    },
     env: env("NODE_ENV", "development"),
   };
 
