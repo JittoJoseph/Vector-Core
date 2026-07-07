@@ -729,7 +729,7 @@ export class MarketOrchestrator extends EventEmitter {
     });
 
     if (counts.inBand > 0) {
-      logger.info(
+      logger.debug(
         {
           campaignId: campaign.id,
           inBand: counts.inBand,
