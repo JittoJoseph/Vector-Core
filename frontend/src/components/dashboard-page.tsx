@@ -765,10 +765,10 @@ export function DashboardPage() {
 
                 <div className="flex justify-between items-end">
                   <span className="text-[10px] text-muted-foreground uppercase tracking-widest">
-                    Expected Profit Min
+                    Min Risk/Reward
                   </span>
                   <span className="text-[11px] font-mono text-emerald-400 tabular-nums">
-                    ${stats?.config.minExpectedNetProfit || 0}
+                    {stats?.config.minRiskReward ?? 0}×
                   </span>
                 </div>
 
@@ -786,8 +786,15 @@ export function DashboardPage() {
                     Stop Loss
                   </span>
                   <span className="text-[11px] font-mono text-foreground tabular-nums">
-                    low −{Math.round((stats?.config.stopLossBufferBelowLow || 0) * 100)}¢, floor{" "}
-                    {Math.round((stats?.config.stopLossAbsoluteFloor || 0) * 100)}¢
+                    low −
+                    {Math.round(
+                      (stats?.config.stopLossBufferBelowLow || 0) * 100,
+                    )}
+                    ¢, floor{" "}
+                    {Math.round(
+                      (stats?.config.stopLossAbsoluteFloor || 0) * 100,
+                    )}
+                    ¢
                   </span>
                 </div>
               </div>

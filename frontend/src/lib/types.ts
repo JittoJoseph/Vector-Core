@@ -54,21 +54,22 @@ export interface LiveMarketInfo {
   status: "OPEN" | "AWAITING_RESOLUTION" | "RESOLVED";
 }
 
-export interface DipRecoveryAnalysis {
+export interface RecoveryAnalysis {
   recentLow: number;
   lastPrice: number;
-  dipped: boolean;
-  recovered: boolean;
-  pass: boolean;
+  priorPrice: number;
+  rising: boolean;
+  aboveLow: boolean;
+  isRecovery: boolean;
 }
 
 export interface EntryGateSnapshot {
-  campaignAgeFraction: number | null;
-  bucketDistance: number;
-  tailYesMass: number;
-  modalMargin: number;
-  dip: DipRecoveryAnalysis | null;
-  stopNoPrice?: number;
+  recovery?: RecoveryAnalysis | null;
+  riskReward?: number;
+  riskAnchor?: number;
+  entryMassAtOrBelow?: number;
+  entryDistanceToModal?: number;
+  modalBucketAtEntry?: string;
   ladderYes?: Record<string, number>;
 }
 
@@ -117,10 +118,8 @@ export interface ScanTelemetry {
   entered: number;
   rejected: {
     band: number;
-    age: number;
-    tail: number;
-    margin: number;
     recovery: number;
+    riskreward: number;
     other: number;
   };
 }
@@ -139,18 +138,25 @@ export interface PriceHistoryResponse {
   recentLow?: number | null;
 }
 
+export type BucketStatus =
+  | "modal"
+  | "above"
+  | "held"
+  | "band"
+  | "recovery"
+  | "riskreward"
+  | "other"
+  | "eligible"
+  | "pending";
+
 export interface StrategyBucket {
   id: string;
   groupItemTitle: string;
   noPrice: string | null;
   noTokenId: string;
-  status: "held" | "band" | "age" | "tail" | "margin" | "eligible";
-  gateMetrics: {
-    campaignAgeFraction: number | null;
-    bucketDistance: number;
-    tailYesMass: number;
-    modalMargin: number;
-  };
+  isModal: boolean;
+  isCandidate: boolean;
+  status: BucketStatus;
 }
 
 export interface StrategyCampaign {
@@ -193,8 +199,7 @@ export interface SystemStats {
   config: {
     minNoEntryPrice: number;
     maxNoEntryPrice: number;
-
-    minExpectedNetProfit: number;
+    minRiskReward: number;
     startingCapital: number;
     maxPositions: number;
     stopLossEnabled: boolean;

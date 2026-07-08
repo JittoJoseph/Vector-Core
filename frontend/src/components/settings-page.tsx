@@ -377,8 +377,8 @@ export function SettingsPage() {
                     />
 
                     <ConfigItem
-                      label="Min Expected Net Profit"
-                      value={`$${stats.config.minExpectedNetProfit}`}
+                      label="Min Risk/Reward"
+                      value={`${stats.config.minRiskReward}×`}
                     />
                   </div>
                 ) : (
