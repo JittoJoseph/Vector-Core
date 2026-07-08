@@ -1,12 +1,7 @@
 /**
- * Threshold-calibration backtest for the ladder-aware entry gates.
- *
- * Read-only against the DB; fetches Polymarket /prices-history per YES token
- * to reconstruct the ladder over time for closed campaigns, then replays the
- * gated entry policy with per-gate ablation so thresholds can be calibrated.
- *
- * Limitation: prices-history is trade/mid price, not the live ask, so entry
- * and stop levels carry roughly spread/2 of error.
+ * Backtest: replays the recovery + R:R entry over closed campaigns under each
+ * exit model (ladder / floor / none) to see which wins. Read-only; reconstructs
+ * the ladder from Polymarket /prices-history (trade/mid price, ~spread/2 error).
  *
  * Usage: npx tsx src/scripts/backtest-entry-gates.ts
  */
@@ -18,49 +13,50 @@ import { getConfig } from "../utils/config.js";
 import {
   parseBucketMinMax,
   isCandidateBucket,
-  cumulativeYesMassBelow,
-  modalMarginBelow,
+  findModalBucket,
+  yesMassAtOrBelow,
   bucketDistanceBelowModal,
-  campaignAgeFraction,
-  analyzeDipRecovery,
-  isRecoveryEntryAllowed,
-  computeStopNoPrice,
-  evaluateSyncEntryGates,
+  analyzeRecovery,
+  riskReward,
+  riskAnchorNoPrice,
+  evaluateLadderExit,
 } from "../utils/distribution-logic.js";
 
 const STEP_SEC = 600; // 10-minute grid, matches fidelity=10
 
+type BucketRow = typeof schema.distributionBuckets.$inferSelect;
+type CampaignRow = typeof schema.distributionCampaigns.$inferSelect;
+
 interface BucketSeries {
-  bucket: typeof schema.distributionBuckets.$inferSelect;
+  bucket: BucketRow;
   history: Array<{ t: number; p: number }>; // YES price
 }
 
 interface SimTrade {
-  campaignId: string;
   bucketTitle: string;
   entryT: number;
   entryNoPrice: number;
-  stopNoPrice: number;
-  outcome: "WIN" | "STOP" | "OPEN_AT_END";
+  outcome: "WIN" | "EXIT" | "OPEN_AT_END";
   exitNoPrice: number;
   pnlPerShare: number;
   maxDrawdown: number;
 }
 
-interface GateConfig {
-  minCampaignAgeFraction: number;
-  maxTailYesMass: number;
-  minModalMargin: number;
-  dipLookbackHours: number;
-  highConfidenceNoPrice: number;
-  reboundEpsilon: number;
-  stopBufferBelowLow: number;
-  stopAbsoluteFloor: number;
-  disabled?: string; // gate key to ablate: age|tail|margin|trajectory
+interface PolicyConfig {
+  min: number;
+  max: number;
+  lookbackHours: number;
+  confirmHours: number;
+  epsilon: number;
+  minRiskReward: number;
+  stopBuffer: number;
+  floor: number;
+  exitMassRise: number;
+  exitModalDistance: number;
+  exit: "ladder" | "floor" | "none";
 }
 
 function yesAt(series: BucketSeries, t: number): number | null {
-  // History is sorted ascending; last point at or before t.
   let latest: number | null = null;
   for (const h of series.history) {
     if (h.t > t) break;
@@ -70,17 +66,16 @@ function yesAt(series: BucketSeries, t: number): number | null {
 }
 
 function replayCampaign(
-  campaign: typeof schema.distributionCampaigns.$inferSelect,
+  campaign: CampaignRow,
   series: BucketSeries[],
-  gates: GateConfig,
-  entryBand: { min: number; max: number },
+  cfg: PolicyConfig,
 ): SimTrade[] {
   const allT = series.flatMap((s) => s.history.map((h) => h.t));
   if (allT.length === 0) return [];
   const tStart = Math.min(...allT);
   const tEnd = Math.max(...allT);
 
-  const open = new Map<string, SimTrade>(); // bucketTitle -> trade
+  const open = new Map<string, SimTrade & { entryMass: number }>();
   const done: SimTrade[] = [];
 
   for (let t = tStart; t <= tEnd; t += STEP_SEC) {
@@ -90,29 +85,42 @@ function replayCampaign(
         yesPrice: yesAt(s, t),
         series: s,
       }))
-      .filter((b) => b.yesPrice !== null);
+      .filter((b) => b.yesPrice !== null) as Array<{
+      groupItemTitle: string;
+      yesPrice: number;
+      series: BucketSeries;
+    }>;
     if (ladder.length < 2) continue;
 
-    let modal = ladder[0]!;
-    for (const b of ladder) if (b.yesPrice! > modal.yesPrice!) modal = b;
+    const modal = findModalBucket(ladder)!;
     const [modalMin] = parseBucketMinMax(modal.groupItemTitle);
-    const modalMargin = modalMarginBelow(ladder, modal.groupItemTitle);
-    const age = campaignAgeFraction(
-      campaign.startDate,
-      campaign.endDate,
-      new Date(t * 1000),
-    );
 
     for (const b of ladder) {
-      const noPrice = 1 - b.yesPrice!;
+      const noPrice = 1 - b.yesPrice;
       const title = b.groupItemTitle;
 
-      // Track open positions: context-relative stop + drawdown.
       const pos = open.get(title);
       if (pos) {
         pos.maxDrawdown = Math.min(pos.maxDrawdown, noPrice - pos.entryNoPrice);
-        if (noPrice <= pos.stopNoPrice) {
-          pos.outcome = "STOP";
+        let exit = false;
+        if (cfg.exit === "floor" && noPrice <= cfg.floor) exit = true;
+        if (cfg.exit === "ladder") {
+          if (noPrice <= cfg.floor) exit = true;
+          else {
+            const mass = yesMassAtOrBelow(ladder, title);
+            const dist = bucketDistanceBelowModal(
+              ladder,
+              title,
+              modal.groupItemTitle,
+            );
+            exit = evaluateLadderExit(pos.entryMass, mass, dist, {
+              massRise: cfg.exitMassRise,
+              modalDistanceExit: cfg.exitModalDistance,
+            }).exit;
+          }
+        }
+        if (exit) {
+          pos.outcome = "EXIT";
           pos.exitNoPrice = noPrice;
           pos.pnlPerShare = noPrice - pos.entryNoPrice;
           done.push(pos);
@@ -121,50 +129,33 @@ function replayCampaign(
         continue;
       }
 
-      // Entry policy.
       if (!isCandidateBucket(title, modalMin)) continue;
-      if (noPrice < entryBand.min || noPrice > entryBand.max) continue;
+      if (noPrice < cfg.min || noPrice > cfg.max) continue;
 
-      const metrics = {
-        campaignAgeFraction: age,
-        bucketDistance: bucketDistanceBelowModal(
-          ladder,
-          title,
-          modal.groupItemTitle,
-        ),
-        tailYesMass: cumulativeYesMassBelow(ladder, title),
-        modalMargin,
-      };
-      const gate = evaluateSyncEntryGates(metrics, gates);
-      const failed = gate.failed.filter((f) => f !== gates.disabled);
-      if (failed.length > 0) continue;
-
-      // Recovery gate (primary). recentLow also anchors the stop.
       const noHistory = b.series.history
         .filter((h) => h.t <= t)
         .map((h) => ({ t: h.t, p: 1 - h.p }));
-      const dip = analyzeDipRecovery(
+      const rec = analyzeRecovery(
         noHistory,
         t,
-        gates.dipLookbackHours,
-        gates.reboundEpsilon,
+        cfg.lookbackHours,
+        cfg.confirmHours,
+        cfg.epsilon,
       );
-      if (!dip) continue;
-      if (gates.disabled !== "trajectory") {
-        const recovery = isRecoveryEntryAllowed(dip, noPrice, gates);
-        if (!recovery.pass) continue;
-      }
+      if (!rec || !rec.isRecovery) continue;
+
+      const anchor = riskAnchorNoPrice(
+        rec.recentLow,
+        cfg.stopBuffer,
+        cfg.floor,
+      );
+      if (riskReward(noPrice, anchor) < cfg.minRiskReward) continue;
 
       open.set(title, {
-        campaignId: campaign.id,
         bucketTitle: title,
         entryT: t,
         entryNoPrice: noPrice,
-        stopNoPrice: computeStopNoPrice(
-          dip.recentLow,
-          gates.stopBufferBelowLow,
-          gates.stopAbsoluteFloor,
-        ),
+        entryMass: yesMassAtOrBelow(ladder, title),
         outcome: "OPEN_AT_END",
         exitNoPrice: noPrice,
         pnlPerShare: 0,
@@ -173,7 +164,7 @@ function replayCampaign(
     }
   }
 
-  // Resolve remaining positions from final prices: NO wins if final YES < 0.5.
+  // Resolve survivors from final prices: NO wins if final YES < 0.5.
   for (const pos of open.values()) {
     const s = series.find((x) => x.bucket.groupItemTitle === pos.bucketTitle)!;
     const finalYes = s.history[s.history.length - 1]!.p;
@@ -182,7 +173,7 @@ function replayCampaign(
       pos.exitNoPrice = 1;
       pos.pnlPerShare = 1 - pos.entryNoPrice;
     } else {
-      pos.outcome = "STOP"; // NO lost at resolution
+      pos.outcome = "EXIT";
       pos.exitNoPrice = 0;
       pos.pnlPerShare = -pos.entryNoPrice;
     }
@@ -192,14 +183,16 @@ function replayCampaign(
 }
 
 function summarize(label: string, trades: SimTrade[]): void {
-  const wins = trades.filter((t) => t.outcome === "WIN").length;
-  const stops = trades.filter((t) => t.outcome === "STOP").length;
+  const wins = trades.filter((t) => t.pnlPerShare > 0).length;
+  const losses = trades.length - wins;
   const pnl = trades.reduce((s, t) => s + t.pnlPerShare, 0);
   const worstDd = Math.min(0, ...trades.map((t) => t.maxDrawdown));
+  const avg = trades.length ? pnl / trades.length : 0;
   console.log(
-    `${label.padEnd(24)} entries=${String(trades.length).padStart(3)} ` +
-      `wins=${String(wins).padStart(3)} stops=${String(stops).padStart(3)} ` +
-      `pnl/share=${pnl.toFixed(3).padStart(8)} worstDrawdown=${worstDd.toFixed(3)}`,
+    `${label.padEnd(22)} n=${String(trades.length).padStart(3)} ` +
+      `win=${String(wins).padStart(3)} loss=${String(losses).padStart(3)} ` +
+      `pnl/sh=${pnl.toFixed(3).padStart(8)} avg=${avg.toFixed(4).padStart(8)} ` +
+      `worstDD=${worstDd.toFixed(3)}`,
   );
 }
 
@@ -228,27 +221,27 @@ async function main(): Promise<void> {
       ),
     );
 
-  const gateCfg: Omit<GateConfig, "disabled"> = {
-    minCampaignAgeFraction: config.strategy.entryMinCampaignAgeFraction,
-    maxTailYesMass: config.strategy.entryMaxTailYesMass,
-    minModalMargin: config.strategy.entryMinModalMargin,
-    dipLookbackHours: config.strategy.entryDipLookbackHours,
-    highConfidenceNoPrice: config.strategy.entryHighConfidenceNoPrice,
-    reboundEpsilon: config.strategy.entryReboundEpsilon,
-    stopBufferBelowLow: config.strategy.stopLossBufferBelowLow,
-    stopAbsoluteFloor: config.strategy.stopLossAbsoluteFloor,
-  };
-  const entryBand = {
+  const base: Omit<PolicyConfig, "exit"> = {
     min: config.strategy.minNoEntryPrice,
     max: config.strategy.maxNoEntryPrice,
+    lookbackHours: config.strategy.entryDipLookbackHours,
+    confirmHours: config.strategy.entryConfirmHours,
+    epsilon: config.strategy.entryReboundEpsilon,
+    minRiskReward: config.strategy.entryMinRiskReward,
+    stopBuffer: config.strategy.stopLossBufferBelowLow,
+    floor: config.strategy.stopLossAbsoluteFloor,
+    exitMassRise: config.strategy.exitMassRise,
+    exitModalDistance: config.strategy.exitModalDistance,
   };
 
-  const variants: Array<{ label: string; disabled?: string }> = [
-    { label: "all gates" },
-    { label: "ablate: age", disabled: "age" },
-    { label: "ablate: tail", disabled: "tail" },
-    { label: "ablate: margin", disabled: "margin" },
-    { label: "ablate: trajectory", disabled: "trajectory" },
+  const variants: Array<{ label: string; cfg: PolicyConfig }> = [
+    { label: "ladder exit", cfg: { ...base, exit: "ladder" } },
+    { label: "floor stop only", cfg: { ...base, exit: "floor" } },
+    { label: "no stop (hold)", cfg: { ...base, exit: "none" } },
+    {
+      label: "no R:R + ladder",
+      cfg: { ...base, minRiskReward: 0, exit: "ladder" },
+    },
   ];
   const results = new Map<string, SimTrade[]>(
     variants.map((v) => [v.label, []]),
@@ -257,8 +250,8 @@ async function main(): Promise<void> {
   for (const campaign of campaigns) {
     const buckets = allBuckets.filter((b) => b.campaignId === campaign.id);
     if (buckets.length === 0) continue;
+    console.log(`Fetching: ${campaign.title} (${buckets.length} buckets)`);
 
-    console.log(`Fetching history: ${campaign.title} (${buckets.length} buckets)`);
     const series: BucketSeries[] = [];
     for (const bucket of buckets) {
       try {
@@ -268,29 +261,20 @@ async function main(): Promise<void> {
         });
         if (history.length > 0) series.push({ bucket, history });
       } catch (err) {
-        console.warn(`  skipping ${bucket.groupItemTitle}: ${err}`);
+        console.warn(`  skip ${bucket.groupItemTitle}: ${err}`);
       }
     }
     await new Promise((r) => setTimeout(r, 100));
 
     for (const v of variants) {
-      results
-        .get(v.label)!
-        .push(
-          ...replayCampaign(
-            campaign,
-            series,
-            { ...gateCfg, disabled: v.disabled },
-            entryBand,
-          ),
-        );
+      results.get(v.label)!.push(...replayCampaign(campaign, series, v.cfg));
     }
   }
 
-  console.log(`\n=== Backtest over ${campaigns.length} closed campaigns ===`);
+  console.log(`\n=== ${campaigns.length} closed campaigns ===`);
   for (const v of variants) summarize(v.label, results.get(v.label)!);
   console.log(
-    "\nNote: history is trade/mid price, not the ask; entries/stops carry ~spread/2 error.",
+    "\nNote: history is trade/mid price, not the ask; entries/exits carry ~spread/2 error.",
   );
   process.exit(0);
 }

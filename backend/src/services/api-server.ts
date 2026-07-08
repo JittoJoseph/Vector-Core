@@ -22,11 +22,7 @@ import {
   isCandidateBucket,
   isRelevantBucket,
   downsamplePriceHistory,
-  modalMarginBelow,
-  campaignAgeFraction,
-  buildEntryGateMetrics,
-  evaluateSyncEntryGates,
-  analyzeDipRecovery,
+  analyzeRecovery,
 } from "../utils/distribution-logic.js";
 
 // Point cap for lazily-served price-history curves (compact chart, small payload).
@@ -45,7 +41,7 @@ function buildSystemState() {
     config: {
       minNoEntryPrice: config.strategy.minNoEntryPrice,
       maxNoEntryPrice: config.strategy.maxNoEntryPrice,
-      minExpectedNetProfit: config.strategy.minExpectedNetProfit,
+      minRiskReward: config.strategy.entryMinRiskReward,
       startingCapital: config.portfolio.startingCapital,
       maxPositions: config.strategy.maxSimultaneousPositions,
       stopLossEnabled: config.strategy.stopLossEnabled,
@@ -339,9 +335,8 @@ export class ApiServer {
       }
     });
 
-    // Strategy observability: what the engine is currently seeing and why it is
-    // (or isn't) entering. Per-bucket status reuses buildEntryGateMetrics — the
-    // same metric definition the scan loop uses — so there is one source of truth.
+    // Strategy observability: the ladder per campaign, each bucket carrying its
+    // real last-scan status from the orchestrator (no strategy logic recomputed).
     this.app.get("/api/strategy", async (_req, res) => {
       try {
         const db = getDb();
@@ -368,67 +363,34 @@ export class ApiServer {
               campaigns.map((c) => c.id),
             ),
           );
-        const heldBucketIds = new Set(
-          orchestrator.getOpenPositions().map((p) => p.bucketId),
-        );
-        const gateCfg = {
-          minCampaignAgeFraction: config.strategy.entryMinCampaignAgeFraction,
-          maxTailYesMass: config.strategy.entryMaxTailYesMass,
-          minModalMargin: config.strategy.entryMinModalMargin,
-        };
-        const band = {
-          min: config.strategy.minNoEntryPrice,
-          max: config.strategy.maxNoEntryPrice,
-        };
-
         const out = campaigns.map((c) => {
           const buckets = allBuckets.filter((b) => b.campaignId === c.id);
           const metrics = orchestrator.getActiveCampaignMetrics(c.id);
           const modal = findModalBucket(buckets);
-          if (!modal) {
-            return {
-              id: c.id,
-              title: c.title,
-              slug: c.slug,
-              modalBucketTitle: null,
-              inBand: metrics.inBand,
-              rejected: metrics.rejected,
-              buckets: [],
-            };
-          }
-          const [modalMin] = parseBucketMinMax(modal.groupItemTitle);
-          const ageFraction = campaignAgeFraction(
-            c.startDate,
-            c.endDate,
-            new Date(),
-          );
-          const modalMargin = modalMarginBelow(buckets, modal.groupItemTitle);
+          const modalTitle = modal?.groupItemTitle ?? null;
+          const modalMin = modal
+            ? parseBucketMinMax(modal.groupItemTitle)[0]
+            : Infinity;
 
-          const candidateBuckets = buckets
-            .filter((b) => isCandidateBucket(b.groupItemTitle, modalMin))
+          const ladder = buckets
             .map((b) => {
-              const noPrice = parseFloat(b.noPrice?.toString() ?? "1");
-              const gateMetrics = buildEntryGateMetrics(
-                buckets,
-                b.groupItemTitle,
-                modal.groupItemTitle,
-                ageFraction,
-                modalMargin,
-              );
+              const isModal =
+                modalTitle != null && b.groupItemTitle === modalTitle;
+              const isCandidate = modal
+                ? isCandidateBucket(b.groupItemTitle, modalMin)
+                : false;
               let status: string;
-              if (heldBucketIds.has(b.id)) status = "held";
-              else if (noPrice < band.min || noPrice > band.max) status = "band";
-              else {
-                const gate = evaluateSyncEntryGates(gateMetrics, gateCfg);
-                status = gate.pass ? "eligible" : gate.failed[0]!;
-              }
+              if (isModal) status = "modal";
+              else if (!isCandidate) status = "above";
+              else status = orchestrator.getBucketStatus(b.id) ?? "pending";
               return {
                 id: b.id,
                 groupItemTitle: b.groupItemTitle,
                 noPrice: b.noPrice,
                 noTokenId: b.noTokenId,
+                isModal,
+                isCandidate,
                 status,
-                gateMetrics,
               };
             })
             .sort(
@@ -441,10 +403,10 @@ export class ApiServer {
             id: c.id,
             title: c.title,
             slug: c.slug,
-            modalBucketTitle: modal.groupItemTitle,
+            modalBucketTitle: modalTitle,
             inBand: metrics.inBand,
             rejected: metrics.rejected,
-            buckets: candidateBuckets,
+            buckets: ladder,
           };
         });
 
@@ -568,14 +530,14 @@ export class ApiServer {
             return;
           }
           tokenId = trade.tokenId;
-          entryTs = trade.entryTs ? new Date(trade.entryTs).toISOString() : null;
+          entryTs = trade.entryTs
+            ? new Date(trade.entryTs).toISOString()
+            : null;
           exitTs = trade.exitTs ? new Date(trade.exitTs).toISOString() : null;
           const entrySec = trade.entryTs
             ? Math.floor(new Date(trade.entryTs).getTime() / 1000)
             : nowSec - config.strategy.entryDipLookbackHours * 3600;
-          // Span the SAME window the recovery analysis used (lookback before
-          // entry), so the dip the strategy saw is visible and the chart's low
-          // matches the stored recentLow.
+          // Span the same window the recovery analysis used, so the dip is visible.
           fromSec = entrySec - config.strategy.entryDipLookbackHours * 3600;
           toSec = trade.exitTs
             ? Math.floor(new Date(trade.exitTs).getTime() / 1000)
@@ -607,14 +569,13 @@ export class ApiServer {
           tokenId,
           { startTs: fromSec, endTs: toSec, fidelity: 10 },
         );
-        // For a live candidate bucket there is no frozen snapshot, so the
-        // recovery low is derived here with the SAME function the scan uses.
-        // (Trades carry the authoritative recentLow in their entryGateSnapshot.)
+        // Live buckets have no frozen snapshot, so derive the recovery low here.
         const recentLow = bucketId
-          ? (analyzeDipRecovery(
+          ? (analyzeRecovery(
               history,
               nowSec,
               config.strategy.entryDipLookbackHours,
+              config.strategy.entryConfirmHours,
               config.strategy.entryReboundEpsilon,
             )?.recentLow ?? null)
           : null;
