@@ -135,16 +135,22 @@ describe("riskReward / riskAnchorNoPrice", () => {
 });
 
 describe("evaluateLadderExit", () => {
-  const cfg = { massRise: 0.1, modalDistanceExit: 1 };
-  it("holds when nothing migrated", () => {
-    expect(evaluateLadderExit(0.05, 0.05, 3, cfg).exit).toBe(false);
+  const cfg = { massRise: 0.1, modalStepsIn: 1 };
+  it("holds when nothing changed since entry", () => {
+    // entryDist 3, currentDist 3 — no migration
+    expect(evaluateLadderExit(0.05, 0.05, 3, 3, cfg).exit).toBe(false);
+  });
+  it("does NOT exit a bucket entered next to the modal that stays there", () => {
+    // the churn bug: entered at distance 1, still distance 1 → hold
+    expect(evaluateLadderExit(0.05, 0.05, 1, 1, cfg).exit).toBe(false);
+  });
+  it("exits when the modal migrates closer since entry", () => {
+    // entryDist 2 → currentDist 1: modal moved one step onto us
+    const r = evaluateLadderExit(0.05, 0.05, 2, 1, cfg);
+    expect(r).toEqual({ exit: true, reason: "modal-migrated" });
   });
   it("exits when mass at-or-below rises past the threshold", () => {
-    const r = evaluateLadderExit(0.05, 0.2, 3, cfg);
+    const r = evaluateLadderExit(0.05, 0.2, 3, 3, cfg);
     expect(r).toEqual({ exit: true, reason: "mass-migrated" });
-  });
-  it("exits when the modal migrates within range", () => {
-    const r = evaluateLadderExit(0.05, 0.05, 1, cfg);
-    expect(r).toEqual({ exit: true, reason: "modal-migrated" });
   });
 });

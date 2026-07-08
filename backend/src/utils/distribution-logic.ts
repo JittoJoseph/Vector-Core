@@ -170,16 +170,18 @@ export function riskAnchorNoPrice(
   return Math.max(absoluteFloor, recentLow - bufferBelowLow);
 }
 
-// Ladder-based exit: fire only when the outcome is genuinely migrating onto the
-// bucket (modal within range, or mass at-or-below risen since entry) — not on a
-// raw price dip the ladder doesn't corroborate.
+// Ladder-based exit: fire only when the outcome has genuinely migrated onto the
+// bucket SINCE ENTRY — the modal moved at least modalStepsIn steps closer, or
+// mass at-or-below rose by massRise. Both legs measure change since entry, so a
+// bucket entered next to the modal doesn't exit unless the modal keeps closing.
 export function evaluateLadderExit(
   entryMassAtOrBelow: number,
   currentMassAtOrBelow: number,
+  entryDistanceToModal: number,
   currentDistanceToModal: number,
-  cfg: { massRise: number; modalDistanceExit: number },
+  cfg: { massRise: number; modalStepsIn: number },
 ): { exit: boolean; reason: string | null } {
-  if (currentDistanceToModal <= cfg.modalDistanceExit)
+  if (entryDistanceToModal - currentDistanceToModal >= cfg.modalStepsIn)
     return { exit: true, reason: "modal-migrated" };
   if (currentMassAtOrBelow - entryMassAtOrBelow >= cfg.massRise)
     return { exit: true, reason: "mass-migrated" };

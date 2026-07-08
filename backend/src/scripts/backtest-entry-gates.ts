@@ -52,7 +52,7 @@ interface PolicyConfig {
   stopBuffer: number;
   floor: number;
   exitMassRise: number;
-  exitModalDistance: number;
+  exitModalStepsIn: number;
   exit: "ladder" | "floor" | "none";
 }
 
@@ -75,7 +75,10 @@ function replayCampaign(
   const tStart = Math.min(...allT);
   const tEnd = Math.max(...allT);
 
-  const open = new Map<string, SimTrade & { entryMass: number }>();
+  const open = new Map<
+    string,
+    SimTrade & { entryMass: number; entryDist: number }
+  >();
   const done: SimTrade[] = [];
 
   for (let t = tStart; t <= tEnd; t += STEP_SEC) {
@@ -113,9 +116,9 @@ function replayCampaign(
               title,
               modal.groupItemTitle,
             );
-            exit = evaluateLadderExit(pos.entryMass, mass, dist, {
+            exit = evaluateLadderExit(pos.entryMass, mass, pos.entryDist, dist, {
               massRise: cfg.exitMassRise,
-              modalDistanceExit: cfg.exitModalDistance,
+              modalStepsIn: cfg.exitModalStepsIn,
             }).exit;
           }
         }
@@ -156,6 +159,7 @@ function replayCampaign(
         entryT: t,
         entryNoPrice: noPrice,
         entryMass: yesMassAtOrBelow(ladder, title),
+        entryDist: bucketDistanceBelowModal(ladder, title, modal.groupItemTitle),
         outcome: "OPEN_AT_END",
         exitNoPrice: noPrice,
         pnlPerShare: 0,
@@ -231,7 +235,7 @@ async function main(): Promise<void> {
     stopBuffer: config.strategy.stopLossBufferBelowLow,
     floor: config.strategy.stopLossAbsoluteFloor,
     exitMassRise: config.strategy.exitMassRise,
-    exitModalDistance: config.strategy.exitModalDistance,
+    exitModalStepsIn: config.strategy.exitModalStepsIn,
   };
 
   const variants: Array<{ label: string; cfg: PolicyConfig }> = [

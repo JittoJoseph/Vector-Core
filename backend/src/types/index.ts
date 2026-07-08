@@ -37,7 +37,7 @@ export const ConfigSchema = z.object({
     stopLossBufferBelowLow: z.number().min(0).max(1),
     stopLossAbsoluteFloor: z.number().min(0).max(1),
     exitMassRise: z.number().min(0).max(1),
-    exitModalDistance: z.number().int().nonnegative(),
+    exitModalStepsIn: z.number().int().positive(),
   }),
   admin: z.object({
     password: z.string().min(1),

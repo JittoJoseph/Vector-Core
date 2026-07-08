@@ -72,7 +72,8 @@ interface OpenPosition {
   actualCost: number;
   minNoPriceDuringPosition: number | null;
   stopNoPrice: number; // catastrophe backstop (floor)
-  entryMassAtOrBelow: number; // ladder-exit reference
+  entryMassAtOrBelow: number; // ladder-exit references (change since entry)
+  entryDistanceToModal: number;
   stopLossConditionFirstSeen?: number | null;
   ladderExitFirstSeen?: number | null;
   isExiting?: boolean;
@@ -716,10 +717,11 @@ export class MarketOrchestrator extends EventEmitter {
       const { exit, reason } = evaluateLadderExit(
         pos.entryMassAtOrBelow,
         currentMass,
+        pos.entryDistanceToModal,
         currentDistance,
         {
           massRise: config.strategy.exitMassRise,
-          modalDistanceExit: config.strategy.exitModalDistance,
+          modalStepsIn: config.strategy.exitModalStepsIn,
         },
       );
 
@@ -992,6 +994,7 @@ export class MarketOrchestrator extends EventEmitter {
           minNoPriceDuringPosition: null,
           stopNoPrice,
           entryMassAtOrBelow: cand.entryMassAtOrBelow,
+          entryDistanceToModal: cand.entryDistanceToModal,
         });
         await logAudit(
           "info",
@@ -1239,6 +1242,7 @@ export class MarketOrchestrator extends EventEmitter {
     for (const { trade } of rows) {
       const snap = (trade.entryGateSnapshot ?? {}) as {
         entryMassAtOrBelow?: number;
+        entryDistanceToModal?: number;
       };
       this.openPositions.set(trade.id, {
         tradeId: trade.id,
@@ -1258,6 +1262,7 @@ export class MarketOrchestrator extends EventEmitter {
           ? parseFloat(trade.stopNoPrice)
           : config.strategy.stopLossAbsoluteFloor,
         entryMassAtOrBelow: snap.entryMassAtOrBelow ?? 0,
+        entryDistanceToModal: snap.entryDistanceToModal ?? 0,
       });
     }
   }

@@ -61,7 +61,7 @@ export function loadConfig(): Config {
       stopLossBufferBelowLow: envNum("STOP_LOSS_BUFFER_BELOW_LOW", 0.03),
       stopLossAbsoluteFloor: envNum("STOP_LOSS_ABSOLUTE_FLOOR", 0.6),
       exitMassRise: envNum("EXIT_MASS_RISE", 0.1),
-      exitModalDistance: envNum("EXIT_MODAL_DISTANCE", 1),
+      exitModalStepsIn: envNum("EXIT_MODAL_STEPS_IN", 1),
     },
     admin: {
       password: env("ADMIN_PASSWORD", isTest ? "test-admin" : undefined),
