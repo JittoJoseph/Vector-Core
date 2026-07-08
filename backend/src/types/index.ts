@@ -21,21 +21,23 @@ export const ConfigSchema = z.object({
     minNoEntryPrice: z.number().min(0).max(1),
     maxNoEntryPrice: z.number().min(0).max(1),
 
-    minExpectedNetProfit: z.number().positive(),
     maxSimultaneousPositions: z.number().int().positive(),
     consecutiveLossPauseLimit: z.number().int().nonnegative(),
     riskAutoResumeEnabled: z.boolean(),
     riskAutoResumeCooldownMs: z.number().int().positive(),
+
+    // Entry — recovery signal + risk/reward.
+    entryDipLookbackHours: z.number().positive(),
+    entryConfirmHours: z.number().positive(),
+    entryReboundEpsilon: z.number().min(0).max(1),
+    entryMinRiskReward: z.number().positive(),
+
+    // Exit — ladder-based primary + catastrophe backstop.
     stopLossEnabled: z.boolean(),
     stopLossBufferBelowLow: z.number().min(0).max(1),
     stopLossAbsoluteFloor: z.number().min(0).max(1),
-
-    entryMinCampaignAgeFraction: z.number().min(0).max(1),
-    entryMaxTailYesMass: z.number().min(0).max(1),
-    entryMinModalMargin: z.number().min(0).max(1),
-    entryDipLookbackHours: z.number().positive(),
-    entryHighConfidenceNoPrice: z.number().min(0).max(1),
-    entryReboundEpsilon: z.number().min(0).max(1),
+    exitMassRise: z.number().min(0).max(1),
+    exitModalDistance: z.number().int().nonnegative(),
   }),
   admin: z.object({
     password: z.string().min(1),

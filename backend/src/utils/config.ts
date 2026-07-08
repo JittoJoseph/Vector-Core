@@ -42,30 +42,26 @@ export function loadConfig(): Config {
     },
     strategy: {
       scanIntervalMs: envNum("SCAN_INTERVAL_MS", 60_000),
-      // Outer sanity bounds; the recovery gate, not this band, drives entry.
       minNoEntryPrice: envNum("MIN_NO_ENTRY_PRICE", 0.75),
-      maxNoEntryPrice: envNum("MAX_NO_ENTRY_PRICE", 0.97),
+      maxNoEntryPrice: envNum("MAX_NO_ENTRY_PRICE", 0.9),
 
-      minExpectedNetProfit: envNum("MIN_EXPECTED_NET_PROFIT_USDC", 0.1),
       maxSimultaneousPositions: envNum("MAX_SIMULTANEOUS_POSITIONS", 5),
       consecutiveLossPauseLimit: envNum("CONSECUTIVE_LOSS_PAUSE_LIMIT", 3),
       riskAutoResumeEnabled: envBool("RISK_AUTO_RESUME_ENABLED", false),
       riskAutoResumeCooldownMs: envNum("RISK_AUTO_RESUME_COOLDOWN_MS", 300_000),
+
+      // Entry: genuine recovery + risk/reward.
+      entryDipLookbackHours: envNum("ENTRY_DIP_LOOKBACK_HOURS", 48),
+      entryConfirmHours: envNum("ENTRY_CONFIRM_HOURS", 6),
+      entryReboundEpsilon: envNum("ENTRY_REBOUND_EPSILON", 0.03),
+      entryMinRiskReward: envNum("ENTRY_MIN_RISK_REWARD", 1.2),
+
+      // Exit: ladder-based primary + catastrophe backstop.
       stopLossEnabled: envBool("STOP_LOSS_ENABLED", true),
-      // Stop sits this far below the recovery low, never under the floor.
       stopLossBufferBelowLow: envNum("STOP_LOSS_BUFFER_BELOW_LOW", 0.03),
       stopLossAbsoluteFloor: envNum("STOP_LOSS_ABSOLUTE_FLOOR", 0.6),
-
-      entryMinCampaignAgeFraction: envNum("ENTRY_MIN_CAMPAIGN_AGE_FRACTION", 0.3),
-      // Secondary sanity bounds (mass strictly below candidate; modal stability).
-      entryMaxTailYesMass: envNum("ENTRY_MAX_TAIL_YES_MASS", 0.25),
-      entryMinModalMargin: envNum("ENTRY_MIN_MODAL_MARGIN", 0.05),
-      entryDipLookbackHours: envNum("ENTRY_DIP_LOOKBACK_HOURS", 24),
-      // Recovery gate: at/above high-confidence a stable price is enough; below
-      // it, entry must sit at least one rebound-epsilon above the recovery low.
-      // The same epsilon defines what counts as a dip and as a recovery.
-      entryHighConfidenceNoPrice: envNum("ENTRY_HIGH_CONFIDENCE_NO_PRICE", 0.9),
-      entryReboundEpsilon: envNum("ENTRY_REBOUND_EPSILON", 0.03),
+      exitMassRise: envNum("EXIT_MASS_RISE", 0.1),
+      exitModalDistance: envNum("EXIT_MODAL_DISTANCE", 1),
     },
     admin: {
       password: env("ADMIN_PASSWORD", isTest ? "test-admin" : undefined),
