@@ -2,7 +2,11 @@
 
 import { useEffect, useState } from "react";
 import type { SimulatedTrade, LiveMarketPrice, PricePoint } from "@/lib/types";
-import { formatPnl, polymarketMarketUrl, calculateTradeUnrealizedPnl } from "@/lib/utils";
+import {
+  formatPnl,
+  polymarketMarketUrl,
+  calculateTradeUnrealizedPnl,
+} from "@/lib/utils";
 import { getApiClient } from "@/lib/api-client";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { ExternalLink, X } from "lucide-react";
@@ -26,8 +30,7 @@ export function TradeDetailPopup({
   const [history, setHistory] = useState<PricePoint[] | null>(null);
   const [histLoading, setHistLoading] = useState(false);
 
-  // Lazily pull the NO-price curve (entry−3h → now/exit) once the popup opens.
-  // Stateless on the server; nothing is stored or polled.
+  // Lazily fetch the price curve once the popup opens.
   useEffect(() => {
     if (!open || !tradeId) return;
     let cancelled = false;
@@ -56,7 +59,7 @@ export function TradeDetailPopup({
   const pnl = parseFloat(trade.realizedPnl || "0");
   const exitPrice = trade.exitPrice ? parseFloat(trade.exitPrice) : null;
   const expectedProfit = parseFloat(trade.expectedNetProfit || "0");
-  
+
   const shares = parseFloat(trade.entryShares);
   const actualCost = parseFloat(trade.actualCost);
 
@@ -76,8 +79,10 @@ export function TradeDetailPopup({
   const minPrice = trade.minNoPriceDuringPosition
     ? parseFloat(trade.minNoPriceDuringPosition)
     : null;
-  const recentLow = snap?.dip?.recentLow ?? null;
+  const recovery = snap?.recovery ?? null;
+  const recentLow = recovery?.recentLow ?? null;
   const aboveLow = recentLow != null ? entryPrice - recentLow : null;
+  const rr = snap?.riskReward ?? null;
 
   const statusBadgeCls = !isClosed
     ? "text-blue-400 border-blue-400/25 bg-blue-400/5"
@@ -85,7 +90,9 @@ export function TradeDetailPopup({
       ? "text-emerald-400 border-emerald-500/25 bg-emerald-500/5"
       : "text-red-400 border-red-500/25 bg-red-500/5";
 
-  const { pnl: unrealizedPnl, pnlPct: unrealizedPnlPct } = (!isClosed) ? calculateTradeUnrealizedPnl(trade, livePrice || null) : { pnl: null, pnlPct: null };
+  const { pnl: unrealizedPnl, pnlPct: unrealizedPnlPct } = !isClosed
+    ? calculateTradeUnrealizedPnl(trade, livePrice || null)
+    : { pnl: null, pnlPct: null };
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
@@ -94,7 +101,9 @@ export function TradeDetailPopup({
         <div className="shrink-0 px-4 pt-4 pb-3 border-b border-border/20">
           <div className="flex items-start justify-between gap-3">
             <div className="flex items-center gap-1.5 flex-wrap">
-              <span className={`inline-flex items-center text-[10px] font-semibold tracking-[0.15em] px-2 py-0.5 rounded border ${statusBadgeCls}`}>
+              <span
+                className={`inline-flex items-center text-[10px] font-semibold tracking-[0.15em] px-2 py-0.5 rounded border ${statusBadgeCls}`}
+              >
                 {isClosed ? (outcome ?? "SETTLED") : "OPEN"}
               </span>
               <Chip>{trade.side}</Chip>
@@ -131,14 +140,18 @@ export function TradeDetailPopup({
           {trade.bucketGroupTitle && (
             <div className="mt-2 mb-1 flex flex-wrap items-center gap-x-4 gap-y-2">
               <div className="flex items-center gap-2">
-                <span className="text-[10px] uppercase tracking-widest text-muted-foreground/60 font-bold">COUNT BUCKET:</span>
+                <span className="text-[10px] uppercase tracking-widest text-muted-foreground/60 font-bold">
+                  COUNT BUCKET:
+                </span>
                 <span className="text-[11px] font-semibold text-foreground/90 bg-muted/20 px-2 py-0.5 rounded border border-border/10">
                   {trade.bucketGroupTitle}
                 </span>
               </div>
               {trade.modalBucketAtEntry && (
                 <div className="flex items-center gap-2">
-                  <span className="text-[10px] uppercase tracking-widest text-muted-foreground/60 font-bold">MODAL AT ENTRY:</span>
+                  <span className="text-[10px] uppercase tracking-widest text-muted-foreground/60 font-bold">
+                    MODAL AT ENTRY:
+                  </span>
                   <span className="text-[11px] font-semibold text-foreground/90 bg-muted/20 px-2 py-0.5 rounded border border-border/10">
                     {trade.modalBucketAtEntry}
                   </span>
@@ -150,15 +163,21 @@ export function TradeDetailPopup({
 
         {/* ── SCROLLABLE BODY ── */}
         <div className="overflow-y-auto flex-1 overscroll-contain">
-          
-          {/* ── FINANCIALS ── */}
           <Section title="POSITION FINANCIALS">
             <div className="px-4 pt-1 pb-3 space-y-2">
               <StatGroup label="POSITION">
-                <Stat label="ENTRY" value={`${(entryPrice * 100).toFixed(1)}¢`} emphasis />
+                <Stat
+                  label="ENTRY"
+                  value={`${(entryPrice * 100).toFixed(1)}¢`}
+                  emphasis
+                />
                 <Stat label="COST" value={`$${actualCost.toFixed(2)}`} />
                 <Stat label="SHARES" value={shares.toFixed(1)} tone="muted" />
-                <Stat label="FEES" value={`$${entryFees.toFixed(3)}`} tone="muted" />
+                <Stat
+                  label="FEES"
+                  value={`$${entryFees.toFixed(3)}`}
+                  tone="muted"
+                />
               </StatGroup>
 
               <StatGroup label="P&L">
@@ -166,7 +185,11 @@ export function TradeDetailPopup({
                   <>
                     <Stat
                       label="EXIT"
-                      value={exitPrice !== null ? `${(exitPrice * 100).toFixed(1)}¢` : "—"}
+                      value={
+                        exitPrice !== null
+                          ? `${(exitPrice * 100).toFixed(1)}¢`
+                          : "—"
+                      }
                     />
                     <Stat
                       label="REALIZED"
@@ -179,25 +202,40 @@ export function TradeDetailPopup({
                   <>
                     <Stat
                       label="EXP @100¢"
-                      value={expectedProfit > 0 ? formatPnl(expectedProfit) : "—"}
+                      value={
+                        expectedProfit > 0 ? formatPnl(expectedProfit) : "—"
+                      }
                       tone="positive"
                     />
                     <Stat
                       label="UNREALIZED"
-                      tone={unrealizedPnl != null && unrealizedPnl < 0 ? "negative" : "positive"}
+                      tone={
+                        unrealizedPnl != null && unrealizedPnl < 0
+                          ? "negative"
+                          : "positive"
+                      }
                       emphasis
                       value={
                         unrealizedPnl !== null ? (
                           <span className="inline-flex items-baseline gap-1">
                             <NumberFlow
                               value={unrealizedPnl}
-                              format={{ style: "currency", currency: "USD", signDisplay: "always", minimumFractionDigits: 4, maximumFractionDigits: 4 }}
+                              format={{
+                                style: "currency",
+                                currency: "USD",
+                                signDisplay: "always",
+                                minimumFractionDigits: 4,
+                                maximumFractionDigits: 4,
+                              }}
                             />
                             <span className="text-[9px] opacity-70">
-                              ({unrealizedPnlPct! >= 0 ? "+" : ""}{unrealizedPnlPct!.toFixed(1)}%)
+                              ({unrealizedPnlPct! >= 0 ? "+" : ""}
+                              {unrealizedPnlPct!.toFixed(1)}%)
                             </span>
                           </span>
-                        ) : "—"
+                        ) : (
+                          "—"
+                        )
                       }
                     />
                   </>
@@ -206,8 +244,7 @@ export function TradeDetailPopup({
             </div>
           </Section>
 
-          {/* ── DIP TIMELINE ── */}
-          {snap?.dip && (
+          {snap?.recovery && (
             <Section title="DIP TIMELINE">
               {histLoading ? (
                 <TimelinePlaceholder text="loading price history…" />
@@ -229,61 +266,89 @@ export function TradeDetailPopup({
             </Section>
           )}
 
-          {/* ── RECOVERY / RISK ── */}
           {(snap || stopNoPrice !== null || minPrice !== null) && (
             <Section title="RECOVERY / RISK">
               <div className="px-4 pt-1 pb-3 space-y-2">
-                {(recentLow !== null || aboveLow !== null || snap?.dip) && (
+                {recovery && (
                   <StatGroup label="RECOVERY">
                     <Stat
                       label="LOW"
-                      value={recentLow !== null ? `${(recentLow * 100).toFixed(1)}¢` : "—"}
+                      value={
+                        recentLow !== null
+                          ? `${(recentLow * 100).toFixed(1)}¢`
+                          : "—"
+                      }
                       tone="warning"
                       emphasis
                     />
                     <Stat
                       label="ABOVE LOW"
                       value={aboveLow !== null ? signedCents(aboveLow) : "—"}
-                      tone={aboveLow !== null && aboveLow < 0 ? "negative" : "positive"}
+                      tone={
+                        aboveLow !== null && aboveLow < 0
+                          ? "negative"
+                          : "positive"
+                      }
                       emphasis
                     />
                     <Stat
-                      label="DIP"
-                      value={snap?.dip ? (snap.dip.dipped ? "Yes" : "No") : "—"}
-                      tone="muted"
+                      label="RISING"
+                      value={recovery.rising ? "Yes" : "No"}
+                      tone={recovery.rising ? "positive" : "muted"}
                     />
                   </StatGroup>
                 )}
 
-                {(stopNoPrice !== null || minPrice !== null) && (
-                  <StatGroup label="RISK">
-                    <Stat
-                      label="STOP"
-                      value={stopNoPrice !== null ? `${(stopNoPrice * 100).toFixed(1)}¢` : "—"}
-                      tone="negative"
-                      emphasis
-                    />
-                    <Stat
-                      label="STOP DIST"
-                      value={stopNoPrice !== null ? signedCents(stopNoPrice - entryPrice) : "—"}
-                      tone="muted"
-                    />
-                    <Stat
-                      label="MIN HELD"
-                      value={minPrice !== null ? `${(minPrice * 100).toFixed(1)}¢` : "—"}
-                      tone="muted"
-                    />
-                  </StatGroup>
-                )}
+                <StatGroup label="RISK">
+                  <Stat
+                    label="R:R"
+                    value={rr != null ? `${rr.toFixed(2)}×` : "—"}
+                    tone={rr != null && rr >= 1.2 ? "positive" : "negative"}
+                    emphasis
+                  />
+                  <Stat
+                    label="STOP FLOOR"
+                    value={
+                      stopNoPrice !== null
+                        ? `${(stopNoPrice * 100).toFixed(1)}¢`
+                        : "—"
+                    }
+                    tone="muted"
+                  />
+                  <Stat
+                    label="MIN HELD"
+                    value={
+                      minPrice !== null
+                        ? `${(minPrice * 100).toFixed(1)}¢`
+                        : "—"
+                    }
+                    tone="muted"
+                  />
+                </StatGroup>
 
                 {snap && (
                   <StatGroup label="LADDER">
-                    <Stat label="TAIL MASS" value={`${(snap.tailYesMass * 100).toFixed(1)}%`} tone="muted" />
-                    <Stat label="MODAL MARGIN" value={`${(snap.modalMargin * 100).toFixed(1)}¢`} tone="muted" />
-                    <Stat label="DIST MODAL" value={`${snap.bucketDistance} bkt`} tone="muted" />
                     <Stat
-                      label="AGE"
-                      value={snap.campaignAgeFraction != null ? `${(snap.campaignAgeFraction * 100).toFixed(0)}%` : "—"}
+                      label="DIST MODAL"
+                      value={
+                        snap.entryDistanceToModal != null
+                          ? `${snap.entryDistanceToModal} bkt`
+                          : "—"
+                      }
+                      tone="muted"
+                    />
+                    <Stat
+                      label="MASS ≤"
+                      value={
+                        snap.entryMassAtOrBelow != null
+                          ? `${(snap.entryMassAtOrBelow * 100).toFixed(1)}%`
+                          : "—"
+                      }
+                      tone="muted"
+                    />
+                    <Stat
+                      label="MODAL"
+                      value={snap.modalBucketAtEntry ?? "—"}
                       tone="muted"
                     />
                   </StatGroup>
@@ -291,7 +356,6 @@ export function TradeDetailPopup({
               </div>
             </Section>
           )}
-
 
           {/* ── RESOLUTION & RESULT (only if settled) ── */}
           {isClosed && outcome && (
@@ -304,7 +368,9 @@ export function TradeDetailPopup({
                 SETTLED
               </span>
               <span className="text-muted-foreground/20">·</span>
-              <span className={`text-[12px] font-mono font-bold tracking-wider ${isWin ? "text-emerald-400" : "text-red-400"}`}>
+              <span
+                className={`text-[12px] font-mono font-bold tracking-wider ${isWin ? "text-emerald-400" : "text-red-400"}`}
+              >
                 {outcome}
               </span>
               {exitReason && (
@@ -318,22 +384,33 @@ export function TradeDetailPopup({
             </div>
           )}
 
-          {/* ── TIMESTAMPS ── */}
           <Section title="TIMESTAMPS">
             <div className="px-4 pt-1 pb-3 space-y-2">
               <StatGroup label="ENTRY">
                 <Stat label="ENTERED" value={formatTs(trade.entryTs)} />
                 <Stat
                   label="DEADLINE"
-                  value={trade.campaignEndDate ? formatTs(trade.campaignEndDate) : "—"}
+                  value={
+                    trade.campaignEndDate
+                      ? formatTs(trade.campaignEndDate)
+                      : "—"
+                  }
                   tone="muted"
                 />
               </StatGroup>
               <StatGroup label="EXIT">
-                <Stat label="CLOSED" value={trade.exitTs ? formatTs(trade.exitTs) : "—"} tone="muted" />
+                <Stat
+                  label="CLOSED"
+                  value={trade.exitTs ? formatTs(trade.exitTs) : "—"}
+                  tone="muted"
+                />
                 <Stat
                   label="HELD"
-                  value={trade.exitTs ? formatDuration(trade.entryTs, trade.exitTs) : "—"}
+                  value={
+                    trade.exitTs
+                      ? formatDuration(trade.entryTs, trade.exitTs)
+                      : "—"
+                  }
                   tone="muted"
                 />
               </StatGroup>
@@ -355,7 +432,13 @@ function Chip({ children }: { children: React.ReactNode }) {
   );
 }
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+function Section({
+  title,
+  children,
+}: {
+  title: string;
+  children: React.ReactNode;
+}) {
   return (
     <div className="border-b border-border/15 last:border-b-0">
       <div className="px-4 pt-3 pb-2">
@@ -378,7 +461,13 @@ function TimelinePlaceholder({ text }: { text: string }) {
   );
 }
 
-function StatGroup({ label, children }: { label: string; children: React.ReactNode }) {
+function StatGroup({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
   return (
     <div className="flex items-start gap-2.5">
       <span className="w-14 shrink-0 pt-0.5 text-[8px] font-mono font-bold uppercase tracking-[0.15em] text-muted-foreground/25">
