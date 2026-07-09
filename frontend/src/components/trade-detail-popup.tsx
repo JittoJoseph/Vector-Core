@@ -74,15 +74,11 @@ export function TradeDetailPopup({
   const returnPct = actualCost > 0 ? (pnl / actualCost) * 100 : 0;
   const exitReason = trade.exitReason;
 
-  const snap = trade.entryGateSnapshot ?? null;
+  const rv = trade.recoveryRisk ?? null;
   const stopNoPrice = trade.stopNoPrice ? parseFloat(trade.stopNoPrice) : null;
   const minPrice = trade.minNoPriceDuringPosition
     ? parseFloat(trade.minNoPriceDuringPosition)
     : null;
-  const recovery = snap?.recovery ?? null;
-  const recentLow = recovery?.recentLow ?? null;
-  const aboveLow = recentLow != null ? entryPrice - recentLow : null;
-  const rr = snap?.riskReward ?? null;
 
   const statusBadgeCls = !isClosed
     ? "text-blue-400 border-blue-400/25 bg-blue-400/5"
@@ -178,6 +174,15 @@ export function TradeDetailPopup({
                   value={`$${entryFees.toFixed(3)}`}
                   tone="muted"
                 />
+                <Stat
+                  label="MIN HELD"
+                  value={
+                    minPrice !== null
+                      ? `${(minPrice * 100).toFixed(1)}¢`
+                      : "—"
+                  }
+                  tone="muted"
+                />
               </StatGroup>
 
               <StatGroup label="P&L">
@@ -197,13 +202,38 @@ export function TradeDetailPopup({
                       tone={pnl >= 0 ? "positive" : "negative"}
                       emphasis
                     />
+                    <Stat
+                      label="EXP @100¢"
+                      value={
+                        expectedProfit > 0 ? (
+                          <span className="inline-flex items-baseline gap-1">
+                            <span className="font-semibold">{formatPnl(expectedProfit)}</span>
+                            <span className="text-[9px] opacity-70">
+                              (+{((expectedProfit / actualCost) * 100).toFixed(1)}%)
+                            </span>
+                          </span>
+                        ) : (
+                          "—"
+                        )
+                      }
+                      tone="muted"
+                    />
                   </>
                 ) : (
                   <>
                     <Stat
                       label="EXP @100¢"
                       value={
-                        expectedProfit > 0 ? formatPnl(expectedProfit) : "—"
+                        expectedProfit > 0 ? (
+                          <span className="inline-flex items-baseline gap-1">
+                            <span className="font-semibold">{formatPnl(expectedProfit)}</span>
+                            <span className="text-[9px] opacity-70">
+                              (+{((expectedProfit / actualCost) * 100).toFixed(1)}%)
+                            </span>
+                          </span>
+                        ) : (
+                          "—"
+                        )
                       }
                       tone="positive"
                     />
@@ -244,7 +274,7 @@ export function TradeDetailPopup({
             </div>
           </Section>
 
-          {snap?.recovery && (
+          {rv && (
             <Section title="DIP TIMELINE">
               {histLoading ? (
                 <TimelinePlaceholder text="loading price history…" />
@@ -253,7 +283,7 @@ export function TradeDetailPopup({
                   history={history}
                   entryTs={trade.entryTs}
                   entryPrice={entryPrice}
-                  recoveryLow={recentLow}
+                  recoveryLow={rv.recentLow}
                   stopNoPrice={stopNoPrice}
                   exitTs={isClosed ? trade.exitTs : null}
                   exitPrice={isClosed ? exitPrice : null}
@@ -266,35 +296,27 @@ export function TradeDetailPopup({
             </Section>
           )}
 
-          {(snap || stopNoPrice !== null || minPrice !== null) && (
+          {(rv || stopNoPrice !== null) && (
             <Section title="RECOVERY / RISK">
               <div className="px-4 pt-1 pb-3 space-y-2">
-                {recovery && (
+                {rv && (
                   <StatGroup label="RECOVERY">
                     <Stat
                       label="LOW"
-                      value={
-                        recentLow !== null
-                          ? `${(recentLow * 100).toFixed(1)}¢`
-                          : "—"
-                      }
+                      value={`${(rv.recentLow * 100).toFixed(1)}¢`}
                       tone="warning"
                       emphasis
                     />
                     <Stat
                       label="ABOVE LOW"
-                      value={aboveLow !== null ? signedCents(aboveLow) : "—"}
-                      tone={
-                        aboveLow !== null && aboveLow < 0
-                          ? "negative"
-                          : "positive"
-                      }
+                      value={signedCents(rv.aboveLow)}
+                      tone={rv.aboveLow < 0 ? "negative" : "positive"}
                       emphasis
                     />
                     <Stat
                       label="RISING"
-                      value={recovery.rising ? "Yes" : "No"}
-                      tone={recovery.rising ? "positive" : "muted"}
+                      value={rv.rising ? "Yes" : "No"}
+                      tone={rv.rising ? "positive" : "muted"}
                     />
                   </StatGroup>
                 )}
@@ -302,8 +324,12 @@ export function TradeDetailPopup({
                 <StatGroup label="RISK">
                   <Stat
                     label="R:R"
-                    value={rr != null ? `${rr.toFixed(2)}×` : "—"}
-                    tone={rr != null && rr >= 1.2 ? "positive" : "negative"}
+                    value={rv != null ? `${rv.riskReward.toFixed(2)}×` : "—"}
+                    tone={
+                      rv != null && rv.riskReward >= 1.2
+                        ? "positive"
+                        : "negative"
+                    }
                     emphasis
                   />
                   <Stat
@@ -315,24 +341,15 @@ export function TradeDetailPopup({
                     }
                     tone="muted"
                   />
-                  <Stat
-                    label="MIN HELD"
-                    value={
-                      minPrice !== null
-                        ? `${(minPrice * 100).toFixed(1)}¢`
-                        : "—"
-                    }
-                    tone="muted"
-                  />
                 </StatGroup>
 
-                {snap && (
+                {rv && (
                   <StatGroup label="LADDER">
                     <Stat
                       label="DIST MODAL"
                       value={
-                        snap.entryDistanceToModal != null
-                          ? `${snap.entryDistanceToModal} bkt`
+                        rv.distanceToModal != null
+                          ? `${rv.distanceToModal} bkt`
                           : "—"
                       }
                       tone="muted"
@@ -340,15 +357,15 @@ export function TradeDetailPopup({
                     <Stat
                       label="MASS ≤"
                       value={
-                        snap.entryMassAtOrBelow != null
-                          ? `${(snap.entryMassAtOrBelow * 100).toFixed(1)}%`
+                        rv.massAtOrBelow != null
+                          ? `${(rv.massAtOrBelow * 100).toFixed(1)}%`
                           : "—"
                       }
                       tone="muted"
                     />
                     <Stat
                       label="MODAL"
-                      value={snap.modalBucketAtEntry ?? "—"}
+                      value={rv.modalAtEntry ?? "—"}
                       tone="muted"
                     />
                   </StatGroup>

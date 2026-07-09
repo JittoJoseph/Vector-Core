@@ -981,12 +981,15 @@ export class MarketOrchestrator extends EventEmitter {
         modalBucketAtEntry: cand.modalBucketTitle,
         stopNoPrice: stopNoPrice.toFixed(8),
         entryGateSnapshot: {
-          recovery: cand.recovery,
-          riskReward: cand.riskReward,
+          recovery: {
+            recentLow: cand.recovery.recentLow,
+            confirmLow: cand.recovery.confirmLow,
+            lastPrice: cand.recovery.lastPrice,
+          },
+          epsilon: config.strategy.entryReboundEpsilon,
           riskAnchor: cand.riskAnchor,
           entryMassAtOrBelow: cand.entryMassAtOrBelow,
           entryDistanceToModal: cand.entryDistanceToModal,
-          modalBucketAtEntry: cand.modalBucketTitle,
         },
       });
 

@@ -23,12 +23,41 @@ import {
   isRelevantBucket,
   downsamplePriceHistory,
   analyzeRecovery,
+  recoverySignal,
+  riskReward,
 } from "../utils/distribution-logic.js";
 
 // Point cap for lazily-served price-history curves (compact chart, small payload).
 const PRICE_HISTORY_POINTS = 80;
 
 const logger = createModuleLogger("api-server");
+
+type TradeRow = typeof schema.simulatedTrades.$inferSelect;
+function recoveryRiskView(trade: TradeRow) {
+  const snap = trade.entryGateSnapshot as {
+    recovery?: { recentLow: number; confirmLow: number; lastPrice: number };
+    epsilon?: number;
+    riskAnchor?: number;
+    entryMassAtOrBelow?: number;
+    entryDistanceToModal?: number;
+  } | null;
+  if (!snap?.recovery || snap.epsilon == null || snap.riskAnchor == null) {
+    return null;
+  }
+
+  const entryPrice = parseFloat(trade.entryPrice);
+  const { rising, isRecovery } = recoverySignal(snap.recovery, snap.epsilon);
+  return {
+    recentLow: snap.recovery.recentLow,
+    aboveLow: entryPrice - snap.recovery.recentLow, // actual fill vs the low
+    rising,
+    isRecovery,
+    riskReward: riskReward(entryPrice, snap.riskAnchor),
+    massAtOrBelow: snap.entryMassAtOrBelow ?? null,
+    distanceToModal: snap.entryDistanceToModal ?? null,
+    modalAtEntry: trade.modalBucketAtEntry ?? null,
+  };
+}
 
 // Single source of truth for the system-state payload shared by the /api/stats
 // route and the WebSocket broadcast.
@@ -456,6 +485,7 @@ export class ApiServer {
             ...r.trade,
             minNoPriceDuringPosition: minPrice,
             campaignEndDate: r.campaign?.endDate,
+            recoveryRisk: recoveryRiskView(r.trade),
           };
         });
 
@@ -493,6 +523,7 @@ export class ApiServer {
         const rows = rawRows.map((r) => ({
           ...r.trade,
           campaignEndDate: r.campaign?.endDate,
+          recoveryRisk: recoveryRiskView(r.trade),
         }));
 
         res.json(rows);

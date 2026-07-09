@@ -1,15 +1,19 @@
 "use client";
 
 import type { PricePoint } from "@/lib/types";
-import { PriceChart, ChartLegend, type ChartMarker, type ChartHLine, type ChartVLine } from "./price-chart";
+import {
+  PriceChart,
+  ChartLegend,
+  type ChartMarker,
+  type ChartHLine,
+  type ChartVLine,
+} from "./price-chart";
 
 interface DipTimelineProps {
   history: PricePoint[];
   entryTs: string;
   entryPrice: number;
-  // Authoritative recovery low (entryGateSnapshot.dip.recentLow). Rendered as a
-  // reference level — never recomputed from the curve, so it always agrees with
-  // the RECOVERY / RISK section.
+
   recoveryLow: number | null;
   stopNoPrice: number | null;
   exitTs?: string | null;
@@ -46,29 +50,64 @@ export function DipTimeline({
 
   const preEntry = history.filter((h) => h.t <= entryT);
   const lowSource = preEntry.length ? preEntry : history;
-  const lowPoint = lowSource.reduce((m, h) => (h.p < m.p ? h : m), lowSource[0]!);
+  const lowPoint = lowSource.reduce(
+    (m, h) => (h.p < m.p ? h : m),
+    lowSource[0]!,
+  );
 
   const markers: ChartMarker[] = [
     { t: lowPoint.t, p: lowPoint.p, className: "fill-amber-400", label: "Low" },
     { t: entryT, p: entryPrice, className: "fill-purple-400", label: "Entry" },
-    { t: endT, p: endP, className: end.fill, label: isClosed ? (isWin ? "Win" : "Loss") : "Now" },
+    {
+      t: endT,
+      p: endP,
+      className: end.fill,
+      label: isClosed ? (isWin ? "Win" : "Loss") : "Now",
+    },
   ];
   const hlines: ChartHLine[] = [
-    ...(stopNoPrice != null ? [{ p: stopNoPrice, className: "stroke-red-400/40" }] : []),
+    ...(stopNoPrice != null
+      ? [{ p: stopNoPrice, className: "stroke-red-400/40" }]
+      : []),
   ];
-  const vlines: ChartVLine[] = [{ t: entryT, className: "stroke-purple-400/30" }];
+  const vlines: ChartVLine[] = [
+    { t: entryT, className: "stroke-purple-400/30" },
+  ];
 
   const pct = (p: number) => `${(p * 100).toFixed(1)}¢`;
 
   return (
     <div className="px-4 pb-3">
-      <PriceChart history={history} height={84} markers={markers} hlines={hlines} vlines={vlines} />
+      <PriceChart
+        history={history}
+        height={84}
+        markers={markers}
+        hlines={hlines}
+        vlines={vlines}
+      />
       <ChartLegend
         items={[
-          { variant: "dot", swatchClass: "bg-amber-400", label: "Low", value: pct(recoveryLow ?? lowPoint.p) },
-          { variant: "dot", swatchClass: "bg-purple-400", label: "Entry", value: pct(entryPrice) },
+          {
+            variant: "dot",
+            swatchClass: "bg-amber-400",
+            label: "Low",
+            value: pct(recoveryLow ?? lowPoint.p),
+          },
+          {
+            variant: "dot",
+            swatchClass: "bg-purple-400",
+            label: "Entry",
+            value: pct(entryPrice),
+          },
           ...(stopNoPrice != null
-            ? [{ variant: "dash" as const, swatchClass: "border-red-400/70", label: "Stop", value: pct(stopNoPrice) }]
+            ? [
+                {
+                  variant: "dash" as const,
+                  swatchClass: "border-red-400/70",
+                  label: "Stop",
+                  value: pct(stopNoPrice),
+                },
+              ]
             : []),
           {
             variant: "dot",

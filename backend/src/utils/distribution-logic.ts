@@ -74,14 +74,26 @@ export function bucketDistanceBelowModal(
   }
   return between + 1;
 }
-
-export interface RecoveryAnalysis {
+export interface RecoveryMeasurement {
   recentLow: number;
-  lastPrice: number;
   confirmLow: number;
+  lastPrice: number;
+}
+
+export interface RecoverySignal {
   rising: boolean;
   aboveLow: boolean;
   isRecovery: boolean;
+}
+
+export type RecoveryAnalysis = RecoveryMeasurement & RecoverySignal;
+export function recoverySignal(
+  m: RecoveryMeasurement,
+  epsilon: number,
+): RecoverySignal {
+  const rising = m.lastPrice - m.confirmLow >= epsilon;
+  const aboveLow = m.lastPrice >= m.recentLow + epsilon;
+  return { rising, aboveLow, isRecovery: rising && aboveLow };
 }
 
 export function windowPriceHistory(
@@ -118,15 +130,12 @@ export function downsamplePriceHistory(
     .sort((a, b) => a - b)
     .map((i) => history[i]!);
 }
-
-// Validates a fresh rebound above the lookback low and the recent confirm window low.
-export function analyzeRecovery(
+export function measureRecovery(
   history: Array<{ t: number; p: number }>,
   nowSec: number,
   lookbackHours: number,
   confirmHours: number,
-  epsilon: number,
-): RecoveryAnalysis | null {
+): RecoveryMeasurement | null {
   const window = windowPriceHistory(history, nowSec, lookbackHours);
   if (window.length === 0) return null;
 
@@ -135,22 +144,25 @@ export function analyzeRecovery(
 
   const lastPrice = window[window.length - 1]!.p;
 
-  // Lowest price within the confirm window.
+  // Seeded with lastPrice (whose own sample is inside the window), so
+  // confirmLow <= lastPrice always.
   const confirmCutoff = nowSec - confirmHours * 3600;
   let confirmLow = lastPrice;
   for (const h of window)
     if (h.t >= confirmCutoff && h.p < confirmLow) confirmLow = h.p;
 
-  const rising = lastPrice - confirmLow >= epsilon;
-  const aboveLow = lastPrice >= recentLow + epsilon;
-  return {
-    recentLow,
-    lastPrice,
-    confirmLow,
-    rising,
-    aboveLow,
-    isRecovery: rising && aboveLow,
-  };
+  return { recentLow, confirmLow, lastPrice };
+}
+export function analyzeRecovery(
+  history: Array<{ t: number; p: number }>,
+  nowSec: number,
+  lookbackHours: number,
+  confirmHours: number,
+  epsilon: number,
+): RecoveryAnalysis | null {
+  const m = measureRecovery(history, nowSec, lookbackHours, confirmHours);
+  if (!m) return null;
+  return { ...m, ...recoverySignal(m, epsilon) };
 }
 
 // Reward (upside to 1.0) over Risk (downside to anchor).

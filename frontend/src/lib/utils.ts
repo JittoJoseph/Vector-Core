@@ -65,7 +65,12 @@ export function calculateTradeUnrealizedPnl(
   const fees = parseFloat(trade.entryFees || "0");
   const actualCost = parseFloat(trade.actualCost || "0");
 
-  const pnl = (liveMid - entryPrice) * shares - fees;
+  // Approximate exit fee on Polymarket (2% of value bounded by p*(1-p))
+  const exitFeeRate = 0.02;
+  const expectedExitFeePerShare = exitFeeRate * liveMid * (1 - liveMid);
+  const expectedExitFees = expectedExitFeePerShare * shares;
+
+  const pnl = (liveMid - entryPrice) * shares - fees - expectedExitFees;
   const pnlPct = actualCost > 0 ? (pnl / actualCost) * 100 : null;
 
   return { pnl, pnlPct };

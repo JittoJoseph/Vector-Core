@@ -53,24 +53,15 @@ export interface LiveMarketInfo {
   markPrice: Record<string, { bid: number; ask: number; mid: number }>;
   status: "OPEN" | "AWAITING_RESOLUTION" | "RESOLVED";
 }
-
-export interface RecoveryAnalysis {
+export interface RecoveryRiskView {
   recentLow: number;
-  lastPrice: number;
-  confirmLow: number;
+  aboveLow: number; // actual fill price minus the recovery low
   rising: boolean;
-  aboveLow: boolean;
   isRecovery: boolean;
-}
-
-export interface EntryGateSnapshot {
-  recovery?: RecoveryAnalysis | null;
-  riskReward?: number;
-  riskAnchor?: number;
-  entryMassAtOrBelow?: number;
-  entryDistanceToModal?: number;
-  modalBucketAtEntry?: string;
-  ladderYes?: Record<string, number>;
+  riskReward: number;
+  massAtOrBelow: number | null;
+  distanceToModal: number | null;
+  modalAtEntry: string | null;
 }
 
 export interface SimulatedTrade {
@@ -106,7 +97,7 @@ export interface SimulatedTrade {
   modalBucketAtEntry?: string | null;
   minNoPriceDuringPosition?: string | null;
   stopNoPrice?: string | null;
-  entryGateSnapshot?: EntryGateSnapshot | null;
+  recoveryRisk?: RecoveryRiskView | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -133,8 +124,6 @@ export interface PriceHistoryResponse {
   history: PricePoint[];
   entryTs?: string | null;
   exitTs?: string | null;
-  // Authoritative recovery low for a candidate bucket (from analyzeRecovery).
-  // Null for trades, which carry the frozen value in entryGateSnapshot.recovery.
   recentLow?: number | null;
 }
 
