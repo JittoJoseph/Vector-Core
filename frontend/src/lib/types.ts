@@ -57,7 +57,7 @@ export interface LiveMarketInfo {
 export interface RecoveryAnalysis {
   recentLow: number;
   lastPrice: number;
-  priorPrice: number;
+  confirmLow: number;
   rising: boolean;
   aboveLow: boolean;
   isRecovery: boolean;
@@ -133,8 +133,8 @@ export interface PriceHistoryResponse {
   history: PricePoint[];
   entryTs?: string | null;
   exitTs?: string | null;
-  // Authoritative recovery low for a candidate bucket (from analyzeDipRecovery).
-  // Null for trades, which carry the frozen value in entryGateSnapshot.dip.
+  // Authoritative recovery low for a candidate bucket (from analyzeRecovery).
+  // Null for trades, which carry the frozen value in entryGateSnapshot.recovery.
   recentLow?: number | null;
 }
 
