@@ -140,7 +140,6 @@ export class MarketOrchestrator extends EventEmitter {
   private activeCampaignMetrics = new Map<string, CampaignMetrics>();
   // Scan-level telemetry (campaign telemetry holds the funnel breakdown).
   private lastScanAt: number | null = null;
-  private enteredThisScan = 0;
   // Per-bucket last-scan disposition for the strategy view.
   private bucketStatuses = new Map<string, BucketStatus>();
 
@@ -290,7 +289,8 @@ export class MarketOrchestrator extends EventEmitter {
       scanAt: this.lastScanAt,
       candidates,
       inBand,
-      entered: this.enteredThisScan,
+      // Positions currently held
+      entered: this.openPositions.size,
       rejected,
     };
   }
@@ -536,7 +536,6 @@ export class MarketOrchestrator extends EventEmitter {
     this.isEvaluating = true;
     this.cycleCount++;
     this.lastScanAt = Date.now();
-    this.enteredThisScan = 0;
 
     try {
       const result = await this.findCandidateOpportunities();
@@ -1023,7 +1022,6 @@ export class MarketOrchestrator extends EventEmitter {
           },
           "Taker entry executed",
         );
-        this.enteredThisScan++;
         this.emit("tradeOpened", { trade });
         notifyDiscordEntry({
           campaignTitle: cand.campaign.title,
