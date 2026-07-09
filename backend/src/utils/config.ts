@@ -54,7 +54,7 @@ export function loadConfig(): Config {
       entryDipLookbackHours: envNum("ENTRY_DIP_LOOKBACK_HOURS", 48),
       entryConfirmHours: envNum("ENTRY_CONFIRM_HOURS", 6),
       entryReboundEpsilon: envNum("ENTRY_REBOUND_EPSILON", 0.03),
-      entryMinRiskReward: envNum("ENTRY_MIN_RISK_REWARD", 1.2),
+      entryMinRiskReward: envNum("ENTRY_MIN_RISK_REWARD", 1.1),
 
       // Exit: ladder-based primary + catastrophe backstop.
       stopLossEnabled: envBool("STOP_LOSS_ENABLED", true),
