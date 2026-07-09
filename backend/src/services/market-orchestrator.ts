@@ -9,7 +9,6 @@ import {
   logAudit,
   resolveTrade,
   wipeAndResetPortfolio,
-  updateTradePositionSize,
 } from "../db/client.js";
 import * as schema from "../db/schema.js";
 import { getPolymarketClient, PolymarketClient } from "./polymarket-client.js";
@@ -229,6 +228,7 @@ export class MarketOrchestrator extends EventEmitter {
     this.pause();
     const config = getConfig();
     await wipeAndResetPortfolio(config.portfolio.startingCapital);
+    await this.portfolioManager.reconcile();
     this.trackedBuckets.clear();
     this.tokenToBucket.clear();
     this.conditionIdToBucket.clear();
@@ -287,7 +287,13 @@ export class MarketOrchestrator extends EventEmitter {
       for (const k of Object.keys(rejected) as RejectionReason[])
         rejected[k] += m.rejected[k];
     }
-    return { scanAt: this.lastScanAt, candidates, inBand, entered: this.enteredThisScan, rejected };
+    return {
+      scanAt: this.lastScanAt,
+      candidates,
+      inBand,
+      entered: this.enteredThisScan,
+      rejected,
+    };
   }
 
   getOpenPositionPrices(): Record<
@@ -732,15 +738,22 @@ export class MarketOrchestrator extends EventEmitter {
       const now = Date.now();
       if (!pos.ladderExitFirstSeen) {
         pos.ladderExitFirstSeen = now;
-      } else if (now - pos.ladderExitFirstSeen >= config.strategy.scanIntervalMs) {
+      } else if (
+        now - pos.ladderExitFirstSeen >=
+        config.strategy.scanIntervalMs
+      ) {
         const state = this.trackedBuckets.get(pos.bucketId);
         if (executionPolicy.canExecuteStopLoss()) {
           logger.warn(
             { tradeId: pos.tradeId, bucket: pos.groupItemTitle, reason },
             "Ladder exit confirmed",
           );
-          this.executeEarlyExit(pos, state?.feeSchedule ?? null, "ladder").catch(
-            (e) => logger.error({ err: e }, "Failed to execute ladder exit"),
+          this.executeEarlyExit(
+            pos,
+            state?.feeSchedule ?? null,
+            "ladder",
+          ).catch((e) =>
+            logger.error({ err: e }, "Failed to execute ladder exit"),
           );
         }
       }
@@ -773,7 +786,8 @@ export class MarketOrchestrator extends EventEmitter {
     if (budget <= 0) return { reject: "other" };
 
     const state = this.trackedBuckets.get(bucket.id);
-    if (state && !this.isMarketActivelyTrading(state)) return { reject: "other" };
+    if (state && !this.isMarketActivelyTrading(state))
+      return { reject: "other" };
 
     let recovery: RecoveryAnalysis | null = null;
     try {
@@ -799,7 +813,8 @@ export class MarketOrchestrator extends EventEmitter {
       config.strategy.stopLossAbsoluteFloor,
     );
     const rr = riskReward(entryPrice, riskAnchor);
-    if (rr < config.strategy.entryMinRiskReward) return { reject: "riskreward" };
+    if (rr < config.strategy.entryMinRiskReward)
+      return { reject: "riskreward" };
 
     const execResult = simulateLimitBuy(
       book,
@@ -868,9 +883,6 @@ export class MarketOrchestrator extends EventEmitter {
       this.inFlightTokens.add(cand.bucket.noTokenId);
 
       try {
-        const deducted = await this.portfolioManager.deductCash(cand.budget);
-        if (!deducted) continue;
-
         await this.executeMarketEntry(cand);
       } catch (err) {
         logger.error(
@@ -922,8 +934,9 @@ export class MarketOrchestrator extends EventEmitter {
               pos.stopLossConditionFirstSeen = now;
             } else if (now - pos.stopLossConditionFirstSeen >= 10000) {
               if (executionPolicy.canExecuteStopLoss()) {
-                this.executeEarlyExit(pos, state.feeSchedule, "backstop").catch((e) =>
-                  logger.error({ err: e }, "Failed to execute stop loss"),
+                this.executeEarlyExit(pos, state.feeSchedule, "backstop").catch(
+                  (e) =>
+                    logger.error({ err: e }, "Failed to execute stop loss"),
                 );
               }
             }
@@ -996,6 +1009,9 @@ export class MarketOrchestrator extends EventEmitter {
           entryMassAtOrBelow: cand.entryMassAtOrBelow,
           entryDistanceToModal: cand.entryDistanceToModal,
         });
+        // Cash is derived from the trade we just committed. If the guard above
+        // returned, or createSimulatedTrade threw, cash is never touched.
+        await this.portfolioManager.reconcile();
         await logAudit(
           "info",
           "TRADE_OPENED",
@@ -1041,61 +1057,39 @@ export class MarketOrchestrator extends EventEmitter {
       const { data: book } = await this.client.getOrderbook(pos.tokenId);
 
       const exit = simulateTakerSell(book, pos.entryShares, feeSchedule);
-      if (exit.totalShares <= 0) {
+      // All-or-nothing: never leave a half-sold position. If the book can't
+      // absorb the whole size, hold and retry on the next scan/tick.
+      if (exit.totalShares < pos.entryShares || exit.totalShares <= 0) {
         logger.warn(
-          { tradeId: pos.tradeId },
-          "Stop-Loss failed: No bids available",
+          {
+            tradeId: pos.tradeId,
+            available: exit.totalShares,
+            needed: pos.entryShares,
+          },
+          "Early exit deferred: insufficient bid depth for full size",
         );
         pos.isExiting = false;
         return;
       }
 
-      await this.portfolioManager.addCash(exit.netCost);
-
-      if (exit.isPartialFill) {
-        logger.warn(
-          {
-            tradeId: pos.tradeId,
-            soldShares: exit.totalShares,
-            remainingShares: pos.entryShares - exit.totalShares,
-          },
-          "Stop-Loss partial fill",
-        );
-        const ratioRemaining = 1 - exit.totalShares / pos.entryShares;
-        const newShares = pos.entryShares - exit.totalShares;
-        const newActualCost = pos.actualCost * ratioRemaining;
-        const newFees = pos.fees * ratioRemaining;
-
-        pos.entryShares = newShares;
-        pos.actualCost = newActualCost;
-        pos.fees = newFees;
-
-        await updateTradePositionSize(
-          pos.tradeId,
-          newShares.toFixed(8),
-          newActualCost.toFixed(8),
-          newFees.toFixed(8),
-        );
-        pos.isExiting = false;
-      } else {
-        logger.info(
-          { tradeId: pos.tradeId, avgPrice: exit.averagePrice },
-          "Stop-Loss fully executed",
-        );
-        const realizedPnl = exit.netCost - pos.actualCost;
-        await resolveTrade(
-          pos.tradeId,
-          "LOSS",
-          realizedPnl.toFixed(8),
-          exit.averagePrice.toFixed(8),
-          {
-            exitReason: "EARLY_EXIT",
-            minNoPriceDuringPosition: pos.minNoPriceDuringPosition?.toFixed(8),
-          },
-        );
-        this.openPositions.delete(pos.tradeId);
-        this.emit("tradeResolved", { bucketId: pos.bucketId });
-      }
+      const realizedPnl = exit.netCost - pos.actualCost;
+      await resolveTrade(
+        pos.tradeId,
+        "LOSS",
+        realizedPnl.toFixed(8),
+        exit.averagePrice.toFixed(8),
+        {
+          exitReason: "EARLY_EXIT",
+          minNoPriceDuringPosition: pos.minNoPriceDuringPosition?.toFixed(8),
+        },
+      );
+      this.openPositions.delete(pos.tradeId);
+      await this.portfolioManager.reconcile();
+      logger.info(
+        { tradeId: pos.tradeId, avgPrice: exit.averagePrice, realizedPnl },
+        "Early exit executed",
+      );
+      this.emit("tradeResolved", { bucketId: pos.bucketId });
     } catch (e) {
       pos.isExiting = false;
       throw e;
@@ -1189,8 +1183,6 @@ export class MarketOrchestrator extends EventEmitter {
       const pnl = isWin
         ? calculateWinProfit(pos.entryPrice, pos.entryShares, pos.fees)
         : calculateLossAmount(pos.entryPrice, pos.entryShares, pos.fees);
-      const cashReturn = pos.actualCost + pnl;
-      if (cashReturn > 0) await this.portfolioManager.addCash(cashReturn);
       const trade = await resolveTrade(
         pos.tradeId,
         isWin ? "WIN" : "LOSS",
@@ -1211,6 +1203,7 @@ export class MarketOrchestrator extends EventEmitter {
       );
       this.emit("tradeResolved", { tradeId: pos.tradeId, isWin, pnl, trade });
     }
+    if (positions.length > 0) await this.portfolioManager.reconcile();
   }
 
   private updateConsecutiveLossState(isWin: boolean): void {

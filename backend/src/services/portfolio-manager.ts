@@ -6,7 +6,7 @@ import { POLYMARKET_MIN_ORDER_SIZE } from "../types/index.js";
 import {
   getPortfolio,
   initPortfolio,
-  updateCashBalance,
+  reconcilePortfolioCash,
 } from "../db/client.js";
 
 const logger = createModuleLogger("portfolio-manager");
@@ -23,21 +23,22 @@ const logger = createModuleLogger("portfolio-manager");
  * - Budget is always sized at maxNoEntryPrice (worst-case we'd accept), so even
  *   if entering at a lower price the budget can absorb fills up to the limit
  * - Minimum position: POLYMARKET_MIN_ORDER_SIZE shares (protocol-level = 5)
- * - Cash balance is persisted in DB so it survives restarts
+ * - Cash is a DERIVED projection of the trades table (single source of truth),
+ *   recomputed via reconcile() after every trade change and on restart — so no
+ *   failed or aborted entry can ever leave cash inconsistent.
  */
 export class PortfolioManager {
   private cashBalance: Decimal = new Decimal(0);
   private initialCapital: Decimal = new Decimal(0);
 
-  /** Initialise from DB or create fresh portfolio row. */
+  /** Ensure the portfolio row exists, then derive cash from the trades table. */
   async init(): Promise<void> {
     const config = getConfig();
     const portfolio = await initPortfolio(config.portfolio.startingCapital);
     if (!portfolio) {
       throw new Error("Failed to initialise portfolio row");
     }
-    this.cashBalance = new Decimal(portfolio.cashBalance);
-    this.initialCapital = new Decimal(portfolio.initialCapital);
+    await this.reconcile();
     logger.info(
       {
         initialCapital: this.initialCapital.toString(),
@@ -48,14 +49,19 @@ export class PortfolioManager {
     );
   }
 
-  /** Reload cash balance from DB (e.g. after a wipe). */
   async reload(): Promise<void> {
-    const portfolio = await getPortfolio();
-    if (!portfolio) {
-      throw new Error("Portfolio row missing — call init() first");
-    }
-    this.cashBalance = new Decimal(portfolio.cashBalance);
-    this.initialCapital = new Decimal(portfolio.initialCapital);
+    await this.reconcile();
+  }
+
+  /**
+   * Recompute cash from the trades table and refresh the in-memory cache:
+   *   cash = initialCapital − Σ open(actualCost) + Σ settled(realizedPnl)
+   */
+  async reconcile(): Promise<void> {
+    const r = await reconcilePortfolioCash();
+    if (!r) throw new Error("Portfolio row missing — call init() first");
+    this.cashBalance = new Decimal(r.cashBalance);
+    this.initialCapital = new Decimal(r.initialCapital);
   }
 
   // ── Getters ──────────────────────────────────────────────────
@@ -106,7 +112,10 @@ export class PortfolioManager {
     const budget = Decimal.max(rawBudget, minBudget);
 
     // If we can't even afford the minimum shares at worst-case price, skip (unless negative allowed)
-    if (!config.portfolio.allowNegativeBalance && this.cashBalance.lt(minBudget)) {
+    if (
+      !config.portfolio.allowNegativeBalance &&
+      this.cashBalance.lt(minBudget)
+    ) {
       logger.warn(
         {
           cash: this.cashBalance.toString(),
@@ -114,7 +123,7 @@ export class PortfolioManager {
           minShares,
           maxEntryPrice: maxPrice,
         },
-      `Insufficient cash for ${minShares}-share minimum at maxNoEntryPrice — skipping`,
+        `Insufficient cash for ${minShares}-share minimum at maxNoEntryPrice — skipping`,
       );
       return 0;
     }
@@ -125,44 +134,5 @@ export class PortfolioManager {
     }
     const capped = Decimal.min(budget, this.cashBalance);
     return capped.toDP(8).toNumber();
-  }
-
-  // ── Cash mutations ───────────────────────────────────────────
-
-  /**
-   * Deduct the actual fill cost from cash after a buy is executed.
-   * Returns false if there's not enough cash (shouldn't happen if
-   * computePositionBudget was called first, but defensive).
-   */
-  async deductCash(amount: number): Promise<boolean> {
-    const config = getConfig();
-    const dec = new Decimal(amount);
-    if (!config.portfolio.allowNegativeBalance && dec.gt(this.cashBalance)) {
-      logger.error(
-        { requested: dec.toString(), available: this.cashBalance.toString() },
-        "Attempted to deduct more cash than available",
-      );
-      return false;
-    }
-    this.cashBalance = this.cashBalance.minus(dec);
-    await updateCashBalance(this.cashBalance.toString());
-    logger.debug(
-      { deducted: dec.toString(), remaining: this.cashBalance.toString() },
-      "Cash deducted",
-    );
-    return true;
-  }
-
-  /**
-   * Add cash back after a position is resolved (win payout or stop-loss sell).
-   */
-  async addCash(amount: number): Promise<void> {
-    const dec = new Decimal(amount);
-    this.cashBalance = this.cashBalance.plus(dec);
-    await updateCashBalance(this.cashBalance.toString());
-    logger.debug(
-      { added: dec.toString(), newBalance: this.cashBalance.toString() },
-      "Cash added",
-    );
   }
 }

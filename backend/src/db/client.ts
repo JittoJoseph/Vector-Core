@@ -1,5 +1,6 @@
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
+import Decimal from "decimal.js";
 import { getConfig } from "../utils/config.js";
 import { createModuleLogger } from "../utils/logger.js";
 import * as schema from "./schema.js";
@@ -75,14 +76,43 @@ export async function initPortfolio(startingCapital: number) {
   return result[0];
 }
 
-export async function updateCashBalance(newBalance: string) {
+/**
+ * Cash is a derived projection of the trades table — the single source of truth.
+ * Recompute it from durable records and persist the cached balance:
+ *   cash = initialCapital − Σ open(actualCost) + Σ settled(realizedPnl)
+ * Because it is always recomputed from committed trades, no failed/aborted entry
+ * can leave cash inconsistent.
+ */
+export async function reconcilePortfolioCash() {
   const database = getDb();
-  const result = await database
+  const portfolio = await getPortfolio();
+  if (!portfolio) return null;
+
+  const [openAgg] = await database
+    .select({
+      cost: sql<string>`coalesce(sum(${schema.simulatedTrades.actualCost}), 0)`,
+    })
+    .from(schema.simulatedTrades)
+    .where(eq(schema.simulatedTrades.status, "OPEN"));
+  const [settledAgg] = await database
+    .select({
+      pnl: sql<string>`coalesce(sum(${schema.simulatedTrades.realizedPnl}), 0)`,
+    })
+    .from(schema.simulatedTrades)
+    .where(eq(schema.simulatedTrades.status, "SETTLED"));
+
+  const cash = new Decimal(portfolio.initialCapital)
+    .minus(openAgg?.cost ?? "0")
+    .plus(settledAgg?.pnl ?? "0")
+    .toDP(8)
+    .toString();
+
+  await database
     .update(schema.portfolio)
-    .set({ cashBalance: newBalance, updatedAt: new Date() })
-    .where(eq(schema.portfolio.id, 1))
-    .returning();
-  return result[0];
+    .set({ cashBalance: cash, updatedAt: new Date() })
+    .where(eq(schema.portfolio.id, 1));
+
+  return { cashBalance: cash, initialCapital: portfolio.initialCapital };
 }
 
 export async function wipeAndResetPortfolio(startingCapital: number) {
@@ -201,26 +231,6 @@ export async function resolveTrade(
       ...(extras?.minNoPriceDuringPosition !== undefined
         ? { minNoPriceDuringPosition: extras.minNoPriceDuringPosition }
         : {}),
-    })
-    .where(eq(schema.simulatedTrades.id, id))
-    .returning();
-  return result[0];
-}
-
-export async function updateTradePositionSize(
-  id: string,
-  newShares: string,
-  newActualCost: string,
-  newFees: string,
-) {
-  const database = getDb();
-  const result = await database
-    .update(schema.simulatedTrades)
-    .set({
-      entryShares: newShares,
-      actualCost: newActualCost,
-      entryFees: newFees,
-      updatedAt: new Date(),
     })
     .where(eq(schema.simulatedTrades.id, id))
     .returning();
