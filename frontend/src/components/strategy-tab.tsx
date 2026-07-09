@@ -19,7 +19,7 @@ const REASONS: {
   { key: "band", label: "Band", text: "text-zinc-400", bar: "bg-zinc-500/70" },
   {
     key: "recovery",
-    label: "No recovery",
+    label: "Rebound",
     text: "text-orange-400",
     bar: "bg-orange-500/70",
   },
@@ -55,7 +55,7 @@ const STATUS_LABEL: Record<StrategyBucket["status"], string> = {
   eligible: "eligible — would enter",
   held: "position held",
   band: "outside entry band",
-  recovery: "no recovery in progress",
+  recovery: "rebound not yet confirmed",
   riskreward: "risk/reward too low",
   other: "filtered (book/budget)",
   pending: "not yet evaluated",
