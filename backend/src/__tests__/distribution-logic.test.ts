@@ -99,6 +99,18 @@ describe("analyzeRecovery", () => {
     expect(r.isRecovery).toBe(true);
   });
 
+  it("detects a fresh V whose dip and bounce both fall inside the confirm window", () => {
+    // The 140-159 case: the pre-dip price 6h ago (0.87) sits ABOVE the later
+    // trough (0.845), so an endpoint delta would understate the +4¢ rebound and
+    // wrongly reject. Measuring off the confirm-window low sees it.
+    const h = hourly([0.9, 0.88, 0.87, 0.865, 0.85, 0.845, 0.87, 0.88, 0.885]);
+    const r = analyzeRecovery(h, now, 48, 6, 0.03)!;
+    expect(r.confirmLow).toBeCloseTo(0.845);
+    expect(r.rising).toBe(true);
+    expect(r.aboveLow).toBe(true);
+    expect(r.isRecovery).toBe(true);
+  });
+
   it("rejects a stale spike that already recovered and went flat (the bug case)", () => {
     // deep low long ago, then flat ~0.80 for many hours — no current momentum
     const h = hourly([0.34, 0.5, 0.7, 0.8, 0.8, 0.8, 0.8, 0.8, 0.8, 0.8]);

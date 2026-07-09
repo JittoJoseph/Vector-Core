@@ -98,7 +98,7 @@ interface Candidate {
   entryDistanceToModal: number;
 }
 
-// Why an in-band candidate did not become a position (dashboard decision flow).
+// Rejection reason for dashboard funnel tracking.
 type RejectionReason = "band" | "recovery" | "riskreward" | "other";
 type BucketStatus = RejectionReason | "held" | "eligible";
 
@@ -138,8 +138,7 @@ export class MarketOrchestrator extends EventEmitter {
   private consecutiveLossCount = 0;
   private riskAutoResumeTimer: NodeJS.Timeout | null = null;
   private activeCampaignMetrics = new Map<string, CampaignMetrics>();
-  // The global funnel is derived from activeCampaignMetrics; only scan time and
-  // the entered count (opens happen after the scan) are held here.
+  // Scan-level telemetry (campaign telemetry holds the funnel breakdown).
   private lastScanAt: number | null = null;
   private enteredThisScan = 0;
   // Per-bucket last-scan disposition for the strategy view.
@@ -704,8 +703,7 @@ export class MarketOrchestrator extends EventEmitter {
     return candidates;
   }
 
-  // Primary exit: fire the ladder exit for open positions in this campaign,
-  // sustained across two scans so a single noisy ladder read can't trigger it.
+  // Ladder exit: must be sustained across two scans to filter noise.
   private evaluateLadderExits(buckets: BucketRow[], modalTitle: string): void {
     const config = getConfig();
     if (!config.strategy.stopLossEnabled) return;
@@ -760,8 +758,7 @@ export class MarketOrchestrator extends EventEmitter {
     }
   }
 
-  // Entry decision for an in-band candidate: genuine recovery + acceptable R:R.
-  // No ladder gates — the ladder drives the exit, not the entry.
+  // Entry decision (ladder drives exit only, not entry).
   private async buildEntryCandidate(
     campaign: CampaignRow,
     bucket: BucketRow,

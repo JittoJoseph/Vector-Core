@@ -44,8 +44,7 @@ function toYesPrice(yesPrice: any): number {
   return Number.isNaN(y) ? 0 : y;
 }
 
-// P(outcome lands in the candidate bucket or lower). Rising after entry = mass
-// migrating onto us; the ladder-denoised exit signal.
+// Total mass of candidate and lower buckets. Used for exit signals.
 export function yesMassAtOrBelow(
   buckets: Array<{ groupItemTitle: string; yesPrice?: any }>,
   candidateTitle: string,
@@ -59,8 +58,7 @@ export function yesMassAtOrBelow(
   return mass;
 }
 
-// Ladder steps from the candidate up to the modal bucket. Used as an exit
-// signal: the modal migrating toward us means the outcome is shifting onto us.
+// Ladder steps up to the modal bucket. Decreasing distance is an exit signal.
 export function bucketDistanceBelowModal(
   buckets: Array<{ groupItemTitle: string }>,
   candidateTitle: string,
@@ -80,7 +78,7 @@ export function bucketDistanceBelowModal(
 export interface RecoveryAnalysis {
   recentLow: number;
   lastPrice: number;
-  priorPrice: number;
+  confirmLow: number;
   rising: boolean;
   aboveLow: boolean;
   isRecovery: boolean;
@@ -95,8 +93,7 @@ export function windowPriceHistory(
   return history.filter((h) => h.t >= cutoff);
 }
 
-// Thins a series to <= maxPoints, always keeping the first, last, min and max
-// so a rendered sparkline never loses its low or high.
+// Thins a series to <= maxPoints while preserving extrema for accurate sparklines.
 export function downsamplePriceHistory(
   history: Array<{ t: number; p: number }>,
   maxPoints: number,
@@ -122,9 +119,7 @@ export function downsamplePriceHistory(
     .map((i) => history[i]!);
 }
 
-// A genuine recovery is upward momentum now (last price up >= epsilon over the
-// past confirmHours, and above the lookback low) — not merely sitting above a
-// stale minimum.
+// Validates a fresh rebound above the lookback low and the recent confirm window low.
 export function analyzeRecovery(
   history: Array<{ t: number; p: number }>,
   nowSec: number,
@@ -139,29 +134,33 @@ export function analyzeRecovery(
   for (const h of window) if (h.p < recentLow) recentLow = h.p;
 
   const lastPrice = window[window.length - 1]!.p;
-  const priorCutoff = nowSec - confirmHours * 3600;
-  const priorPrice = (window.find((h) => h.t >= priorCutoff) ?? window[0]!).p;
 
-  const rising = lastPrice - priorPrice >= epsilon;
+  // Lowest price within the confirm window.
+  const confirmCutoff = nowSec - confirmHours * 3600;
+  let confirmLow = lastPrice;
+  for (const h of window)
+    if (h.t >= confirmCutoff && h.p < confirmLow) confirmLow = h.p;
+
+  const rising = lastPrice - confirmLow >= epsilon;
   const aboveLow = lastPrice >= recentLow + epsilon;
   return {
     recentLow,
     lastPrice,
-    priorPrice,
+    confirmLow,
     rising,
     aboveLow,
     isRecovery: rising && aboveLow,
   };
 }
 
-// Upside to resolution over downside to the risk anchor; Infinity if no downside.
+// Reward (upside to 1.0) over Risk (downside to anchor).
 export function riskReward(entryPrice: number, riskAnchor: number): number {
   const downside = entryPrice - riskAnchor;
   if (downside <= 0) return Infinity;
   return (1 - entryPrice) / downside;
 }
 
-// R:R reference (not a live stop): just below the recovery low, floored.
+// Risk anchor reference (not a live stop) placed below the recovery low.
 export function riskAnchorNoPrice(
   recentLow: number,
   bufferBelowLow: number,
@@ -170,10 +169,7 @@ export function riskAnchorNoPrice(
   return Math.max(absoluteFloor, recentLow - bufferBelowLow);
 }
 
-// Ladder-based exit: fire only when the outcome has genuinely migrated onto the
-// bucket SINCE ENTRY — the modal moved at least modalStepsIn steps closer, or
-// mass at-or-below rose by massRise. Both legs measure change since entry, so a
-// bucket entered next to the modal doesn't exit unless the modal keeps closing.
+// Ladder-based exit fires if the modal or mass migrates toward us significantly since entry.
 export function evaluateLadderExit(
   entryMassAtOrBelow: number,
   currentMassAtOrBelow: number,
