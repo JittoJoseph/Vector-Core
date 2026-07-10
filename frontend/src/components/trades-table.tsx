@@ -397,15 +397,6 @@ export function TradesTable({
                         {realizedPnlPct >= 0 ? "+" : ""}
                         {realizedPnlPct.toFixed(1)}%
                       </span>
-                      {expectedProfit > 0 && (
-                        <span className="text-[10px] text-muted-foreground/50 tabular-nums mt-0.5">
-                          Exp: {formatPnl(expectedProfit)}{" "}
-                          <span className="opacity-75">
-                            (+{((expectedProfit / actualCost) * 100).toFixed(1)}
-                            %)
-                          </span>
-                        </span>
-                      )}
                     </div>
                   </td>
                 </tr>
