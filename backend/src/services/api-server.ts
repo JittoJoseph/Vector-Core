@@ -38,8 +38,6 @@ function recoveryRiskView(trade: TradeRow) {
     recovery?: { recentLow: number; confirmLow: number; lastPrice: number };
     epsilon?: number;
     riskAnchor?: number;
-    entryMassAtOrBelow?: number;
-    entryDistanceToModal?: number;
   } | null;
   if (!snap?.recovery || snap.epsilon == null || snap.riskAnchor == null) {
     return null;
@@ -53,9 +51,6 @@ function recoveryRiskView(trade: TradeRow) {
     rising,
     isRecovery,
     riskReward: riskReward(entryPrice, snap.riskAnchor),
-    massAtOrBelow: snap.entryMassAtOrBelow ?? null,
-    distanceToModal: snap.entryDistanceToModal ?? null,
-    modalAtEntry: trade.modalBucketAtEntry ?? null,
   };
 }
 
@@ -73,9 +68,9 @@ function buildSystemState() {
       minRiskReward: config.strategy.entryMinRiskReward,
       startingCapital: config.portfolio.startingCapital,
       maxPositions: config.strategy.maxSimultaneousPositions,
-      stopLossEnabled: config.strategy.stopLossEnabled,
-      stopLossBufferBelowLow: config.strategy.stopLossBufferBelowLow,
-      stopLossAbsoluteFloor: config.strategy.stopLossAbsoluteFloor,
+      stopEnabled: config.strategy.stopEnabled,
+      riskAnchorBuffer: config.strategy.riskAnchorBuffer,
+      stopFloor: config.strategy.stopFloor,
     },
     openPositionPrices: orchestrator.getOpenPositionPrices(),
     portfolio: {

@@ -166,12 +166,10 @@ export async function createSimulatedTrade(data: {
   entryFees?: string;
   fillStatus?: string;
   expectedNetProfit?: string;
-  expectedReturnPercent?: string;
   noBestBidAtEntry?: string;
   noBestAskAtEntry?: string;
-  depthAtLimit?: string;
   modalBucketAtEntry?: string | null;
-  stopNoPrice?: string | null;
+  stopFloor?: string | null;
   entryGateSnapshot?: unknown;
 }) {
   const database = getDb();
@@ -193,12 +191,10 @@ export async function createSimulatedTrade(data: {
       entryFees: data.entryFees ?? "0",
       fillStatus: data.fillStatus ?? "FULL",
       expectedNetProfit: data.expectedNetProfit ?? null,
-      expectedReturnPercent: data.expectedReturnPercent ?? null,
       noBestBidAtEntry: data.noBestBidAtEntry ?? null,
       noBestAskAtEntry: data.noBestAskAtEntry ?? null,
-      depthAtLimit: data.depthAtLimit ?? null,
       modalBucketAtEntry: data.modalBucketAtEntry ?? null,
-      stopNoPrice: data.stopNoPrice ?? null,
+      stopFloor: data.stopFloor ?? null,
       entryGateSnapshot: (data.entryGateSnapshot as any) ?? null,
       status: "OPEN",
     })
@@ -212,7 +208,7 @@ export async function resolveTrade(
   realizedPnl: string,
   exitPrice?: string,
   extras?: {
-    exitReason?: "RESOLUTION" | "EARLY_EXIT" | "MANUAL" | "FORCE_TIMEOUT";
+    exitReason?: "RESOLUTION" | "STOP" | "MANUAL" | "FORCE_TIMEOUT";
     minNoPriceDuringPosition?: string | null;
   },
 ) {
