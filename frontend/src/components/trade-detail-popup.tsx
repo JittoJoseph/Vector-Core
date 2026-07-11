@@ -75,7 +75,7 @@ export function TradeDetailPopup({
   const exitReason = trade.exitReason;
 
   const rv = trade.recoveryRisk ?? null;
-  const stopNoPrice = trade.stopNoPrice ? parseFloat(trade.stopNoPrice) : null;
+  const stopFloor = trade.stopFloor ? parseFloat(trade.stopFloor) : null;
   const minPrice = trade.minNoPriceDuringPosition
     ? parseFloat(trade.minNoPriceDuringPosition)
     : null;
@@ -284,7 +284,7 @@ export function TradeDetailPopup({
                   entryTs={trade.entryTs}
                   entryPrice={entryPrice}
                   recoveryLow={rv.recentLow}
-                  stopNoPrice={stopNoPrice}
+                  stopFloor={stopFloor}
                   exitTs={isClosed ? trade.exitTs : null}
                   exitPrice={isClosed ? exitPrice : null}
                   isClosed={isClosed}
@@ -296,7 +296,7 @@ export function TradeDetailPopup({
             </Section>
           )}
 
-          {(rv || stopNoPrice !== null) && (
+          {(rv || stopFloor !== null) && (
             <Section title="RECOVERY / RISK">
               <div className="px-4 pt-1 pb-3 space-y-2">
                 {rv && (
@@ -326,7 +326,7 @@ export function TradeDetailPopup({
                     label="R:R"
                     value={rv != null ? `${rv.riskReward.toFixed(2)}×` : "—"}
                     tone={
-                      rv != null && rv.riskReward >= 1.2
+                      rv != null && rv.riskReward >= 1.1
                         ? "positive"
                         : "negative"
                     }
@@ -335,41 +335,13 @@ export function TradeDetailPopup({
                   <Stat
                     label="STOP FLOOR"
                     value={
-                      stopNoPrice !== null
-                        ? `${(stopNoPrice * 100).toFixed(1)}¢`
+                      stopFloor !== null
+                        ? `${(stopFloor * 100).toFixed(1)}¢`
                         : "—"
                     }
                     tone="muted"
                   />
                 </StatGroup>
-
-                {rv && (
-                  <StatGroup label="LADDER">
-                    <Stat
-                      label="DIST MODAL"
-                      value={
-                        rv.distanceToModal != null
-                          ? `${rv.distanceToModal} bkt`
-                          : "—"
-                      }
-                      tone="muted"
-                    />
-                    <Stat
-                      label="MASS ≤"
-                      value={
-                        rv.massAtOrBelow != null
-                          ? `${(rv.massAtOrBelow * 100).toFixed(1)}%`
-                          : "—"
-                      }
-                      tone="muted"
-                    />
-                    <Stat
-                      label="MODAL"
-                      value={rv.modalAtEntry ?? "—"}
-                      tone="muted"
-                    />
-                  </StatGroup>
-                )}
               </div>
             </Section>
           )}

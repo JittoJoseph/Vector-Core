@@ -59,9 +59,6 @@ export interface RecoveryRiskView {
   rising: boolean;
   isRecovery: boolean;
   riskReward: number;
-  massAtOrBelow: number | null;
-  distanceToModal: number | null;
-  modalAtEntry: string | null;
 }
 
 export interface SimulatedTrade {
@@ -87,7 +84,6 @@ export interface SimulatedTrade {
   expectedNetProfit: string | null;
   noBestBidAtEntry: string | null;
   noBestAskAtEntry: string | null;
-  depthAtLimit: string | null;
   exitPrice: string | null;
   exitTs: string | null;
   exitOutcome: string | null;
@@ -96,7 +92,7 @@ export interface SimulatedTrade {
   status: string;
   modalBucketAtEntry?: string | null;
   minNoPriceDuringPosition?: string | null;
-  stopNoPrice?: string | null;
+  stopFloor?: string | null;
   recoveryRisk?: RecoveryRiskView | null;
   createdAt: string;
   updatedAt: string;
@@ -191,9 +187,9 @@ export interface SystemStats {
     minRiskReward: number;
     startingCapital: number;
     maxPositions: number;
-    stopLossEnabled: boolean;
-    stopLossBufferBelowLow: number;
-    stopLossAbsoluteFloor: number;
+    stopEnabled: boolean;
+    riskAnchorBuffer: number;
+    stopFloor: number;
   };
   openPositionPrices?: Record<string, LiveMarketPrice>;
   portfolio?: {

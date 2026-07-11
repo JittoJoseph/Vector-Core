@@ -19,7 +19,7 @@ import type {
  * - Initial load via REST (PAGE_SIZE=25)
  * - loadMore() fetches the next 25 from the DB
  * - tradeOpened → prepend to list
- * - tradeResolved / stopLossTriggered → update in place
+ * - tradeResolved → update in place
  * No periodic polling.
  */
 const PAGE_SIZE = 25;

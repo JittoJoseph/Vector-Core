@@ -15,7 +15,7 @@ interface DipTimelineProps {
   entryPrice: number;
 
   recoveryLow: number | null;
-  stopNoPrice: number | null;
+  stopFloor: number | null;
   exitTs?: string | null;
   exitPrice?: number | null;
   isClosed: boolean;
@@ -27,7 +27,7 @@ export function DipTimeline({
   entryTs,
   entryPrice,
   recoveryLow,
-  stopNoPrice,
+  stopFloor,
   exitTs,
   exitPrice,
   isClosed,
@@ -66,8 +66,8 @@ export function DipTimeline({
     },
   ];
   const hlines: ChartHLine[] = [
-    ...(stopNoPrice != null
-      ? [{ p: stopNoPrice, className: "stroke-red-400/40" }]
+    ...(stopFloor != null
+      ? [{ p: stopFloor, className: "stroke-red-400/40" }]
       : []),
   ];
   const vlines: ChartVLine[] = [
@@ -99,13 +99,13 @@ export function DipTimeline({
             label: "Entry",
             value: pct(entryPrice),
           },
-          ...(stopNoPrice != null
+          ...(stopFloor != null
             ? [
                 {
                   variant: "dash" as const,
                   swatchClass: "border-red-400/70",
                   label: "Stop",
-                  value: pct(stopNoPrice),
+                  value: pct(stopFloor),
                 },
               ]
             : []),

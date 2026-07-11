@@ -774,27 +774,22 @@ export function DashboardPage() {
 
                 <div className="flex justify-between items-end">
                   <span className="text-[10px] text-muted-foreground uppercase tracking-widest">
-                    Stop Loss Enabled
+                    Stop
                   </span>
                   <span className="text-[11px] font-mono text-foreground tabular-nums">
-                    {stats?.config.stopLossEnabled ? "Enabled" : "Disabled"}
+                    {stats?.config.stopEnabled
+                      ? `floor ${Math.round((stats?.config.stopFloor || 0) * 100)}¢`
+                      : "Disabled"}
                   </span>
                 </div>
 
                 <div className="flex justify-between items-end">
                   <span className="text-[10px] text-muted-foreground uppercase tracking-widest">
-                    Stop Loss
+                    Risk Anchor
                   </span>
                   <span className="text-[11px] font-mono text-foreground tabular-nums">
-                    low −
-                    {Math.round(
-                      (stats?.config.stopLossBufferBelowLow || 0) * 100,
-                    )}
-                    ¢, floor{" "}
-                    {Math.round(
-                      (stats?.config.stopLossAbsoluteFloor || 0) * 100,
-                    )}
-                    ¢
+                    low −{Math.round((stats?.config.riskAnchorBuffer || 0) * 100)}
+                    ¢, floored
                   </span>
                 </div>
               </div>
