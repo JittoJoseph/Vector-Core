@@ -1,7 +1,7 @@
 /**
- * Backtest: replays the recovery + R:R entry over closed campaigns under each
- * exit model (ladder / floor / none) to see which wins. Read-only; reconstructs
- * the ladder from Polymarket /prices-history (trade/mid price, ~spread/2 error).
+ * Backtest: replays the recovery + R:R entry with the floor stop over closed
+ * campaigns to measure PnL. Read-only; reconstructs each bucket's NO price from
+ * Polymarket /prices-history (trade/mid price, ~spread/2 error vs the live ask).
  *
  * Usage: npx tsx src/scripts/backtest-entry-gates.ts
  */
@@ -14,12 +14,9 @@ import {
   parseBucketMinMax,
   isCandidateBucket,
   findModalBucket,
-  yesMassAtOrBelow,
-  bucketDistanceBelowModal,
   analyzeRecovery,
   riskReward,
   riskAnchorNoPrice,
-  evaluateLadderExit,
 } from "../utils/distribution-logic.js";
 
 const STEP_SEC = 600; // 10-minute grid, matches fidelity=10
@@ -36,7 +33,7 @@ interface SimTrade {
   bucketTitle: string;
   entryT: number;
   entryNoPrice: number;
-  outcome: "WIN" | "EXIT" | "OPEN_AT_END";
+  outcome: "WIN" | "STOP" | "OPEN_AT_END";
   exitNoPrice: number;
   pnlPerShare: number;
   maxDrawdown: number;
@@ -51,11 +48,6 @@ interface PolicyConfig {
   minRiskReward: number;
   stopBuffer: number;
   floor: number;
-  exitMassRise: number;
-  exitModalStepsIn: number;
-  exit: "ladder" | "floor" | "none";
-  // "relative" = fixed (modal closed since entry); "absolute" = old buggy leg.
-  exitModalMode: "relative" | "absolute";
 }
 
 function yesAt(series: BucketSeries, t: number): number | null {
@@ -67,8 +59,10 @@ function yesAt(series: BucketSeries, t: number): number | null {
   return latest;
 }
 
+// Replays the live strategy: enter on recovery + R:R, hold to resolution, and
+// cut only when NO falls to the floor (the sole exit).
 function replayCampaign(
-  campaign: CampaignRow,
+  _campaign: CampaignRow,
   series: BucketSeries[],
   cfg: PolicyConfig,
 ): SimTrade[] {
@@ -77,19 +71,12 @@ function replayCampaign(
   const tStart = Math.min(...allT);
   const tEnd = Math.max(...allT);
 
-  const open = new Map<
-    string,
-    SimTrade & { entryMass: number; entryDist: number }
-  >();
+  const open = new Map<string, SimTrade>();
   const done: SimTrade[] = [];
 
   for (let t = tStart; t <= tEnd; t += STEP_SEC) {
     const ladder = series
-      .map((s) => ({
-        groupItemTitle: s.bucket.groupItemTitle,
-        yesPrice: yesAt(s, t),
-        series: s,
-      }))
+      .map((s) => ({ groupItemTitle: s.bucket.groupItemTitle, yesPrice: yesAt(s, t), series: s }))
       .filter((b) => b.yesPrice !== null) as Array<{
       groupItemTitle: string;
       yesPrice: number;
@@ -107,29 +94,8 @@ function replayCampaign(
       const pos = open.get(title);
       if (pos) {
         pos.maxDrawdown = Math.min(pos.maxDrawdown, noPrice - pos.entryNoPrice);
-        let exit = false;
-        if (cfg.exit === "floor" && noPrice <= cfg.floor) exit = true;
-        if (cfg.exit === "ladder") {
-          if (noPrice <= cfg.floor) exit = true;
-          else {
-            const mass = yesMassAtOrBelow(ladder, title);
-            const dist = bucketDistanceBelowModal(
-              ladder,
-              title,
-              modal.groupItemTitle,
-            );
-            const massRose = mass - pos.entryMass >= cfg.exitMassRise;
-            exit =
-              cfg.exitModalMode === "absolute"
-                ? dist <= cfg.exitModalStepsIn || massRose
-                : evaluateLadderExit(pos.entryMass, mass, pos.entryDist, dist, {
-                    massRise: cfg.exitMassRise,
-                    modalStepsIn: cfg.exitModalStepsIn,
-                  }).exit;
-          }
-        }
-        if (exit) {
-          pos.outcome = "EXIT";
+        if (noPrice <= cfg.floor) {
+          pos.outcome = "STOP";
           pos.exitNoPrice = noPrice;
           pos.pnlPerShare = noPrice - pos.entryNoPrice;
           done.push(pos);
@@ -144,28 +110,16 @@ function replayCampaign(
       const noHistory = b.series.history
         .filter((h) => h.t <= t)
         .map((h) => ({ t: h.t, p: 1 - h.p }));
-      const rec = analyzeRecovery(
-        noHistory,
-        t,
-        cfg.lookbackHours,
-        cfg.confirmHours,
-        cfg.epsilon,
-      );
+      const rec = analyzeRecovery(noHistory, t, cfg.lookbackHours, cfg.confirmHours, cfg.epsilon);
       if (!rec || !rec.isRecovery) continue;
 
-      const anchor = riskAnchorNoPrice(
-        rec.recentLow,
-        cfg.stopBuffer,
-        cfg.floor,
-      );
+      const anchor = riskAnchorNoPrice(rec.recentLow, cfg.stopBuffer, cfg.floor);
       if (riskReward(noPrice, anchor) < cfg.minRiskReward) continue;
 
       open.set(title, {
         bucketTitle: title,
         entryT: t,
         entryNoPrice: noPrice,
-        entryMass: yesMassAtOrBelow(ladder, title),
-        entryDist: bucketDistanceBelowModal(ladder, title, modal.groupItemTitle),
         outcome: "OPEN_AT_END",
         exitNoPrice: noPrice,
         pnlPerShare: 0,
@@ -183,7 +137,7 @@ function replayCampaign(
       pos.exitNoPrice = 1;
       pos.pnlPerShare = 1 - pos.entryNoPrice;
     } else {
-      pos.outcome = "EXIT";
+      pos.outcome = "STOP";
       pos.exitNoPrice = 0;
       pos.pnlPerShare = -pos.entryNoPrice;
     }
@@ -203,22 +157,6 @@ function summarize(label: string, trades: SimTrade[]): void {
       `win=${String(wins).padStart(3)} loss=${String(losses).padStart(3)} ` +
       `pnl/sh=${pnl.toFixed(3).padStart(8)} avg=${avg.toFixed(4).padStart(8)} ` +
       `worstDD=${worstDd.toFixed(3)}`,
-  );
-}
-
-// Entries, distinct buckets, and re-entries (churn = enter→exit→re-enter cycles).
-function churn(label: string, trades: SimTrade[]): void {
-  const byBucket = new Map<string, number>();
-  for (const t of trades)
-    byBucket.set(t.bucketTitle, (byBucket.get(t.bucketTitle) ?? 0) + 1);
-  const distinct = byBucket.size;
-  const reentries = trades.length - distinct;
-  const worst = Math.max(0, ...byBucket.values());
-  console.log(
-    `${label.padEnd(22)} entries=${String(trades.length).padStart(3)} ` +
-      `buckets=${String(distinct).padStart(3)} ` +
-      `re-entries=${String(reentries).padStart(3)} ` +
-      `worst/bucket=${worst}`,
   );
 }
 
@@ -247,84 +185,47 @@ async function main(): Promise<void> {
   const db = getDb();
   const client = getPolymarketClient();
 
-  const base: Omit<PolicyConfig, "exit"> = {
+  const cfg: PolicyConfig = {
     min: config.strategy.minNoEntryPrice,
     max: config.strategy.maxNoEntryPrice,
     lookbackHours: config.strategy.entryDipLookbackHours,
     confirmHours: config.strategy.entryConfirmHours,
     epsilon: config.strategy.entryReboundEpsilon,
     minRiskReward: config.strategy.entryMinRiskReward,
-    stopBuffer: config.strategy.stopLossBufferBelowLow,
-    floor: config.strategy.stopLossAbsoluteFloor,
-    exitMassRise: config.strategy.exitMassRise,
-    exitModalStepsIn: config.strategy.exitModalStepsIn,
-    exitModalMode: "relative",
+    stopBuffer: config.strategy.riskAnchorBuffer,
+    floor: config.strategy.stopFloor,
   };
 
-  const campaignBuckets = async (closed: boolean) => {
-    const cs = await db
-      .select()
-      .from(schema.distributionCampaigns)
-      .where(eq(schema.distributionCampaigns.closed, closed));
-    if (cs.length === 0) return [];
-    const bs = await db
-      .select()
-      .from(schema.distributionBuckets)
-      .where(
-        inArray(
-          schema.distributionBuckets.campaignId,
-          cs.map((c) => c.id),
-        ),
-      );
-    return cs.map((c) => ({ c, buckets: bs.filter((b) => b.campaignId === c.id) }));
-  };
-
-  // ── PnL over resolved campaigns (needs closed campaigns) ──
-  const closed = await campaignBuckets(true);
-  if (closed.length > 0) {
-    const variants: Array<{ label: string; cfg: PolicyConfig }> = [
-      { label: "ladder exit", cfg: { ...base, exit: "ladder" } },
-      { label: "floor stop only", cfg: { ...base, exit: "floor" } },
-      { label: "no stop (hold)", cfg: { ...base, exit: "none" } },
-      { label: "no R:R + ladder", cfg: { ...base, minRiskReward: 0, exit: "ladder" } },
-    ];
-    const results = new Map<string, SimTrade[]>(variants.map((v) => [v.label, []]));
-    for (const { c, buckets } of closed) {
-      if (buckets.length === 0) continue;
-      console.log(`Fetching (closed): ${c.title} (${buckets.length} buckets)`);
-      const series = await loadSeries(client, buckets);
-      for (const v of variants)
-        results.get(v.label)!.push(...replayCampaign(c, series, v.cfg));
-    }
-    console.log(`\n=== PnL over ${closed.length} closed campaigns ===`);
-    for (const v of variants) summarize(v.label, results.get(v.label)!);
-  } else {
-    console.log("No closed campaigns yet — skipping PnL section.");
+  const closed = await db
+    .select()
+    .from(schema.distributionCampaigns)
+    .where(eq(schema.distributionCampaigns.closed, true));
+  if (closed.length === 0) {
+    console.log("No closed campaigns yet — nothing to replay.");
+    process.exit(0);
   }
 
-  // ── Churn check over active campaigns (the fixed vs old exit) ──
-  const active = await campaignBuckets(false);
-  if (active.length > 0) {
-    const fixed: SimTrade[] = [];
-    const old: SimTrade[] = [];
-    for (const { c, buckets } of active) {
-      if (buckets.length === 0) continue;
-      console.log(`Fetching (active): ${c.title} (${buckets.length} buckets)`);
-      const series = await loadSeries(client, buckets);
-      fixed.push(...replayCampaign(c, series, { ...base, exit: "ladder" }));
-      old.push(
-        ...replayCampaign(c, series, {
-          ...base,
-          exit: "ladder",
-          exitModalMode: "absolute",
-        }),
-      );
-    }
-    console.log(`\n=== Churn over ${active.length} active campaigns ===`);
-    churn("old (absolute)", old);
-    churn("fixed (relative)", fixed);
+  const allBuckets = await db
+    .select()
+    .from(schema.distributionBuckets)
+    .where(
+      inArray(
+        schema.distributionBuckets.campaignId,
+        closed.map((c) => c.id),
+      ),
+    );
+
+  const trades: SimTrade[] = [];
+  for (const c of closed) {
+    const buckets = allBuckets.filter((b) => b.campaignId === c.id);
+    if (buckets.length === 0) continue;
+    console.log(`Fetching: ${c.title} (${buckets.length} buckets)`);
+    const series = await loadSeries(client, buckets);
+    trades.push(...replayCampaign(c, series, cfg));
   }
 
+  console.log(`\n=== PnL over ${closed.length} closed campaigns (floor stop) ===`);
+  summarize("recovery + R:R", trades);
   console.log(
     "\nNote: history is trade/mid price, not the ask; carries ~spread/2 error.",
   );

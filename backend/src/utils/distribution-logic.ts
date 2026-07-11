@@ -39,41 +39,6 @@ export function isCandidateBucket(
   return bMax < modalMin;
 }
 
-function toYesPrice(yesPrice: any): number {
-  const y = parseFloat(yesPrice?.toString() ?? "0");
-  return Number.isNaN(y) ? 0 : y;
-}
-
-// Total mass of candidate and lower buckets. Used for exit signals.
-export function yesMassAtOrBelow(
-  buckets: Array<{ groupItemTitle: string; yesPrice?: any }>,
-  candidateTitle: string,
-): number {
-  const [, candidateMax] = parseBucketMinMax(candidateTitle);
-  let mass = 0;
-  for (const b of buckets) {
-    const [, bMax] = parseBucketMinMax(b.groupItemTitle);
-    if (bMax <= candidateMax) mass += toYesPrice(b.yesPrice);
-  }
-  return mass;
-}
-
-// Ladder steps up to the modal bucket. Decreasing distance is an exit signal.
-export function bucketDistanceBelowModal(
-  buckets: Array<{ groupItemTitle: string }>,
-  candidateTitle: string,
-  modalTitle: string,
-): number {
-  const [, candidateMax] = parseBucketMinMax(candidateTitle);
-  const [modalMin] = parseBucketMinMax(modalTitle);
-  if (candidateMax >= modalMin) return 0;
-  let between = 0;
-  for (const b of buckets) {
-    const [bMin, bMax] = parseBucketMinMax(b.groupItemTitle);
-    if (bMin > candidateMax && bMax < modalMin) between++;
-  }
-  return between + 1;
-}
 export interface RecoveryMeasurement {
   recentLow: number;
   confirmLow: number;
@@ -182,20 +147,6 @@ export function riskAnchorNoPrice(
 }
 
 // Ladder-based exit fires if the modal or mass migrates toward us significantly since entry.
-export function evaluateLadderExit(
-  entryMassAtOrBelow: number,
-  currentMassAtOrBelow: number,
-  entryDistanceToModal: number,
-  currentDistanceToModal: number,
-  cfg: { massRise: number; modalStepsIn: number },
-): { exit: boolean; reason: string | null } {
-  if (entryDistanceToModal - currentDistanceToModal >= cfg.modalStepsIn)
-    return { exit: true, reason: "modal-migrated" };
-  if (currentMassAtOrBelow - entryMassAtOrBelow >= cfg.massRise)
-    return { exit: true, reason: "mass-migrated" };
-  return { exit: false, reason: null };
-}
-
 export function isRelevantBucket(
   isCandidate: boolean,
   isModal: boolean,
