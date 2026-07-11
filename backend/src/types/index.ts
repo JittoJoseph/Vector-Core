@@ -32,12 +32,10 @@ export const ConfigSchema = z.object({
     entryReboundEpsilon: z.number().min(0).max(1),
     entryMinRiskReward: z.number().positive(),
 
-    // Exit — ladder-based primary + catastrophe backstop.
-    stopLossEnabled: z.boolean(),
-    stopLossBufferBelowLow: z.number().min(0).max(1),
-    stopLossAbsoluteFloor: z.number().min(0).max(1),
-    exitMassRise: z.number().min(0).max(1),
-    exitModalStepsIn: z.number().int().positive(),
+    // Risk anchor + exit stop.
+    riskAnchorBuffer: z.number().min(0).max(1),
+    stopEnabled: z.boolean(),
+    stopFloor: z.number().min(0).max(1),
   }),
   admin: z.object({
     password: z.string().min(1),

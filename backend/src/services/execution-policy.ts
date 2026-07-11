@@ -43,6 +43,6 @@ export const executionPolicy = {
   },
   getStatus: () => currentStatus,
   canOpenNewPositions: () => currentStatus === "UP",
-  canExecuteStopLoss: () =>
+  canExecuteStop: () =>
     currentStatus === "UP" || currentStatus === "HASISSUES",
 };

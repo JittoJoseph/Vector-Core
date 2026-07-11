@@ -56,12 +56,11 @@ export function loadConfig(): Config {
       entryReboundEpsilon: envNum("ENTRY_REBOUND_EPSILON", 0.03),
       entryMinRiskReward: envNum("ENTRY_MIN_RISK_REWARD", 1.1),
 
-      // Exit: ladder-based primary + catastrophe backstop.
-      stopLossEnabled: envBool("STOP_LOSS_ENABLED", true),
-      stopLossBufferBelowLow: envNum("STOP_LOSS_BUFFER_BELOW_LOW", 0.03),
-      stopLossAbsoluteFloor: envNum("STOP_LOSS_ABSOLUTE_FLOOR", 0.6),
-      exitMassRise: envNum("EXIT_MASS_RISE", 0.1),
-      exitModalStepsIn: envNum("EXIT_MODAL_STEPS_IN", 1),
+      // Risk anchor: R:R reference placed just below the recovery low.
+      riskAnchorBuffer: envNum("RISK_ANCHOR_BUFFER", 0.03),
+      // Exit stop: hold to resolution, cut only when NO falls to this floor.
+      stopEnabled: envBool("STOP_ENABLED", true),
+      stopFloor: envNum("STOP_FLOOR", 0.6),
     },
     admin: {
       password: env("ADMIN_PASSWORD", isTest ? "test-admin" : undefined),

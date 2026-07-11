@@ -37,12 +37,9 @@ import {
   findModalBucket,
   isCandidateBucket,
   isRelevantBucket,
-  bucketDistanceBelowModal,
-  yesMassAtOrBelow,
   analyzeRecovery,
   riskReward,
   riskAnchorNoPrice,
-  evaluateLadderExit,
   type RecoveryAnalysis,
 } from "../utils/distribution-logic.js";
 
@@ -70,11 +67,8 @@ interface OpenPosition {
   fees: number;
   actualCost: number;
   minNoPriceDuringPosition: number | null;
-  stopNoPrice: number; // catastrophe backstop (floor)
-  entryMassAtOrBelow: number; // ladder-exit references (change since entry)
-  entryDistanceToModal: number;
-  stopLossConditionFirstSeen?: number | null;
-  ladderExitFirstSeen?: number | null;
+  stopFloor: number; // NO price at which the stop fires
+  stopConditionFirstSeen?: number | null;
   isExiting?: boolean;
 }
 
@@ -94,8 +88,6 @@ interface Candidate {
   modalBucketTitle: string;
   recovery: RecoveryAnalysis;
   riskAnchor: number;
-  entryMassAtOrBelow: number;
-  entryDistanceToModal: number;
 }
 
 // Rejection reason for dashboard funnel tracking.
@@ -663,12 +655,7 @@ export class MarketOrchestrator extends EventEmitter {
       }
       counts.inBand++;
 
-      const result = await this.buildEntryCandidate(
-        campaign,
-        bucket,
-        buckets,
-        modalTitle,
-      );
+      const result = await this.buildEntryCandidate(campaign, bucket, modalTitle);
       if ("reject" in result) {
         reject(bucket.id, result.reject);
         continue;
@@ -676,8 +663,6 @@ export class MarketOrchestrator extends EventEmitter {
       this.bucketStatuses.set(bucket.id, "eligible");
       candidates.push(result);
     }
-
-    this.evaluateLadderExits(buckets, modalTitle);
 
     this.activeCampaignMetrics.set(campaign.id, {
       candidateCount: counts.candidateCount,
@@ -702,66 +687,10 @@ export class MarketOrchestrator extends EventEmitter {
     return candidates;
   }
 
-  // Ladder exit: must be sustained across two scans to filter noise.
-  private evaluateLadderExits(buckets: BucketRow[], modalTitle: string): void {
-    const config = getConfig();
-    if (!config.strategy.stopLossEnabled) return;
-    const bucketIds = new Set(buckets.map((b) => b.id));
-
-    for (const pos of this.openPositions.values()) {
-      if (!bucketIds.has(pos.bucketId) || pos.isExiting) continue;
-
-      const currentMass = yesMassAtOrBelow(buckets, pos.groupItemTitle);
-      const currentDistance = bucketDistanceBelowModal(
-        buckets,
-        pos.groupItemTitle,
-        modalTitle,
-      );
-      const { exit, reason } = evaluateLadderExit(
-        pos.entryMassAtOrBelow,
-        currentMass,
-        pos.entryDistanceToModal,
-        currentDistance,
-        {
-          massRise: config.strategy.exitMassRise,
-          modalStepsIn: config.strategy.exitModalStepsIn,
-        },
-      );
-
-      if (!exit) {
-        pos.ladderExitFirstSeen = null;
-        continue;
-      }
-      const now = Date.now();
-      if (!pos.ladderExitFirstSeen) {
-        pos.ladderExitFirstSeen = now;
-      } else if (
-        now - pos.ladderExitFirstSeen >=
-        config.strategy.scanIntervalMs
-      ) {
-        const state = this.trackedBuckets.get(pos.bucketId);
-        if (executionPolicy.canExecuteStopLoss()) {
-          logger.warn(
-            { tradeId: pos.tradeId, bucket: pos.groupItemTitle, reason },
-            "Ladder exit confirmed",
-          );
-          this.executeEarlyExit(
-            pos,
-            state?.feeSchedule ?? null,
-            "ladder",
-          ).catch((e) =>
-            logger.error({ err: e }, "Failed to execute ladder exit"),
-          );
-        }
-      }
-    }
-  }
-
-  // Entry decision (ladder drives exit only, not entry).
+  // Entry decision: recovery + risk/reward. Exit is a price stop only.
   private async buildEntryCandidate(
     campaign: CampaignRow,
     bucket: BucketRow,
-    buckets: BucketRow[],
     modalBucketTitle: string,
   ): Promise<Candidate | { reject: RejectionReason }> {
     const config = getConfig();
@@ -805,8 +734,8 @@ export class MarketOrchestrator extends EventEmitter {
 
     const riskAnchor = riskAnchorNoPrice(
       recovery.recentLow,
-      config.strategy.stopLossBufferBelowLow,
-      config.strategy.stopLossAbsoluteFloor,
+      config.strategy.riskAnchorBuffer,
+      config.strategy.stopFloor,
     );
     const rr = riskReward(entryPrice, riskAnchor);
     if (rr < config.strategy.entryMinRiskReward)
@@ -831,12 +760,6 @@ export class MarketOrchestrator extends EventEmitter {
       modalBucketTitle,
       recovery,
       riskAnchor,
-      entryMassAtOrBelow: yesMassAtOrBelow(buckets, bucket.groupItemTitle),
-      entryDistanceToModal: bucketDistanceBelowModal(
-        buckets,
-        bucket.groupItemTitle,
-        modalBucketTitle,
-      ),
     };
   }
 
@@ -923,21 +846,20 @@ export class MarketOrchestrator extends EventEmitter {
           }
         }
 
-        if (config.strategy.stopLossEnabled) {
-          if (currentPrice !== null && currentPrice <= pos.stopNoPrice) {
+        if (config.strategy.stopEnabled) {
+          if (currentPrice !== null && currentPrice <= pos.stopFloor) {
             const now = Date.now();
-            if (!pos.stopLossConditionFirstSeen) {
-              pos.stopLossConditionFirstSeen = now;
-            } else if (now - pos.stopLossConditionFirstSeen >= 10000) {
-              if (executionPolicy.canExecuteStopLoss()) {
-                this.executeEarlyExit(pos, state.feeSchedule, "backstop").catch(
-                  (e) =>
-                    logger.error({ err: e }, "Failed to execute stop loss"),
+            if (!pos.stopConditionFirstSeen) {
+              pos.stopConditionFirstSeen = now;
+            } else if (now - pos.stopConditionFirstSeen >= 10000) {
+              if (executionPolicy.canExecuteStop()) {
+                this.executeStopExit(pos, state.feeSchedule).catch((e) =>
+                  logger.error({ err: e }, "Failed to execute stop"),
                 );
               }
             }
           } else {
-            pos.stopLossConditionFirstSeen = null;
+            pos.stopConditionFirstSeen = null;
           }
         }
       }
@@ -957,8 +879,8 @@ export class MarketOrchestrator extends EventEmitter {
     try {
       const execResult = cand.execResult;
 
-      // Price-triggered exit is the catastrophe backstop only; ladder is primary.
-      const stopNoPrice = config.strategy.stopLossAbsoluteFloor;
+      // The stop: exit when NO falls to this floor. The only early exit.
+      const stopFloor = config.strategy.stopFloor;
 
       const trade = await createSimulatedTrade({
         campaignId: cand.campaign.id,
@@ -979,7 +901,7 @@ export class MarketOrchestrator extends EventEmitter {
         noBestBidAtEntry: cand.top.bestBid?.toFixed(8),
         noBestAskAtEntry: cand.top.bestAsk?.toFixed(8),
         modalBucketAtEntry: cand.modalBucketTitle,
-        stopNoPrice: stopNoPrice.toFixed(8),
+        stopFloor: stopFloor.toFixed(8),
         entryGateSnapshot: {
           recovery: {
             recentLow: cand.recovery.recentLow,
@@ -988,8 +910,6 @@ export class MarketOrchestrator extends EventEmitter {
           },
           epsilon: config.strategy.entryReboundEpsilon,
           riskAnchor: cand.riskAnchor,
-          entryMassAtOrBelow: cand.entryMassAtOrBelow,
-          entryDistanceToModal: cand.entryDistanceToModal,
         },
       });
 
@@ -1004,9 +924,7 @@ export class MarketOrchestrator extends EventEmitter {
           fees: execResult.fees,
           actualCost: execResult.netCost,
           minNoPriceDuringPosition: null,
-          stopNoPrice,
-          entryMassAtOrBelow: cand.entryMassAtOrBelow,
-          entryDistanceToModal: cand.entryDistanceToModal,
+          stopFloor,
         });
         // Cash is derived from the trade we just committed. If the guard above
         // returned, or createSimulatedTrade threw, cash is never touched.
@@ -1040,17 +958,17 @@ export class MarketOrchestrator extends EventEmitter {
     }
   }
 
-  private async executeEarlyExit(
+  // Price-collapse stop: the only early exit. Fires when NO falls to the floor.
+  private async executeStopExit(
     pos: OpenPosition,
     feeSchedule: FeeSchedule | null,
-    trigger: "ladder" | "backstop",
   ) {
     if (pos.isExiting) return;
     pos.isExiting = true;
     try {
       logger.warn(
-        { tradeId: pos.tradeId, bucketId: pos.bucketId, trigger },
-        "Executing early exit",
+        { tradeId: pos.tradeId, bucketId: pos.bucketId },
+        "Executing stop exit",
       );
       const { data: book } = await this.client.getOrderbook(pos.tokenId);
 
@@ -1064,7 +982,7 @@ export class MarketOrchestrator extends EventEmitter {
             available: exit.totalShares,
             needed: pos.entryShares,
           },
-          "Early exit deferred: insufficient bid depth for full size",
+          "Stop deferred: insufficient bid depth for full size",
         );
         pos.isExiting = false;
         return;
@@ -1077,7 +995,7 @@ export class MarketOrchestrator extends EventEmitter {
         realizedPnl.toFixed(8),
         exit.averagePrice.toFixed(8),
         {
-          exitReason: "EARLY_EXIT",
+          exitReason: "STOP",
           minNoPriceDuringPosition: pos.minNoPriceDuringPosition?.toFixed(8),
         },
       );
@@ -1085,7 +1003,7 @@ export class MarketOrchestrator extends EventEmitter {
       await this.portfolioManager.reconcile();
       logger.info(
         { tradeId: pos.tradeId, avgPrice: exit.averagePrice, realizedPnl },
-        "Early exit executed",
+        "Stop exit executed",
       );
       this.emit("tradeResolved", { bucketId: pos.bucketId });
     } catch (e) {
@@ -1231,10 +1149,6 @@ export class MarketOrchestrator extends EventEmitter {
     const config = getConfig();
     const rows = await loadOpenTradesWithBuckets();
     for (const { trade } of rows) {
-      const snap = (trade.entryGateSnapshot ?? {}) as {
-        entryMassAtOrBelow?: number;
-        entryDistanceToModal?: number;
-      };
       this.openPositions.set(trade.id, {
         tradeId: trade.id,
         bucketId: trade.bucketId ?? "",
@@ -1249,11 +1163,9 @@ export class MarketOrchestrator extends EventEmitter {
           trade.minNoPriceDuringPosition !== undefined
             ? parseFloat(trade.minNoPriceDuringPosition)
             : null,
-        stopNoPrice: trade.stopNoPrice
-          ? parseFloat(trade.stopNoPrice)
-          : config.strategy.stopLossAbsoluteFloor,
-        entryMassAtOrBelow: snap.entryMassAtOrBelow ?? 0,
-        entryDistanceToModal: snap.entryDistanceToModal ?? 0,
+        stopFloor: trade.stopFloor
+          ? parseFloat(trade.stopFloor)
+          : config.strategy.stopFloor,
       });
     }
   }
