@@ -49,7 +49,6 @@ export function SettingsPage() {
   const [isWiping, setIsWiping] = useState(false);
   const [isTogglingEngine, setIsTogglingEngine] = useState(false);
 
-  // Load password from localStorage on mount
   useEffect(() => {
     const savedPassword = localStorage.getItem("vector_admin_password") || "";
     setPassword(savedPassword);
@@ -157,9 +156,7 @@ export function SettingsPage() {
         )}
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {/* Left Column: Admin Credentials & System Operations */}
           <div className="space-y-6">
-            {/* Admin Credentials Card */}
             <Card className="border-border/30 bg-card/30">
               <CardHeader className="pb-3">
                 <CardTitle className="text-sm font-semibold tracking-wider flex items-center gap-2 text-foreground">
@@ -195,7 +192,6 @@ export function SettingsPage() {
               </CardContent>
             </Card>
 
-            {/* System Actions Card */}
             <Card className="border-border/30 bg-card/30">
               <CardHeader className="pb-3">
                 <CardTitle className="text-sm font-semibold tracking-wider flex items-center gap-2 text-foreground">
@@ -208,7 +204,6 @@ export function SettingsPage() {
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
-                {/* Pause/Resume Section */}
                 <div className="flex items-center justify-between p-3 border border-border/20 rounded bg-background/20">
                   <div className="space-y-0.5">
                     <div className="text-[11px] font-bold text-foreground">
@@ -253,7 +248,6 @@ export function SettingsPage() {
                   </Button>
                 </div>
 
-                {/* Wipe Section */}
                 <div className="flex items-center justify-between p-3 border border-red-950/20 rounded bg-red-950/5">
                   <div className="space-y-0.5">
                     <div className="text-[11px] font-bold text-red-400">
@@ -339,7 +333,6 @@ export function SettingsPage() {
             </Card>
           </div>
 
-          {/* Right Column: Read-only Server Configuration Display */}
           <div>
             <Card className="border-border/30 bg-card/30 h-full">
               <CardHeader className="pb-3">

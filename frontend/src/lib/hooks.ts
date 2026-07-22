@@ -15,19 +15,8 @@ import type {
   WsMessage,
 } from "./types";
 
-/**
- * WS-driven trades hook with pagination.
- * - Initial load via REST (PAGE_SIZE=25)
- * - loadMore() fetches the next 25 from the DB
- * - tradeOpened → prepend to list
- * - tradeResolved / stopLossTriggered → update in place
- * No periodic polling.
- */
 const PAGE_SIZE = 25;
 
-/**
- * Helper hook to lazily fetch data exactly once when enabled becomes true.
- */
 function useFetchOnce(
   enabled: boolean,
   action: () => void,
@@ -39,13 +28,9 @@ function useFetchOnce(
       hasFetched.current = true;
       action();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [enabled, ...deps]);
 }
 
-/**
- * Helper hook to cleanly subscribe to a WebSocket event.
- */
 function useWsEvent<T>(eventName: string, handler: (data: T) => void) {
   useEffect(() => {
     const ws = getWsClient();
@@ -65,7 +50,6 @@ export function usePositions() {
       const api = getApiClient();
       const response = await api.getPositions();
       setPositions((prev) => {
-        // Merge: keep any positions that were added via WS while fetching
         const existingIds = new Set(prev.map((t) => t.id));
         const missingFromWs = response.filter((t) => !existingIds.has(t.id));
         return [...missingFromWs, ...prev];
@@ -82,7 +66,6 @@ export function usePositions() {
     fetchPositions();
   }, [fetchPositions]);
 
-  // WS-driven updates
   useWsEvent<{ trade?: SimulatedTrade }>(
     "tradeOpened",
     useCallback((data) => {
@@ -185,9 +168,6 @@ export function useTradeHistory(enabled: boolean = true) {
   };
 }
 
-/**
- * Hook to fetch system stats.
- */
 export function useSystemStats() {
   const [stats, setStats] = useState<SystemStats | null>(null);
   const [loading, setLoading] = useState(true);
@@ -197,7 +177,6 @@ export function useSystemStats() {
     try {
       const api = getApiClient();
       const response = await api.getSystemStats();
-      // Merge to ensure we don't overwrite newer WS payloads if they fired during the HTTP fetch
       setStats((prev) => ({ ...response, ...prev }));
       setError(null);
     } catch (err) {
@@ -207,12 +186,10 @@ export function useSystemStats() {
     }
   }, []);
 
-  // Fetch initial on mount
   useEffect(() => {
     fetchStats();
   }, [fetchStats]);
 
-  // Real-time updates
   useWsEvent<SystemStats>(
     "systemState",
     useCallback((data) => {
@@ -280,16 +257,6 @@ export function useCampaignDetails(id: string | null) {
   return { details, loading, error, refetch: () => id && fetchDetails(id) };
 }
 
-/**
- * Enhanced real-time performance hook.
- *
- * - Fetches initial performance data once on mount (for the given period)
- * - When period changes, re-fetches fresh data
- * - Listens to tradeOpened and tradeResolved WS events
- * - Updates metrics in real-time (wins/losses, PnL, ROI, win rate, etc.)
- * - Recalculates derived metrics efficiently
- * - Does NOT poll the API after initial load
- */
 export function usePerformanceRealtime(
   period: "1D" | "1W" | "1M" | "ALL" = "1D",
 ) {
@@ -299,12 +266,11 @@ export function usePerformanceRealtime(
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
 
-  // Fetch initial data on mount and when period changes
   const fetchPerformance = useCallback(async () => {
     try {
       setLoading(true);
       const data = await getApiClient().getPerformance(period);
-      setPerformance((prev) => ({ ...data, ...prev })); // Merge to prevent REST from clobbering WS
+      setPerformance((prev) => ({ ...data, ...prev }));
       setError(null);
     } catch (err) {
       setError(err as Error);
@@ -340,7 +306,6 @@ export function usePerformanceRealtime(
     };
   }, [period]);
 
-  // Real-time updates from WebSocket events
   useWsEvent<{ trade?: SimulatedTrade }>(
     "tradeOpened",
     useCallback((data) => {
@@ -404,11 +369,6 @@ export function usePerformanceRealtime(
   return { performance, loading, error, refetch: fetchPerformance };
 }
 
-/**
- * Hook for WebSocket connection status.
- * Sends a JSON ping to the backend every 15 s; isConnected flips to true
- * only after receiving a pong, and resets to false if none arrives within 20 s.
- */
 export function useWsConnection() {
   const [isConnected, setIsConnected] = useState(false);
   const pongTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -419,17 +379,14 @@ export function useWsConnection() {
 
     const resetPongTimeout = () => {
       if (pongTimerRef.current) clearTimeout(pongTimerRef.current);
-      // If no pong within 20 s, mark disconnected
       pongTimerRef.current = setTimeout(() => setIsConnected(false), 20_000);
     };
 
-    // Listen for pong responses
     const unsubPong = ws.on("pong", () => {
       setIsConnected(true);
       resetPongTimeout();
     });
 
-    // Send ping now and every 15 s
     const sendPing = () => ws.sendPing();
     sendPing();
     const pingInterval = setInterval(sendPing, 15_000);
@@ -444,9 +401,6 @@ export function useWsConnection() {
   return isConnected;
 }
 
-/**
- * Hook to track system status and connectivity.
- */
 export function useSystemStatus() {
   const [backendActive, setBackendActive] = useState(true);
   const wsConnected = useWsConnection();
@@ -468,22 +422,18 @@ export function useSystemStatus() {
   return { backendActive, wsConnected };
 }
 
-// ── helper: map AuditLog → ActivityEntry ─────────────────────────────────────
 function auditLogToActivity(log: AuditLog): ActivityEntry {
   const cat = log.category?.toUpperCase() ?? "";
   let kind: ActivityEntry["kind"] = "INFO";
   if (cat.includes("TRADE_RESOLVED") || cat.includes("TRADE_SETTLED"))
-    kind = "TRADE_WIN"; // will be refined below by level
+    kind = "TRADE_WIN";
   else if (cat.includes("TRADE_OPENED")) kind = "TRADE_OPENED";
   else if (cat.includes("TRADE_FORCE") || cat.includes("LOSS"))
     kind = "TRADE_LOSS";
-  else if (cat.includes("SKIP") || cat.includes("MOMENTUM"))
-    kind = "MOMENTUM_SKIP";
   else if (cat.includes("MARKET")) kind = "MARKET_RESOLVED";
   else if (log.level === "warn") kind = "WARN";
   else if (log.level === "error") kind = "ERROR";
 
-  // Refine TRADE_RESOLVED: look at metadata for outcome
   if (kind === "TRADE_WIN" && log.metadata) {
     const outcome = (log.metadata as any)?.outcome as string | undefined;
     if (outcome === "LOSS") kind = "TRADE_LOSS";
@@ -506,14 +456,6 @@ function auditLogToActivity(log: AuditLog): ActivityEntry {
 
 const MAX_ACTIVITY_ENTRIES = 100;
 
-/**
- * Activity log hook.
- *
- * - Seeds from GET /api/audit?limit=30 at mount (one-time REST call)
- * - Appends real-time entries from `tradeOpened` and `tradeResolved` WS events
- * - Never polls the API again after initial load
- * - Capped at MAX_ACTIVITY_ENTRIES to prevent unbounded growth
- */
 export function useActivityLog(enabled: boolean = true) {
   const [activities, setActivities] = useState<ActivityEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -525,12 +467,11 @@ export function useActivityLog(enabled: boolean = true) {
       .then((logs) => {
         const entries = logs
           .map(auditLogToActivity)
-          .sort((a, b) => b.ts - a.ts); // newest first
+          .sort((a, b) => b.ts - a.ts);
         entries.forEach((e) => seenIds.current.add(e.id));
         setActivities(entries);
       })
       .catch(() => {
-        /* silently skip if backend not ready */
       })
       .finally(() => {
         setLoading(false);
@@ -539,7 +480,6 @@ export function useActivityLog(enabled: boolean = true) {
 
   useFetchOnce(enabled, fetchAuditLogs, [fetchAuditLogs]);
 
-  // Real-time: tradeOpened
   useEffect(() => {
     const ws = getWsClient();
     ws.connect();
@@ -568,7 +508,6 @@ export function useActivityLog(enabled: boolean = true) {
       setActivities((prev) => [entry, ...prev].slice(0, MAX_ACTIVITY_ENTRIES));
     });
 
-    // Real-time: tradeResolved
     const unsubResolved = ws.on("tradeResolved", (msg: WsMessage) => {
       const d = msg.data as any;
       const trade = d?.trade as SimulatedTrade | undefined;

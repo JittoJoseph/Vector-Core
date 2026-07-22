@@ -11,7 +11,6 @@ export interface DistributionCampaign {
   createdAt: string;
   updatedAt: string;
 
-  // Computed API fields
   modalBucketTitle?: string;
   candidateCount?: number;
   trackedCount?: number;
@@ -150,7 +149,6 @@ export interface PerformanceMetrics {
   cashBalance: string;
   initialCapital: string;
   openPositionsValue: string;
-  avgBtcDistance?: string;
 }
 
 export interface AuditLog {
@@ -168,7 +166,6 @@ export interface ActivityEntry {
     | "TRADE_OPENED"
     | "TRADE_WIN"
     | "TRADE_LOSS"
-    | "MOMENTUM_SKIP"
     | "MARKET_RESOLVED"
     | "SYSTEM"
     | "INFO"
@@ -182,11 +179,6 @@ export interface ActivityEntry {
 }
 
 export interface WsMessage {
-  type:
-    | "systemState"
-    | "tradeOpened"
-    | "tradeResolved"
-    | "btcPriceUpdate"
-    | "pong";
+  type: "systemState" | "tradeOpened" | "tradeResolved" | "pong";
   data?: unknown;
 }

@@ -1,7 +1,7 @@
 {
-  "name": "penguinx-backend",
+  "name": "vector-core-backend",
   "version": "1.0.0",
-  "description": "Polymarket copy-trading analysis service - paper trading simulator",
+  "description": "Polymarket weather campaign trading engine - simulated NO-side strategy",
   "main": "dist/index.js",
   "scripts": {
     "dev": "tsx watch src/index.ts",

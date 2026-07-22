@@ -8,11 +8,10 @@ const logger = createModuleLogger("main");
 
 async function main(): Promise<void> {
   logger.info("═══════════════════════════════════════════");
-  logger.info("  Vector Core — Distribution Strategy Engine");
+  logger.info("  Vector Core — Weather Campaign Trading Engine");
   logger.info("  Polymarket NO-side Simulation");
   logger.info("═══════════════════════════════════════════");
 
-  // 1. Load and validate configuration
   const config = getConfig();
   logger.info(
     {
@@ -24,20 +23,16 @@ async function main(): Promise<void> {
     "Configuration loaded",
   );
 
-  // 2. Start API server immediately to satisfy Render's port detection
   const apiServer = getApiServer();
   await apiServer.start();
 
-  // 3. Connect to database
   await connectDatabase();
 
-  // 4. Start market orchestrator (event discovery + WS + execution)
   const orchestrator = getMarketOrchestrator();
   await orchestrator.start();
 
   logger.info("All systems operational ✓");
 
-  // Graceful shutdown
   const shutdown = async (signal: string) => {
     logger.info({ signal }, "Shutdown signal received");
 

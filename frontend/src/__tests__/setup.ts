@@ -1,7 +1,6 @@
 import "@testing-library/jest-dom/vitest";
 import { vi } from "vitest";
 
-// Mock WebSocket
 class MockWebSocket {
   static CONNECTING = 0;
   static OPEN = 1;
@@ -23,7 +22,6 @@ class MockWebSocket {
   }
 
   send(data: string) {
-    // Mock send
   }
 
   close() {
@@ -36,5 +34,4 @@ class MockWebSocket {
 
 global.WebSocket = MockWebSocket as unknown as typeof WebSocket;
 
-// Mock fetch
 global.fetch = vi.fn();

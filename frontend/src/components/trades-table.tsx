@@ -15,7 +15,6 @@ interface TradesTableProps {
   trades: SimulatedTrade[];
   loading: boolean;
   type: "OPEN" | "SETTLED";
-  /** Real-time prices keyed by tokenId, refreshed from WS */
   livePrices?: Record<string, LiveMarketPrice>;
 
   onTradeClick?: (trade: SimulatedTrade) => void;
@@ -143,7 +142,6 @@ export function TradesTable({
                     idx % 2 === 0 ? "bg-transparent" : "bg-card/5"
                   }`}
                 >
-                  {/* MARKET */}
                   <td className="py-3 px-3">
                     <div className="flex flex-col gap-1.5 max-w-[280px]">
                       <div className="flex items-center gap-1.5">
@@ -172,7 +170,6 @@ export function TradesTable({
                     </div>
                   </td>
 
-                  {/* COST BASIS */}
                   <td className="py-3 px-3 text-right">
                     <div className="flex flex-col gap-0.5 items-end">
                       <span className="text-foreground font-medium tabular-nums">
@@ -184,7 +181,6 @@ export function TradesTable({
                     </div>
                   </td>
 
-                  {/* PRICE DRIFT */}
                   <td className="py-3 px-3 text-right">
                     <div className="flex items-center justify-end gap-1.5 tabular-nums">
                       <span className="text-muted-foreground">
@@ -203,7 +199,6 @@ export function TradesTable({
                     </div>
                   </td>
 
-                  {/* PNL / ROI */}
                   <td className="py-3 px-3 text-right">
                     <div className="flex flex-col items-end gap-0.5">
                       {unrealizedPnl !== null ? (
@@ -240,7 +235,6 @@ export function TradesTable({
                     </div>
                   </td>
 
-                  {/* TIME LEFT */}
                   <td className="py-3 px-3 text-right">
                     {endDateStr ? (
                       <div className="flex items-center justify-end">
@@ -259,7 +253,6 @@ export function TradesTable({
                 </tr>
               );
             } else {
-              // SETTLED VIEW
               const realizedPnl = parseFloat(trade.realizedPnl || "0");
               const realizedPnlPct =
                 actualCost > 0 ? (realizedPnl / actualCost) * 100 : 0;
@@ -278,7 +271,6 @@ export function TradesTable({
                     idx % 2 === 0 ? "bg-transparent" : "bg-card/5"
                   }`}
                 >
-                  {/* MARKET */}
                   <td className="py-3 px-3">
                     <div className="flex flex-col gap-1.5 max-w-[280px]">
                       <div className="flex items-center gap-1.5">
@@ -307,7 +299,6 @@ export function TradesTable({
                     </div>
                   </td>
 
-                  {/* RESOLUTION DATE */}
                   <td className="py-3 px-3 text-right">
                     {exitTs ? (
                       <div className="flex flex-col gap-0.5 items-end">
@@ -329,14 +320,12 @@ export function TradesTable({
                     )}
                   </td>
 
-                  {/* COST BASIS */}
                   <td className="py-3 px-3 text-right">
                     <span className="text-foreground font-medium tabular-nums">
                       ${actualCost.toFixed(2)}
                     </span>
                   </td>
 
-                  {/* PRICE DRIFT */}
                   <td className="py-3 px-3 text-right">
                     <div className="flex items-center justify-end gap-1.5 tabular-nums">
                       <span className="text-muted-foreground">
@@ -359,7 +348,6 @@ export function TradesTable({
                     </div>
                   </td>
 
-                  {/* OUTCOME */}
                   <td className="py-3 px-3 text-right">
                     <span
                       className={`inline-flex rounded px-1.5 py-0.5 text-[9px] font-bold uppercase ${
@@ -374,7 +362,6 @@ export function TradesTable({
                     </span>
                   </td>
 
-                  {/* REALIZED PNL */}
                   <td className="py-3 px-3 text-right">
                     <div className="flex flex-col items-end gap-0.5">
                       <span
@@ -406,7 +393,6 @@ export function TradesTable({
         </tbody>
       </table>
 
-      {/* Show More */}
       {(hasMore || loadingMore) && (
         <div className="flex justify-center pt-3 pb-1">
           <button
@@ -429,7 +415,6 @@ export function TradesTable({
   );
 }
 
-// Inline MarketCountdown component for portability
 import { useEffect, useState } from "react";
 
 export function MarketCountdown({

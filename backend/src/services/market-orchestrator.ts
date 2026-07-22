@@ -30,14 +30,16 @@ import type { FeeSchedule, GammaEvent, GammaMarket } from "../types/index.js";
 import type { MarketResolvedEvent } from "../interfaces/websocket-types.js";
 import { executionPolicy } from "./execution-policy.js";
 
-const logger = createModuleLogger("distribution-orchestrator");
+const logger = createModuleLogger("market-orchestrator");
 
 import {
   parseBucketMinMax,
   findModalBucket,
   isCandidateBucket,
   isRelevantBucket,
-} from "../utils/distribution-logic.js";
+  isSupportedWeatherCampaign,
+  WEATHER_TAG_ID,
+} from "../utils/weather-logic.js";
 
 interface TrackedBucket {
   bucketId: string;
@@ -300,12 +302,11 @@ export class MarketOrchestrator extends EventEmitter {
   async syncCampaigns(): Promise<void> {
     if (this.paused) return;
 
-    // Tag 972 = Tweet Markets
     const result = await this.client.listEventsKeyset({
       limit: 100,
       active: true,
       closed: false,
-      tag_id: "972",
+      tag_id: WEATHER_TAG_ID,
     });
 
     const db = getDb();
@@ -314,17 +315,23 @@ export class MarketOrchestrator extends EventEmitter {
 
     for (const event of result.events) {
       if (this.paused) break;
-      if (!event.negRisk) continue; // Must be a multi-outcome campaign
+      if (!event.negRisk) continue;
       await this.persistCampaign(event);
     }
 
-    // Check for campaigns that dropped from the active API list
     const activeDbCampaigns = await db
       .select()
       .from(schema.distributionCampaigns)
       .where(eq(schema.distributionCampaigns.active, true));
     for (const c of activeDbCampaigns) {
       if (this.paused) break;
+      if (!isSupportedWeatherCampaign(c.title)) {
+        await db
+          .update(schema.distributionCampaigns)
+          .set({ active: false, updatedAt: new Date() })
+          .where(eq(schema.distributionCampaigns.id, c.id));
+        continue;
+      }
       if (!activeApiEventIds.has(c.id)) {
         try {
           const fullEvent = await this.client.getEventById(c.id);
@@ -349,11 +356,7 @@ export class MarketOrchestrator extends EventEmitter {
     const db = getDb();
     const eventId = String(event.id);
 
-    if (
-      !/^Elon Musk # tweets [A-Za-z]+ \d+ - [A-Za-z]+ \d+, \d{4}\?$/.test(
-        event.title ?? "",
-      )
-    ) {
+    if (!isSupportedWeatherCampaign(event.title)) {
       return;
     }
 
@@ -396,7 +399,7 @@ export class MarketOrchestrator extends EventEmitter {
       for (const market of event.markets) {
         if (!market.groupItemTitle) continue;
         const clobTokenIds = PolymarketClient.parseClobTokenIds(market);
-        if (clobTokenIds.length < 2) continue; // Need Yes and No tokens
+        if (clobTokenIds.length < 2) continue;
 
         await db
           .insert(schema.distributionBuckets)
@@ -929,7 +932,6 @@ export class MarketOrchestrator extends EventEmitter {
     const state = this.trackedBuckets.get(bucketId);
     if (state) state.resolved = true;
 
-    // Update the DB to reflect the resolution of this bucket so it stops being considered
     try {
       const db = getDb();
       const [bucket] = await db

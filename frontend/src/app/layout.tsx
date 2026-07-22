@@ -13,9 +13,9 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Vector Core - Distribution Strategy Engine",
+  title: "Vector Core - Weather Trading Engine",
   description:
-    "Automated tracking and simulated distribution for social campaigns.",
+    "Automated tracking and simulated trading for Polymarket weather campaigns.",
 };
 
 export const viewport: Viewport = {

@@ -15,18 +15,6 @@ import { logAudit } from "../db/client.js";
 
 const logger = createModuleLogger("market-ws-watcher");
 
-/**
- * Real-time market data via Polymarket CLOB WebSocket.
- * Subscribes with custom_feature_enabled=true to receive:
- *   - price_change: new/cancelled orders with best_bid/best_ask
- *   - best_bid_ask: top-of-book changes (custom feature)
- *   - last_trade_price: matched trades
- *   - tick_size_change: when price >0.96 or <0.04
- *   - market_resolved: market resolution (custom feature)
- *
- * Emits: "priceUpdate", "bestBidAskUpdate",
- *        "marketResolved", "tickSizeChange", "connected", "disconnected"
- */
 export class MarketWebSocketWatcher extends EventEmitter {
   private ws: WebSocket | null = null;
   private subscribedTokens: Set<string> = new Set();
@@ -124,7 +112,6 @@ export class MarketWebSocketWatcher extends EventEmitter {
           this.pendingUnsubscribes.clear();
         }
       } else {
-        // If not connected, clear pending queues, as the reconnect logic will resubscribe to all `subscribedTokens` anyway
         this.pendingSubscribes.clear();
         this.pendingUnsubscribes.clear();
       }
@@ -159,7 +146,6 @@ export class MarketWebSocketWatcher extends EventEmitter {
         this.reconnectAttempt = 0;
         this.emit("connected");
 
-        // Subscribe to all tracked tokens with custom features enabled
         if (this.subscribedTokens.size > 0) {
           const msg: MarketSubscriptionMessage = {
             assets_ids: Array.from(this.subscribedTokens),
@@ -173,7 +159,6 @@ export class MarketWebSocketWatcher extends EventEmitter {
           );
         }
 
-        // Keepalive ping every 10s
         this.pingTimer = setInterval(() => {
           if (this.ws?.readyState === WebSocket.OPEN) {
             this.ws.send("PING");
@@ -186,16 +171,13 @@ export class MarketWebSocketWatcher extends EventEmitter {
         try {
           const text = rawData.toString();
 
-          // Handle text responses (PONG, errors)
           if (text === "PONG" || text.startsWith("INVALID")) return;
 
-          // Drop massive unconsumed payloads before parsing to prevent OOM
           if (text.includes('"event_type":"book"')) return;
 
           const msg: ClobWsMessage = JSON.parse(text);
           this.handleMessage(msg);
         } catch {
-          // ignore parse errors
         }
       });
 
@@ -237,7 +219,6 @@ export class MarketWebSocketWatcher extends EventEmitter {
 
     switch (msg.event_type) {
       case "book":
-        // Safely ignored prior to parse, but kept here for logical completeness
         break;
 
       case "price_change":
@@ -267,9 +248,7 @@ export class MarketWebSocketWatcher extends EventEmitter {
         break;
 
       case "last_trade_price":
-        // Also emit as price update for tracking
         if (msg.asset_id && msg.price) {
-          // last_trade_price doesn't have best_bid/best_ask, skip
         }
         break;
 
@@ -340,7 +319,6 @@ export class MarketWebSocketWatcher extends EventEmitter {
   }
 }
 
-// Singleton
 let instance: MarketWebSocketWatcher | null = null;
 export function getMarketWebSocketWatcher(): MarketWebSocketWatcher {
   if (!instance) instance = new MarketWebSocketWatcher();

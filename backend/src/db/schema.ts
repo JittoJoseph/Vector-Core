@@ -14,10 +14,10 @@ import { sql } from "drizzle-orm";
 export const distributionCampaigns = pgTable(
   "distribution_campaigns",
   {
-    id: text("id").primaryKey(), // Polymarket event ID
+    id: text("id").primaryKey(),
     slug: text("slug").notNull(),
     title: text("title").notNull(),
-    seriesSlug: text("series_slug"), // e.g. "elon-tweets"
+    seriesSlug: text("series_slug"),
     startDate: timestamp("start_date"),
     endDate: timestamp("end_date"),
     active: boolean("active").default(true).notNull(),
@@ -36,11 +36,11 @@ export const distributionCampaigns = pgTable(
 export const distributionBuckets = pgTable(
   "distribution_buckets",
   {
-    id: text("id").primaryKey(), // Polymarket market ID
+    id: text("id").primaryKey(),
     campaignId: text("campaign_id").notNull(),
     conditionId: text("condition_id"),
     slug: text("slug"),
-    groupItemTitle: text("group_item_title").notNull(), // e.g., "180-199"
+    groupItemTitle: text("group_item_title").notNull(),
     yesTokenId: text("yes_token_id").notNull(),
     noTokenId: text("no_token_id").notNull(),
     yesPrice: decimal("yes_price", { precision: 18, scale: 8 }),
@@ -57,8 +57,6 @@ export const distributionBuckets = pgTable(
     noTokenIdx: index("db_no_token_idx").on(table.noTokenId),
   }),
 );
-
-
 
 export const portfolio = pgTable("portfolio", {
   id: integer("id").primaryKey().default(1),

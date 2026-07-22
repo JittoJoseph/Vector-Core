@@ -34,7 +34,6 @@ export function CampaignDetailPopup({
     ? (tradesRaw as SimulatedTrade[])
     : [];
 
-  // Derived metrics for Historical
   const totalTrades = Array.isArray(tradesRaw)
     ? trades.length
     : (tradesRaw?.length ?? 0);
@@ -53,7 +52,6 @@ export function CampaignDetailPopup({
   return (
     <Dialog open={true} onOpenChange={onClose}>
       <DialogContent className="w-[calc(100%-2rem)] sm:w-full sm:max-w-[600px] font-mono bg-background border-border/30 flex flex-col max-h-[90dvh] gap-0 p-0 overflow-hidden rounded-xl">
-        {/* ── HEADER ── */}
         <div className="shrink-0 px-4 pt-4 pb-3 border-b border-border/20">
           <div className="flex items-start justify-between gap-3">
             <div className="flex items-center gap-1.5 flex-wrap">
@@ -103,7 +101,6 @@ export function CampaignDetailPopup({
           </div>
         </div>
 
-        {/* ── SCROLLABLE BODY ── */}
         <div className="overflow-y-auto flex-1 overscroll-contain bg-muted/5 relative">
           {loading && (
             <div className="absolute inset-0 z-20 flex items-center justify-center bg-background/50 backdrop-blur-sm">
@@ -113,7 +110,6 @@ export function CampaignDetailPopup({
             </div>
           )}
 
-          {/* ── COMPACT CAMPAIGN METRICS ── */}
           <div className="flex flex-wrap items-center gap-x-8 gap-y-3 px-4 py-3 bg-muted/40 border-y border-border/15">
             {!isHistorical ? (
               <>
@@ -150,7 +146,6 @@ export function CampaignDetailPopup({
             )}
           </div>
 
-          {/* ── LIST ── */}
           {!isHistorical ? (
             <>
               <Section title="TRACKED BUCKETS">
@@ -350,7 +345,6 @@ export function CampaignDetailPopup({
   );
 }
 
-// ── UTILITY COMPONENTS (Mirrored from TradeDetailPopup) ──
 function Chip({ children }: { children: React.ReactNode }) {
   return (
     <span className="inline-flex items-center text-[9px] font-bold tracking-[0.2em] px-1.5 py-[2px] rounded border border-border/40 text-muted-foreground/80 uppercase">

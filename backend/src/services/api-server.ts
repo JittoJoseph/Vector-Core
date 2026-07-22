@@ -25,7 +25,7 @@ import {
   findModalBucket,
   isCandidateBucket,
   isRelevantBucket,
-} from "../utils/distribution-logic.js";
+} from "../utils/weather-logic.js";
 
 const logger = createModuleLogger("api-server");
 
@@ -53,7 +53,6 @@ export class ApiServer {
           if (msg.type === "ping")
             ws.send(JSON.stringify({ type: "pong", ts: Date.now() }));
         } catch {
-          // ignore
         }
       });
     });

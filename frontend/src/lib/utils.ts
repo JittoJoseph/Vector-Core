@@ -5,7 +5,6 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-/** Returns "text-emerald-500" or "text-red-500" based on sign. Optional opacity suffix e.g. "/80". */
 export function pnlColor(value: number, opacity?: string): string {
   if (value >= 0) {
     if (opacity === "80") return "text-emerald-500/80";
@@ -16,7 +15,6 @@ export function pnlColor(value: number, opacity?: string): string {
   }
 }
 
-/** Format a PnL value as "+$0.0123" or "-$0.0456". */
 export function formatPnl(value: number, decimals = 4): string {
   return `${value >= 0 ? "+" : "-"}$${Math.abs(value).toFixed(decimals)}`;
 }
@@ -41,18 +39,16 @@ export function polymarketMarketUrl({
 
 export function shortCampaignTitle(title: string | null | undefined): string {
   if (!title) return "Unknown Campaign";
-  const match = title.match(/(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]* \d{1,2}\s*-\s*(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]* \d{1,2}/i);
+  const match = title.match(/^Highest temperature in (.+) on (.+)\?$/);
   if (match) {
-    return match[0];
+    const date = match[2]!.replace(/^([A-Za-z]{3})[a-z]+/, "$1");
+    return `${match[1]} · ${date}`;
   }
   return title;
 }
 
 import { SimulatedTrade, LiveMarketPrice } from "./types";
 
-/**
- * Calculates the unrealized PnL and return percentage for a single trade.
- */
 export function calculateTradeUnrealizedPnl(
   trade: SimulatedTrade,
   livePrice: LiveMarketPrice | null
@@ -71,9 +67,6 @@ export function calculateTradeUnrealizedPnl(
   return { pnl, pnlPct };
 }
 
-/**
- * Aggregates portfolio metrics from a list of open trades and a map of live prices.
- */
 export function aggregatePortfolioMetrics(
   openTrades: SimulatedTrade[],
   livePricesMap: Record<string, LiveMarketPrice>

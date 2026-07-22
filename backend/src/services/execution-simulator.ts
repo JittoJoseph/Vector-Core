@@ -150,7 +150,7 @@ export function simulateTakerSell(
   const fillDetails: FillDetail[] = [];
   let remainingShares = new Decimal(sharesAmount);
   let totalShares = new Decimal(0);
-  let totalRevenue = new Decimal(0); // Before fees
+  let totalRevenue = new Decimal(0);
   let totalFees = new Decimal(0);
 
   for (const level of bids) {
@@ -203,9 +203,9 @@ export function simulateTakerSell(
   return {
     averagePrice: avgPrice,
     totalShares: totalShares.toNumber(),
-    totalCost: totalRevenue.toNumber(), // Gross revenue
+    totalCost: totalRevenue.toNumber(),
     fees: roundedFees,
-    netCost: totalRevenue.toNumber() - roundedFees, // Net revenue received
+    netCost: totalRevenue.toNumber() - roundedFees,
     isPartialFill: remainingShares.gt(0) && totalShares.gt(0),
     belowMinimumOrderSize,
     minOrderSize,

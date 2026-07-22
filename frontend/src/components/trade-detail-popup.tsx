@@ -54,7 +54,6 @@ export function TradeDetailPopup({
   return (
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent className="w-[calc(100%-2rem)] sm:w-full sm:max-w-[560px] font-mono bg-background border-border/30 flex flex-col max-h-[90dvh] gap-0 p-0 overflow-hidden rounded-xl">
-        {/* ── HEADER ── */}
         <div className="shrink-0 px-4 pt-4 pb-3 border-b border-border/20">
           <div className="flex items-start justify-between gap-3">
             <div className="flex items-center gap-1.5 flex-wrap">
@@ -95,7 +94,7 @@ export function TradeDetailPopup({
           {trade.bucketGroupTitle && (
             <div className="mt-2 mb-1 flex flex-wrap items-center gap-x-4 gap-y-2">
               <div className="flex items-center gap-2">
-                <span className="text-[10px] uppercase tracking-widest text-muted-foreground/60 font-bold">COUNT BUCKET:</span>
+                <span className="text-[10px] uppercase tracking-widest text-muted-foreground/60 font-bold">TEMP BUCKET:</span>
                 <span className="text-[11px] font-semibold text-foreground/90 bg-muted/20 px-2 py-0.5 rounded border border-border/10">
                   {trade.bucketGroupTitle}
                 </span>
@@ -112,10 +111,8 @@ export function TradeDetailPopup({
           )}
         </div>
 
-        {/* ── SCROLLABLE BODY ── */}
         <div className="overflow-y-auto flex-1 overscroll-contain">
           
-          {/* ── FINANCIALS ── */}
           <Section title="POSITION FINANCIALS">
             <Row2>
               <Cell label="COST BASIS" value={`$${actualCost.toFixed(2)}`} />
@@ -161,8 +158,6 @@ export function TradeDetailPopup({
             </Row2>
           </Section>
 
-
-          {/* ── RESOLUTION & RESULT (only if settled) ── */}
           {isClosed && outcome && (
             <div className="flex items-center gap-2 px-4 py-3 border-b border-border/15 bg-card/10">
               <span className="text-[10px] font-mono tracking-[0.2em] text-muted-foreground/35 uppercase">
@@ -187,7 +182,6 @@ export function TradeDetailPopup({
             </div>
           )}
 
-          {/* ── TIMESTAMPS ── */}
           <Section title="TIMESTAMPS">
             <Row2>
               <Cell label="ENTERED" value={formatTs(trade.entryTs)} />
@@ -201,8 +195,6 @@ export function TradeDetailPopup({
     </Dialog>
   );
 }
-
-/* ─────────────── Primitives ─────────────── */
 
 function Chip({ children }: { children: React.ReactNode }) {
   return (
@@ -245,8 +237,6 @@ function Cell({ label, value }: { label: string; value: React.ReactNode }) {
     </div>
   );
 }
-
-/* ─────────────── Formatters ─────────────── */
 
 function formatTs(iso: string): string {
   return new Date(iso).toLocaleString("en-US", {

@@ -1,15 +1,8 @@
-/**
- * WebSocket types for Polymarket CLOB Market Channel
- * Docs: https://docs.polymarket.com/market-data/websocket/market-channel
- */
-
-/** Raw CLOB WS message */
 export interface ClobWsMessage {
   event_type?: string;
   asset_id?: string;
   market?: string;
   timestamp?: number | string;
-  // price_change event
   price_changes?: Array<{
     asset_id: string;
     price: string;
@@ -19,19 +12,15 @@ export interface ClobWsMessage {
     best_bid: string;
     best_ask: string;
   }>;
-  // best_bid_ask event (requires custom_feature_enabled)
   best_bid?: string;
   best_ask?: string;
   spread?: string;
-  // last_trade_price event
   price?: string;
   size?: string;
   side?: string;
   fee_rate_bps?: string;
-  // tick_size_change event
   old_tick_size?: string;
   new_tick_size?: string;
-  // market_resolved event (requires custom_feature_enabled)
   winning_asset_id?: string;
   winning_outcome?: string;
   id?: string;
@@ -42,7 +31,6 @@ export interface ClobWsMessage {
   [key: string]: unknown;
 }
 
-/** Emitted price update event */
 export interface PriceUpdateEvent {
   tokenId: string;
   bestBid: string;
@@ -51,7 +39,6 @@ export interface PriceUpdateEvent {
   timestamp: number;
 }
 
-/** Emitted best bid/ask event */
 export interface BestBidAskEvent {
   tokenId: string;
   bestBid: string;
@@ -60,7 +47,6 @@ export interface BestBidAskEvent {
   timestamp: number;
 }
 
-/** Emitted when a market resolves via WS */
 export interface MarketResolvedEvent {
   marketId: string;
   conditionId: string;
@@ -69,7 +55,6 @@ export interface MarketResolvedEvent {
   timestamp: number;
 }
 
-/** Emitted tick size change */
 export interface TickSizeChangeEvent {
   tokenId: string;
   oldTickSize: string;
@@ -77,33 +62,13 @@ export interface TickSizeChangeEvent {
   timestamp: number;
 }
 
-/** CLOB WS subscription message */
 export interface MarketSubscriptionMessage {
   assets_ids: string[];
   type: "market";
   custom_feature_enabled: boolean;
 }
 
-/** CLOB WS dynamic subscribe/unsubscribe */
 export interface SubscriptionUpdateMessage {
   assets_ids: string[];
   operation: "subscribe" | "unsubscribe";
-}
-
-/** RTDS real-time BTC price message */
-export interface RTDSMessage {
-  topic: string;
-  type: string;
-  timestamp: number;
-  payload: {
-    symbol: string;
-    timestamp: number;
-    value: number;
-  };
-}
-
-/** BTC price data from RTDS */
-export interface BtcPriceData {
-  price: number;
-  timestamp: number;
 }

@@ -39,7 +39,6 @@ export function DashboardPage() {
     null,
   );
 
-  // Core Hooks
   const { stats, refetch: refetchStats } = useSystemStats();
 
   const {
@@ -96,12 +95,10 @@ export function DashboardPage() {
     refetchPerformance,
   ]);
 
-  // Live prices map for Open Positions
   const livePricesMap = useMemo<Record<string, LiveMarketPrice>>(() => {
     return stats?.openPositionPrices || {};
   }, [stats?.openPositionPrices]);
 
-  // Financial Stats
   const initialCapital = stats?.portfolio?.initialCapital ?? 0;
   const cashBalance = stats?.portfolio?.cashBalance ?? 0;
   const openPositionsValue = stats?.portfolio?.openPositionsValue ?? 0;
@@ -128,7 +125,6 @@ export function DashboardPage() {
       <Header />
 
       <main className="flex-1 px-4 py-4 pb-16 max-w-7xl mx-auto w-full space-y-4">
-        {/* ── TOP LEVEL COMMAND PANELS ── */}
         <div className="border border-border/30 rounded-xl bg-card/25 p-6 pt-4">
           <div className="flex items-center justify-between border-b border-border/20 pb-2 mb-3">
             <div className="text-[10px] tracking-[0.2em] text-muted-foreground/80 uppercase flex items-center gap-2 font-bold">
@@ -146,7 +142,6 @@ export function DashboardPage() {
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 divide-y md:divide-y-0 md:divide-x divide-border/20">
-            {/* Section 1: Returns & PnL */}
             <div className="flex flex-col gap-4 lg:pr-6">
               <div className="pt-3">
                 <div className="text-[9px] text-muted-foreground/60 uppercase tracking-widest mb-0.5 font-bold">
@@ -216,7 +211,6 @@ export function DashboardPage() {
               </div>
             </div>
 
-            {/* Section 2: Capital Allocation */}
             <div className="flex flex-col gap-4 md:pl-6 lg:px-6 md:pt-0 pt-4">
               <div className="pt-3">
                 <div className="text-[9px] text-muted-foreground/60 uppercase tracking-widest mb-0.5 font-bold">
@@ -262,7 +256,6 @@ export function DashboardPage() {
               </div>
             </div>
 
-            {/* Section 3: Trade Statistics */}
             <div className="flex flex-col gap-3 lg:pl-6 lg:px-6 md:pt-4 lg:pt-0 pt-4">
               <div className="pt-3">
                 <div className="flex justify-between items-center mb-1.5">
@@ -312,9 +305,7 @@ export function DashboardPage() {
               </div>
             </div>
 
-            {/* Section 4: System & Engine Health */}
             <div className="flex flex-col gap-4 md:pl-6 lg:pl-6 md:pt-4 lg:pt-0 pt-4">
-              {/* Engine & Feed Status */}
               <div className="flex flex-col gap-2 mt-3">
                 <div className="flex items-center justify-between bg-card/30 border border-border/20 rounded px-3 py-1.5">
                   <div className="flex items-center gap-2">
@@ -369,7 +360,6 @@ export function DashboardPage() {
                 </div>
               </div>
 
-              {/* Telemetry Grid */}
               <div className="grid grid-cols-2 gap-x-4 gap-y-2">
                 <div>
                   <div className="text-[9px] text-muted-foreground/60 uppercase tracking-widest mb-0.5 font-bold">
@@ -392,9 +382,7 @@ export function DashboardPage() {
           </div>
         </div>
 
-        {/* ── MAIN SPLIT VIEW ── */}
         <div className="flex flex-col lg:flex-row gap-4">
-          {/* LEFT: TABS & TABLES */}
           <div className="flex-1 min-w-0 border border-border/30 rounded bg-card/25 overflow-hidden flex flex-col">
             <Tabs
               value={activeTab}
@@ -430,7 +418,6 @@ export function DashboardPage() {
                 ))}
               </div>
 
-              {/* OPEN POSITIONS TAB */}
               <TabsContent value="positions" className="mt-0 flex-1 p-0">
                 <TradesTable
                   type="OPEN"
@@ -444,7 +431,6 @@ export function DashboardPage() {
                 />
               </TabsContent>
 
-              {/* TRADE HISTORY TAB */}
               <TabsContent
                 value="history"
                 className="mt-0 flex-1 p-0 flex flex-col"
@@ -530,7 +516,6 @@ export function DashboardPage() {
                 />
               </TabsContent>
 
-              {/* DIAGNOSTICS TAB */}
               <TabsContent value="diagnostics" className="mt-0 flex-1 p-0">
                 <div className="grid grid-cols-1 md:grid-cols-2 divide-y md:divide-y-0 md:divide-x divide-border/20 h-full">
                   <div className="p-6 flex flex-col gap-6">
@@ -629,7 +614,6 @@ export function DashboardPage() {
                             className="relative z-10 pl-6 flex flex-col gap-1 cursor-pointer group"
                             onClick={() => setSelectedTrade(trade)}
                           >
-                            {/* Timeline dot */}
                             <div
                               className={`absolute left-0 top-1 w-[15px] h-[15px] rounded-full flex items-center justify-center bg-background border ${pnl !== null && pnl >= 0 ? "border-emerald-500/50" : pnl !== null ? "border-red-500/50" : "border-muted-foreground/30"}`}
                             >
@@ -731,7 +715,6 @@ export function DashboardPage() {
               </div>
             </div>
 
-            {/* ACTIVE PARAMETERS */}
             <div className="border border-border/30 rounded-xl bg-card/25 p-5">
               <div className="text-[11px] tracking-[0.2em] text-muted-foreground/80 uppercase font-bold mb-5 flex items-center gap-2">
                 <SlidersHorizontal
