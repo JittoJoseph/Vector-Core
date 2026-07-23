@@ -7,115 +7,71 @@ import type {
   PriceUpdateEvent,
   BestBidAskEvent,
   MarketResolvedEvent,
-  TickSizeChangeEvent,
-  MarketSubscriptionMessage,
-  SubscriptionUpdateMessage,
 } from "../interfaces/websocket-types.js";
-import { logAudit } from "../db/client.js";
 
 const logger = createModuleLogger("market-ws-watcher");
 
+const PING_INTERVAL_MS = 5_000;
+const BASE_RECONNECT_DELAY_MS = 1_000;
+const MAX_RECONNECT_DELAY_MS = 60_000;
+
 export class MarketWebSocketWatcher extends EventEmitter {
   private ws: WebSocket | null = null;
-  private subscribedTokens: Set<string> = new Set();
+  private subscribedTokens = new Set<string>();
   private running = false;
   private reconnectAttempt = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private pingTimer: ReturnType<typeof setInterval> | null = null;
   private messageCount = 0;
 
-  private pendingSubscribes = new Set<string>();
-  private pendingUnsubscribes = new Set<string>();
-  private flushTimer: ReturnType<typeof setTimeout> | null = null;
-
-  private static readonly PING_INTERVAL = 10000;
-  private static readonly MAX_RECONNECT_DELAY = 60000;
-  private static readonly BASE_RECONNECT_DELAY = 1000;
-
   start(): void {
     if (this.running) return;
     this.running = true;
-    this.connect();
+    this.ensureConnection();
     logger.info("Market WebSocket watcher started");
   }
 
   stop(): void {
     this.running = false;
-    if (this.reconnectTimer) {
-      clearTimeout(this.reconnectTimer);
-      this.reconnectTimer = null;
-    }
-    if (this.pingTimer) {
-      clearInterval(this.pingTimer);
-      this.pingTimer = null;
-    }
-    if (this.ws) {
-      this.ws.removeAllListeners();
-      if (this.ws.readyState === WebSocket.OPEN) this.ws.close();
-      this.ws = null;
-    }
+    this.closeSocket();
     logger.info("Market WebSocket watcher stopped");
   }
 
   clear(): void {
     this.subscribedTokens.clear();
-    this.pendingSubscribes.clear();
-    this.pendingUnsubscribes.clear();
+    this.closeSocket();
   }
 
   subscribe(tokenIds: string[]): void {
     const newTokens = tokenIds.filter((id) => !this.subscribedTokens.has(id));
     if (newTokens.length === 0) return;
+    newTokens.forEach((id) => this.subscribedTokens.add(id));
 
-    newTokens.forEach((id) => {
-      this.subscribedTokens.add(id);
-      this.pendingSubscribes.add(id);
-      this.pendingUnsubscribes.delete(id);
-    });
-
-    this.scheduleFlush();
+    if (this.ws?.readyState === WebSocket.OPEN) {
+      this.ws.send(
+        JSON.stringify({ assets_ids: newTokens, operation: "subscribe" }),
+      );
+      logger.info({ count: newTokens.length }, "Subscribed to new tokens");
+    } else {
+      this.ensureConnection();
+    }
   }
 
   unsubscribe(tokenIds: string[]): void {
-    tokenIds.forEach((id) => {
-      if (this.subscribedTokens.has(id)) {
-        this.subscribedTokens.delete(id);
-        this.pendingUnsubscribes.add(id);
-        this.pendingSubscribes.delete(id);
-      }
-    });
+    const removed = tokenIds.filter((id) => this.subscribedTokens.delete(id));
+    if (removed.length === 0) return;
 
-    this.scheduleFlush();
-  }
-
-  private scheduleFlush(): void {
-    if (this.flushTimer) return;
-    this.flushTimer = setTimeout(() => {
-      this.flushTimer = null;
-      if (this.ws?.readyState === WebSocket.OPEN) {
-        if (this.pendingSubscribes.size > 0) {
-          const msg: SubscriptionUpdateMessage = {
-            assets_ids: Array.from(this.pendingSubscribes),
-            operation: "subscribe",
-          };
-          this.ws.send(JSON.stringify(msg));
-          logger.info({ count: this.pendingSubscribes.size }, "Subscribed to new tokens (batched)");
-          this.pendingSubscribes.clear();
-        }
-        if (this.pendingUnsubscribes.size > 0) {
-          const msg: SubscriptionUpdateMessage = {
-            assets_ids: Array.from(this.pendingUnsubscribes),
-            operation: "unsubscribe",
-          };
-          this.ws.send(JSON.stringify(msg));
-          logger.info({ count: this.pendingUnsubscribes.size }, "Unsubscribed from tokens (batched)");
-          this.pendingUnsubscribes.clear();
-        }
-      } else {
-        this.pendingSubscribes.clear();
-        this.pendingUnsubscribes.clear();
-      }
-    }, 50);
+    if (this.subscribedTokens.size === 0) {
+      logger.info("No tokens left to watch, closing WebSocket");
+      this.closeSocket();
+      return;
+    }
+    if (this.ws?.readyState === WebSocket.OPEN) {
+      this.ws.send(
+        JSON.stringify({ assets_ids: removed, operation: "unsubscribe" }),
+      );
+      logger.info({ count: removed.length }, "Unsubscribed from tokens");
+    }
   }
 
   isConnected(): boolean {
@@ -135,80 +91,112 @@ export class MarketWebSocketWatcher extends EventEmitter {
     };
   }
 
-  private connect(): void {
-    if (!this.running) return;
-
-    try {
-      this.ws = new WebSocket(POLY_URLS.CLOB_WS);
-
-      this.ws.on("open", () => {
-        logger.info("CLOB WebSocket connected");
-        this.reconnectAttempt = 0;
-        this.emit("connected");
-
-        if (this.subscribedTokens.size > 0) {
-          const msg: MarketSubscriptionMessage = {
-            assets_ids: Array.from(this.subscribedTokens),
-            type: "market",
-            custom_feature_enabled: true,
-          };
-          this.ws!.send(JSON.stringify(msg));
-          logger.info(
-            { tokenCount: this.subscribedTokens.size },
-            "Sent initial subscription with custom_feature_enabled",
-          );
-        }
-
-        this.pingTimer = setInterval(() => {
-          if (this.ws?.readyState === WebSocket.OPEN) {
-            this.ws.send("PING");
-          }
-        }, MarketWebSocketWatcher.PING_INTERVAL);
-      });
-
-      this.ws.on("message", (rawData: WebSocket.Data) => {
-        this.messageCount++;
-        try {
-          const text = rawData.toString();
-
-          if (text === "PONG" || text.startsWith("INVALID")) return;
-
-          if (text.includes('"event_type":"book"')) return;
-
-          const msg: ClobWsMessage = JSON.parse(text);
-          this.handleMessage(msg);
-        } catch {
-        }
-      });
-
-      this.ws.on("close", (code: number, reason: Buffer) => {
-        logger.warn(
-          { code, reason: reason.toString() },
-          "CLOB WebSocket closed",
-        );
-        logAudit(
-          "warn",
-          "SYSTEM",
-          `CLOB WebSocket closed (code: ${code})`,
-        ).catch(() => {});
-        this.cleanup();
-        this.emit("disconnected", { code, reason: reason.toString() });
-        this.scheduleReconnect();
-      });
-
-      this.ws.on("error", (error: Error) => {
-        logger.error({ error: error.message }, "CLOB WebSocket error");
-        logAudit(
-          "error",
-          "SYSTEM",
-          `CLOB WebSocket error: ${error.message}`,
-        ).catch(() => {});
-        this.emit("error", error);
-      });
-    } catch (error) {
-      logger.error({ error }, "Failed to create CLOB WebSocket");
-      this.scheduleReconnect();
+  private ensureConnection(): void {
+    if (!this.running || this.subscribedTokens.size === 0) return;
+    if (this.ws) return;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
     }
+
+    const ws = new WebSocket(POLY_URLS.CLOB_WS);
+    this.ws = ws;
+
+    ws.on("open", () => {
+      this.reconnectAttempt = 0;
+      ws.send(
+        JSON.stringify({
+          assets_ids: Array.from(this.subscribedTokens),
+          type: "market",
+          custom_feature_enabled: true,
+        }),
+      );
+      logger.info(
+        { tokenCount: this.subscribedTokens.size },
+        "CLOB WebSocket connected and subscribed",
+      );
+
+      this.pingTimer = setInterval(() => {
+        if (ws.readyState === WebSocket.OPEN) ws.send("PING");
+      }, PING_INTERVAL_MS);
+    });
+
+    ws.on("message", (rawData: WebSocket.Data) => {
+      this.messageCount++;
+      try {
+        const text = rawData.toString();
+        if (text === "PONG") return;
+        if (text.startsWith("INVALID")) {
+          logger.warn({ text: text.slice(0, 200) }, "CLOB rejected message");
+          return;
+        }
+        if (text.includes('"event_type":"book"')) return;
+        this.handleMessage(JSON.parse(text) as ClobWsMessage);
+      } catch {
+      }
+    });
+
+    ws.on("close", (code: number, reason: Buffer) => {
+      if (this.ws !== ws) return;
+      this.discardSocket();
+      logger.warn(
+        { code, reason: reason.toString() },
+        "CLOB WebSocket closed",
+      );
+      this.scheduleReconnect();
+    });
+
+    ws.on("error", (error: Error) => {
+      logger.error({ error: error.message }, "CLOB WebSocket error");
+    });
+  }
+
+  private discardSocket(): void {
+    if (this.pingTimer) {
+      clearInterval(this.pingTimer);
+      this.pingTimer = null;
+    }
+    if (this.ws) {
+      this.ws.removeAllListeners();
+      this.ws = null;
+    }
+  }
+
+  private closeSocket(): void {
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    const ws = this.ws;
+    this.discardSocket();
+    if (
+      ws &&
+      (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)
+    ) {
+      ws.close();
+    }
+    this.reconnectAttempt = 0;
+  }
+
+  private scheduleReconnect(): void {
+    if (!this.running || this.subscribedTokens.size === 0) return;
+    if (this.reconnectTimer) return;
+
+    const delay =
+      Math.min(
+        BASE_RECONNECT_DELAY_MS * Math.pow(2, this.reconnectAttempt),
+        MAX_RECONNECT_DELAY_MS,
+      ) +
+      Math.random() * 300;
+    this.reconnectAttempt++;
+    logger.info(
+      { delay: Math.round(delay), attempt: this.reconnectAttempt },
+      "CLOB reconnecting",
+    );
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      this.ensureConnection();
+    }, delay);
   }
 
   private handleMessage(msg: ClobWsMessage): void {
@@ -218,20 +206,15 @@ export class MarketWebSocketWatcher extends EventEmitter {
         : (msg.timestamp ?? Date.now());
 
     switch (msg.event_type) {
-      case "book":
-        break;
-
       case "price_change":
-        if (msg.price_changes) {
-          for (const pc of msg.price_changes) {
-            this.emit("priceUpdate", {
-              tokenId: pc.asset_id,
-              bestBid: pc.best_bid,
-              bestAsk: pc.best_ask,
-              midpoint: (parseFloat(pc.best_bid) + parseFloat(pc.best_ask)) / 2,
-              timestamp: ts,
-            } satisfies PriceUpdateEvent);
-          }
+        for (const pc of msg.price_changes ?? []) {
+          this.emit("priceUpdate", {
+            tokenId: pc.asset_id,
+            bestBid: pc.best_bid,
+            bestAsk: pc.best_ask,
+            midpoint: (parseFloat(pc.best_bid) + parseFloat(pc.best_ask)) / 2,
+            timestamp: ts,
+          } satisfies PriceUpdateEvent);
         }
         break;
 
@@ -247,38 +230,10 @@ export class MarketWebSocketWatcher extends EventEmitter {
         }
         break;
 
-      case "last_trade_price":
-        if (msg.asset_id && msg.price) {
-        }
-        break;
-
-      case "tick_size_change":
-        if (msg.asset_id && msg.old_tick_size && msg.new_tick_size) {
-          logger.debug(
-            {
-              tokenId: msg.asset_id,
-              old: msg.old_tick_size,
-              new: msg.new_tick_size,
-            },
-            "Tick size changed — price near extremes",
-          );
-          this.emit("tickSizeChange", {
-            tokenId: msg.asset_id,
-            oldTickSize: msg.old_tick_size,
-            newTickSize: msg.new_tick_size,
-            timestamp: ts,
-          } satisfies TickSizeChangeEvent);
-        }
-        break;
-
       case "market_resolved":
         if (msg.market && msg.winning_asset_id && msg.winning_outcome) {
           logger.info(
-            {
-              market: msg.market,
-              winner: msg.winning_outcome,
-              winnerAsset: msg.winning_asset_id,
-            },
+            { market: msg.market, winner: msg.winning_outcome },
             "Market resolved via WebSocket",
           );
           this.emit("marketResolved", {
@@ -291,31 +246,6 @@ export class MarketWebSocketWatcher extends EventEmitter {
         }
         break;
     }
-  }
-
-  private cleanup(): void {
-    if (this.pingTimer) {
-      clearInterval(this.pingTimer);
-      this.pingTimer = null;
-    }
-  }
-
-  private scheduleReconnect(): void {
-    if (!this.running) return;
-    const delay =
-      Math.min(
-        MarketWebSocketWatcher.BASE_RECONNECT_DELAY *
-          Math.pow(2, this.reconnectAttempt),
-        MarketWebSocketWatcher.MAX_RECONNECT_DELAY,
-      ) +
-      Math.random() * 300;
-
-    this.reconnectAttempt++;
-    logger.info(
-      { delay: Math.round(delay), attempt: this.reconnectAttempt },
-      "CLOB reconnecting",
-    );
-    this.reconnectTimer = setTimeout(() => this.connect(), delay);
   }
 }
 

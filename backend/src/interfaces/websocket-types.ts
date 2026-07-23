@@ -55,20 +55,3 @@ export interface MarketResolvedEvent {
   timestamp: number;
 }
 
-export interface TickSizeChangeEvent {
-  tokenId: string;
-  oldTickSize: string;
-  newTickSize: string;
-  timestamp: number;
-}
-
-export interface MarketSubscriptionMessage {
-  assets_ids: string[];
-  type: "market";
-  custom_feature_enabled: boolean;
-}
-
-export interface SubscriptionUpdateMessage {
-  assets_ids: string[];
-  operation: "subscribe" | "unsubscribe";
-}
