@@ -113,7 +113,6 @@ export class MarketOrchestrator extends EventEmitter {
   private tokenToBucket = new Map<string, string>();
   private conditionIdToBucket = new Map<string, string>();
   private openPositions = new Map<string, OpenPosition>();
-  private inFlightTokens = new Set<string>();
   private realizedPnl = 0;
 
   private running = false;
@@ -176,7 +175,6 @@ export class MarketOrchestrator extends EventEmitter {
     this.tokenToBucket.clear();
     this.conditionIdToBucket.clear();
     this.openPositions.clear();
-    this.inFlightTokens.clear();
     this.wsWatcher.clear();
     this.realizedPnl = 0;
     this.cycleCount = 0;
@@ -221,22 +219,28 @@ export class MarketOrchestrator extends EventEmitter {
 
   private async loadState(): Promise<void> {
     this.realizedPnl = await sumRealizedPnl();
-    this.openPositions.clear();
-    for (const trade of await loadOpenTrades()) {
-      this.openPositions.set(trade.id, {
-        tradeId: trade.id,
-        bucketId: trade.bucketId ?? "",
-        tokenId: trade.tokenId ?? "",
-        entryPrice: parseFloat(trade.entryPrice),
-        entryShares: parseFloat(trade.entryShares),
-        fees: parseFloat(trade.entryFees),
-        actualCost: parseFloat(trade.actualCost),
-        minNoPriceDuringPosition:
-          trade.minNoPriceDuringPosition !== null
-            ? parseFloat(trade.minNoPriceDuringPosition)
-            : null,
-      });
+    const openTrades = await loadOpenTrades();
+    const refreshed = new Map<string, OpenPosition>();
+    for (const trade of openTrades) {
+      const existing = this.openPositions.get(trade.id);
+      refreshed.set(
+        trade.id,
+        existing ?? {
+          tradeId: trade.id,
+          bucketId: trade.bucketId ?? "",
+          tokenId: trade.tokenId ?? "",
+          entryPrice: parseFloat(trade.entryPrice),
+          entryShares: parseFloat(trade.entryShares),
+          fees: parseFloat(trade.entryFees),
+          actualCost: parseFloat(trade.actualCost),
+          minNoPriceDuringPosition:
+            trade.minNoPriceDuringPosition !== null
+              ? parseFloat(trade.minNoPriceDuringPosition)
+              : null,
+        },
+      );
     }
+    this.openPositions = refreshed;
   }
 
   getStats() {
@@ -527,6 +531,7 @@ export class MarketOrchestrator extends EventEmitter {
     this.cycleCount++;
 
     try {
+      await this.loadState();
       const result = await this.findCandidateOpportunities();
       if (!result) return;
 
@@ -619,7 +624,6 @@ export class MarketOrchestrator extends EventEmitter {
         )
           continue;
         if (bucketHasPosition) continue;
-        if (this.inFlightTokens.has(bucket.noTokenId)) continue;
 
         const state = this.trackedBuckets.get(bucket.id);
         if (state && (state.resolved || !state.acceptingOrders)) continue;
@@ -701,7 +705,6 @@ export class MarketOrchestrator extends EventEmitter {
       )
         break;
 
-      this.inFlightTokens.add(cand.bucket.noTokenId);
       try {
         await this.executeMarketEntry(cand);
       } catch (err) {
@@ -709,8 +712,6 @@ export class MarketOrchestrator extends EventEmitter {
           { err, bucketId: cand.bucket.id },
           "Failed to execute entry",
         );
-      } finally {
-        this.inFlightTokens.delete(cand.bucket.noTokenId);
       }
     }
   }
