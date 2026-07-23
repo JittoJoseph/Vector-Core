@@ -5,6 +5,7 @@ export interface Campaign {
   seriesSlug: string | null;
   startDate: string | null;
   endDate: string | null;
+  closedTime: string | null;
   closed: boolean;
   lastFetchedAt: string;
   createdAt: string;

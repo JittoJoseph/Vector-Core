@@ -362,7 +362,7 @@ export function MarketCountdown({
     const update = () => {
       const diff = end - Date.now();
       if (diff <= 0) {
-        setTimeLeft("Resolving...");
+        setTimeLeft("Awaiting resolution");
         return;
       }
 

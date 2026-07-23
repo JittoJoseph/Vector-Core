@@ -414,6 +414,22 @@ export class MarketOrchestrator extends EventEmitter {
     const eventId = String(event.id);
     const isClosed = event.closed ?? false;
 
+    if (!event.markets || event.markets.length === 0) {
+      const fullEvent = await this.client.getEventBySlug(event.slug ?? eventId);
+      if (fullEvent?.markets) {
+        event.markets = fullEvent.markets;
+      }
+    }
+
+    const gameStart = event.markets?.find((m) => m.gameStartTime)
+      ?.gameStartTime;
+    const endDate = gameStart
+      ? new Date(new Date(gameStart).getTime() + 24 * 60 * 60 * 1000)
+      : event.endDate
+        ? new Date(event.endDate)
+        : null;
+    const closedTime = event.closedTime ? new Date(event.closedTime) : null;
+
     await db
       .insert(schema.campaigns)
       .values({
@@ -422,7 +438,8 @@ export class MarketOrchestrator extends EventEmitter {
         title: event.title ?? eventId,
         seriesSlug: (event as any).seriesSlug ?? null,
         startDate: event.startDate ? new Date(event.startDate) : null,
-        endDate: event.endDate ? new Date(event.endDate) : null,
+        endDate,
+        closedTime,
         closed: isClosed,
         lastFetchedAt: new Date(),
         updatedAt: new Date(),
@@ -431,18 +448,13 @@ export class MarketOrchestrator extends EventEmitter {
         target: schema.campaigns.id,
         set: {
           title: event.title ?? eventId,
+          endDate,
+          closedTime,
           closed: isClosed,
           lastFetchedAt: new Date(),
           updatedAt: new Date(),
         },
       });
-
-    if (!event.markets || event.markets.length === 0) {
-      const fullEvent = await this.client.getEventBySlug(event.slug ?? eventId);
-      if (fullEvent?.markets) {
-        event.markets = fullEvent.markets;
-      }
-    }
 
     for (const market of event.markets ?? []) {
       if (!market.groupItemTitle) continue;
