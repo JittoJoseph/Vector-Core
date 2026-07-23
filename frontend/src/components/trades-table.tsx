@@ -2,12 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { Trade, PositionPnl } from "@/lib/types";
-import {
-  polymarketMarketUrl,
-  formatPnl,
-  pnlColor,
-  shortCampaignTitle,
-} from "@/lib/utils";
+import { polymarketMarketUrl, pnlColor, shortCampaignTitle } from "@/lib/utils";
 import NumberFlow from "@number-flow/react";
 import { ExternalLink, Clock } from "lucide-react";
 
@@ -89,6 +84,8 @@ export function TradesTable({
             const shares = parseFloat(trade.entryShares);
             const actualCost = parseFloat(trade.actualCost);
             const expectedProfit = parseFloat(trade.expectedNetProfit || "0");
+            const expectedProfitPct =
+              actualCost > 0 ? (expectedProfit / actualCost) * 100 : null;
             const polyUrl = polymarketMarketUrl({
               eventSlug: trade.campaignSlug,
               marketSlug: trade.bucketSlug,
@@ -196,9 +193,10 @@ export function TradesTable({
                       ) : (
                         <span className="text-muted-foreground/40">—</span>
                       )}
-                      {expectedProfit > 0 && (
+                      {expectedProfitPct !== null && expectedProfit > 0 && (
                         <span className="text-[10px] text-muted-foreground/50 tabular-nums">
-                          Exp: {formatPnl(expectedProfit)}
+                          Exp: {expectedProfitPct >= 0 ? "+" : ""}
+                          {expectedProfitPct.toFixed(1)}%
                         </span>
                       )}
                     </div>

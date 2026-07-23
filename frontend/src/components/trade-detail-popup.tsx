@@ -40,6 +40,8 @@ export function TradeDetailPopup({
   });
 
   const returnPct = actualCost > 0 ? (pnl / actualCost) * 100 : 0;
+  const expectedProfitPct =
+    actualCost > 0 ? (expectedProfit / actualCost) * 100 : null;
 
   const statusBadgeCls = !isClosed
     ? "text-blue-400 border-blue-400/25 bg-blue-400/5"
@@ -134,19 +136,33 @@ export function TradeDetailPopup({
               />
               <Cell label="ENTRY FEES" value={`$${entryFees.toFixed(4)}`} />
               <Cell
-                label={isClosed ? "EXIT PRICE" : "EXPECTED PNL (IF 100¢)"}
+                label={isClosed ? "EXIT PRICE" : "EXPECTED PNL"}
                 value={
-                  isClosed
-                    ? exitPrice !== null
-                      ? `${(exitPrice * 100).toFixed(1)}¢`
-                      : "—"
-                    : expectedProfit > 0
-                      ? (
-                          <span className="text-emerald-400">
-                            {formatPnl(expectedProfit)}
-                          </span>
-                        )
-                      : "—"
+                  isClosed ? (
+                    exitPrice !== null ? (
+                      `${(exitPrice * 100).toFixed(1)}¢`
+                    ) : (
+                      "—"
+                    )
+                  ) : expectedProfit !== 0 ? (
+                    <div className="flex items-center gap-1.5">
+                      <span
+                        className={`font-bold tabular-nums tracking-tight ${pnlColor(expectedProfit)}`}
+                      >
+                        {expectedProfit.toFixed(4)}
+                      </span>
+                      {expectedProfitPct !== null && (
+                        <span
+                          className={`text-[10px] tracking-tight tabular-nums font-bold ${pnlColor(expectedProfitPct, true)}`}
+                        >
+                          ({expectedProfitPct >= 0 ? "+" : ""}
+                          {expectedProfitPct.toFixed(1)}%)
+                        </span>
+                      )}
+                    </div>
+                  ) : (
+                    "—"
+                  )
                 }
               />
               <Cell
