@@ -6,8 +6,6 @@ export const POLY_URLS = {
   CLOB_WS: "wss://ws-subscriptions-clob.polymarket.com/ws/market",
 } as const;
 
-export const POLYMARKET_MIN_ORDER_SIZE = 5;
-
 export const ConfigSchema = z.object({
   db: z.object({
     url: z.string(),

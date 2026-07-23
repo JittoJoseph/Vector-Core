@@ -1,6 +1,5 @@
 import { EventEmitter } from "events";
 import { eq, inArray } from "drizzle-orm";
-import Decimal from "decimal.js";
 import { createModuleLogger } from "../utils/logger.js";
 import { getConfig } from "../utils/config.js";
 import {
@@ -16,7 +15,6 @@ import {
 import * as schema from "../db/schema.js";
 import { getPolymarketClient, PolymarketClient } from "./polymarket-client.js";
 import {
-  calculateFeePerShare,
   calculateLossAmount,
   calculateWinProfit,
   getTopOfBook,
@@ -27,11 +25,10 @@ import {
   getMarketWebSocketWatcher,
   MarketWebSocketWatcher,
 } from "./market-ws-watcher.js";
-import {
-  POLYMARKET_MIN_ORDER_SIZE,
-  type FeeSchedule,
-  type GammaEvent,
-  type GammaMarket,
+import type {
+  FeeSchedule,
+  GammaEvent,
+  GammaMarket,
 } from "../types/index.js";
 import type { MarketResolvedEvent } from "../interfaces/websocket-types.js";
 import { executionPolicy } from "./execution-policy.js";
@@ -47,6 +44,7 @@ import {
 const logger = createModuleLogger("market-orchestrator");
 
 const MAX_ENTRY_SPREAD = 0.02;
+const TRADE_BUDGET = 5;
 
 interface TrackedBucket {
   bucketId: string;
@@ -327,28 +325,6 @@ export class MarketOrchestrator extends EventEmitter {
         positionCount: 0,
       }
     );
-  }
-
-  private computePositionBudget(): number {
-    const config = getConfig();
-    const maxPrice = config.strategy.maxNoEntryPrice;
-    const minBudget = new Decimal(maxPrice)
-      .plus(calculateFeePerShare(maxPrice))
-      .mul(POLYMARKET_MIN_ORDER_SIZE);
-
-    const snapshot = this.getPortfolioSnapshot();
-    const sizingValue = snapshot.initialCapital + snapshot.realizedPnl;
-    const budget = Decimal.max(
-      new Decimal(sizingValue).div(config.strategy.maxSimultaneousPositions),
-      minBudget,
-    );
-
-    if (config.portfolio.allowNegativeBalance) {
-      return budget.toDP(8).toNumber();
-    }
-    const cash = new Decimal(snapshot.cashBalance);
-    if (cash.lt(minBudget)) return 0;
-    return Decimal.min(budget, cash).toDP(8).toNumber();
   }
 
   private wireEvents(): void {
@@ -640,16 +616,14 @@ export class MarketOrchestrator extends EventEmitter {
           continue;
         if (top.spread == null || top.spread > MAX_ENTRY_SPREAD) continue;
 
-        const budget = this.computePositionBudget();
-        if (budget <= 0) continue;
-
         const execResult = simulateLimitBuy(
           book,
-          budget,
+          TRADE_BUDGET,
           config.strategy.maxNoEntryPrice,
           state?.feeSchedule ?? null,
         );
-        if (execResult.totalCost < POLYMARKET_MIN_ORDER_SIZE) continue;
+        if (execResult.totalShares <= 0 || execResult.belowMinimumOrderSize)
+          continue;
 
         const expectedNetProfit = execResult.totalShares - execResult.netCost;
         if (expectedNetProfit < config.strategy.minExpectedNetProfit) continue;
