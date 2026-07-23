@@ -46,6 +46,8 @@ import {
 
 const logger = createModuleLogger("market-orchestrator");
 
+const MAX_ENTRY_SPREAD = 0.02;
+
 interface TrackedBucket {
   bucketId: string;
   campaignId: string;
@@ -632,6 +634,7 @@ export class MarketOrchestrator extends EventEmitter {
           top.bestAsk > config.strategy.maxNoEntryPrice
         )
           continue;
+        if (top.spread == null || top.spread > MAX_ENTRY_SPREAD) continue;
 
         const budget = this.computePositionBudget();
         if (budget <= 0) continue;
