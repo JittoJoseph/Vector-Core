@@ -8,11 +8,9 @@ import {
   GammaEventsKeysetResponseSchema,
   GammaMarketSchema,
   OrderbookSchema,
-  MidpointResponseSchema,
   type GammaEvent,
   type GammaMarket,
   type Orderbook,
-  type MidpointResponse,
 } from "../types/index.js";
 import { logAudit } from "../db/client.js";
 
@@ -21,7 +19,6 @@ const logger = createModuleLogger("polymarket-client");
 export class PolymarketClient {
   private gammaApi: AxiosInstance;
   private clobApi: AxiosInstance;
-  private requestCounts = { gammaApi: 0, clobApi: 0, errors429: 0 };
 
   constructor() {
     this.gammaApi = axios.create({
@@ -40,7 +37,6 @@ export class PolymarketClient {
   private setupInterceptors() {
     const handleError = (apiName: string) => async (error: AxiosError) => {
       if (error.response?.status === 429) {
-        this.requestCounts.errors429++;
         logger.warn({ api: apiName, url: error.config?.url }, "Rate limited");
         await logAudit("warn", "rate_limit", `Rate limited on ${apiName}`, {
           url: error.config?.url,
@@ -50,18 +46,8 @@ export class PolymarketClient {
       throw error;
     };
 
-    this.gammaApi.interceptors.response.use((r) => {
-      this.requestCounts.gammaApi++;
-      return r;
-    }, handleError("gammaApi"));
-    this.clobApi.interceptors.response.use((r) => {
-      this.requestCounts.clobApi++;
-      return r;
-    }, handleError("clobApi"));
-  }
-
-  getRequestCounts() {
-    return { ...this.requestCounts };
+    this.gammaApi.interceptors.response.use((r) => r, handleError("gammaApi"));
+    this.clobApi.interceptors.response.use((r) => r, handleError("clobApi"));
   }
 
   async listEventsKeyset(options: {
@@ -148,18 +134,6 @@ export class PolymarketClient {
     );
   }
 
-  async getMidpoint(tokenId: string): Promise<MidpointResponse> {
-    return withRetry(
-      async () => {
-        const response = await this.clobApi.get("/midpoint", {
-          params: { token_id: tokenId },
-        });
-        return MidpointResponseSchema.parse(response.data);
-      },
-      { maxRetries: 3, retryOn: isRateLimitError },
-    );
-  }
-
   static parseJsonArray(value: string | null | undefined): unknown[] {
     if (!value) return [];
     try {
@@ -172,11 +146,6 @@ export class PolymarketClient {
 
   static parseClobTokenIds(market: GammaMarket): string[] {
     return PolymarketClient.parseJsonArray(market.clobTokenIds)
-      .filter((v): v is string => typeof v === "string" && v.length > 0);
-  }
-
-  static parseOutcomes(market: GammaMarket): string[] {
-    return PolymarketClient.parseJsonArray(market.outcomes)
       .filter((v): v is string => typeof v === "string" && v.length > 0);
   }
 

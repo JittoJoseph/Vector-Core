@@ -1,17 +1,16 @@
 "use client";
 
-import { useState, useCallback, useEffect, useMemo } from "react";
+import { useState, useCallback } from "react";
 import { Header } from "./header";
 import { TradesTable, MarketCountdown } from "./trades-table";
 import { TradeDetailPopup } from "./trade-detail-popup";
 import { ActivityPanel } from "./activity-panel";
 import { CampaignsTable } from "./campaigns-table";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { getApiClient } from "@/lib/api-client";
+import { Tabs, TabsContent } from "@/components/ui/tabs";
 import {
   pnlColor,
   formatPnl,
-  aggregatePortfolioMetrics,
+  groupExpirations,
   shortCampaignTitle,
 } from "@/lib/utils";
 import NumberFlow from "@number-flow/react";
@@ -20,33 +19,49 @@ import {
   useTradeHistory,
   useSystemStats,
   useCampaigns,
-  usePerformanceRealtime,
+  usePerformance,
   useActivityLog,
 } from "@/lib/hooks";
-import type { SimulatedTrade, LiveMarketPrice } from "@/lib/types";
-import {
-  ShieldAlert,
-  RefreshCw,
-  Activity,
-  Workflow,
-  SlidersHorizontal,
-  Hourglass,
-} from "lucide-react";
+import type { Trade, PositionPnl } from "@/lib/types";
+import { RefreshCw, Activity, SlidersHorizontal } from "lucide-react";
+
+function Money({
+  value,
+  className,
+  signed = true,
+  decimals = 4,
+}: {
+  value: number;
+  className?: string;
+  signed?: boolean;
+  decimals?: number;
+}) {
+  return (
+    <span className={className}>
+      <NumberFlow
+        value={value}
+        format={{
+          style: "currency",
+          currency: "USD",
+          signDisplay: signed ? "always" : "auto",
+          minimumFractionDigits: decimals,
+          maximumFractionDigits: decimals,
+        }}
+      />
+    </span>
+  );
+}
 
 export function DashboardPage() {
   const [activeTab, setActiveTab] = useState("positions");
-  const [selectedTrade, setSelectedTrade] = useState<SimulatedTrade | null>(
-    null,
-  );
+  const [selectedTrade, setSelectedTrade] = useState<Trade | null>(null);
 
   const { stats, refetch: refetchStats } = useSystemStats();
-
   const {
     positions: openTrades,
     loading: positionsLoading,
     refetch: refetchPositions,
   } = usePositions();
-
   const {
     trades: settledTrades,
     loading: tradesLoading,
@@ -55,7 +70,6 @@ export function DashboardPage() {
     loadingMore: loadingMoreTrades,
     refetch: refetchTrades,
   } = useTradeHistory(activeTab === "history");
-
   const {
     campaigns: activeCampaigns,
     loading: activeLoading,
@@ -66,25 +80,25 @@ export function DashboardPage() {
     loading: historyLoading,
     refetch: refetchHistory,
   } = useCampaigns("history", activeTab === "campaign_history");
-
   const { activities, loading: activitiesLoading } = useActivityLog(
     activeTab === "diagnostics",
   );
-  const { performance, refetch: refetchPerformance } =
-    usePerformanceRealtime("ALL");
+  const { performance, refetch: refetchPerformance } = usePerformance("ALL");
 
   const [isRefreshing, setIsRefreshing] = useState(false);
 
   const handleManualRefresh = useCallback(async () => {
     setIsRefreshing(true);
-    await Promise.all([
-      refetchStats().catch(() => {}),
-      refetchPositions().catch(() => {}),
-      refetchTrades().catch(() => {}),
-      refetchActive().catch(() => {}),
-      refetchHistory().catch(() => {}),
-      refetchPerformance().catch(() => {}),
-    ]);
+    await Promise.all(
+      [
+        refetchStats(),
+        refetchPositions(),
+        refetchTrades(),
+        refetchActive(),
+        refetchHistory(),
+        refetchPerformance(),
+      ].map((p) => Promise.resolve(p).catch(() => {})),
+    );
     setIsRefreshing(false);
   }, [
     refetchStats,
@@ -95,30 +109,23 @@ export function DashboardPage() {
     refetchPerformance,
   ]);
 
-  const livePricesMap = useMemo<Record<string, LiveMarketPrice>>(() => {
-    return stats?.openPositionPrices || {};
-  }, [stats?.openPositionPrices]);
+  const portfolio = stats?.portfolio;
+  const positionsPnl: Record<string, PositionPnl> = stats?.positionsPnl ?? {};
 
-  const initialCapital = stats?.portfolio?.initialCapital ?? 0;
-  const cashBalance = stats?.portfolio?.cashBalance ?? 0;
-  const openPositionsValue = stats?.portfolio?.openPositionsValue ?? 0;
-  const portfolioValue = cashBalance + openPositionsValue;
+  const netPnl = portfolio?.netPnl ?? 0;
+  const roi = portfolio?.roi ?? 0;
+  const unrealizedPnl = portfolio?.unrealizedPnl ?? 0;
+  const realizedPnl = portfolio?.realizedPnl ?? 0;
+  const portfolioValue = portfolio?.portfolioValue ?? 0;
+  const cashBalance = portfolio?.cashBalance ?? 0;
+  const openPositionsValue = portfolio?.openPositionsValue ?? 0;
+  const initialCapital = portfolio?.initialCapital ?? 0;
 
   const winRate = parseFloat(performance?.winRate || "0");
   const isPaused = stats?.orchestrator?.paused ?? false;
 
-  const {
-    liveUnrealizedPnl,
-    closestExpiration,
-    closestTrades,
-    expirationBuckets,
-  } = aggregatePortfolioMetrics(openTrades, livePricesMap);
-
-  const livePortfolioValue =
-    cashBalance + openPositionsValue + liveUnrealizedPnl;
-
-  const netPnl = livePortfolioValue - initialCapital;
-  const roi = initialCapital > 0 ? (netPnl / initialCapital) * 100 : 0;
+  const { closestExpiration, closestTrades, expirationBuckets } =
+    groupExpirations(openTrades);
 
   return (
     <div className="min-h-screen bg-background text-foreground flex flex-col font-mono selection:bg-muted-foreground/30">
@@ -147,22 +154,12 @@ export function DashboardPage() {
                 <div className="text-[9px] text-muted-foreground/60 uppercase tracking-widest mb-0.5 font-bold">
                   Net P&L
                 </div>
+                <Money
+                  value={netPnl}
+                  className={`block text-3xl font-bold tracking-tight leading-none ${pnlColor(netPnl)}`}
+                />
                 <div
-                  className={`text-3xl font-bold tracking-tight leading-none ${pnlColor(netPnl)}`}
-                >
-                  <NumberFlow
-                    value={netPnl}
-                    format={{
-                      style: "currency",
-                      currency: "USD",
-                      signDisplay: "always",
-                      minimumFractionDigits: 4,
-                      maximumFractionDigits: 4,
-                    }}
-                  />
-                </div>
-                <div
-                  className={`text-xs mt-1.5 font-bold tracking-widest uppercase ${pnlColor(roi, "80")}`}
+                  className={`text-xs mt-1.5 font-bold tracking-widest uppercase ${pnlColor(roi, true)}`}
                 >
                   {roi > 0 ? "+" : ""}
                   {roi.toFixed(2)}% ROI
@@ -174,39 +171,19 @@ export function DashboardPage() {
                   <div className="text-[9px] text-muted-foreground/60 uppercase tracking-widest mb-0.5 font-bold">
                     Unrealized
                   </div>
-                  <div
-                    className={`text-sm font-bold tracking-tight leading-none ${pnlColor(liveUnrealizedPnl)}`}
-                  >
-                    <NumberFlow
-                      value={liveUnrealizedPnl}
-                      format={{
-                        style: "currency",
-                        currency: "USD",
-                        signDisplay: "always",
-                        minimumFractionDigits: 4,
-                        maximumFractionDigits: 4,
-                      }}
-                    />
-                  </div>
+                  <Money
+                    value={unrealizedPnl}
+                    className={`block text-sm font-bold tracking-tight leading-none ${pnlColor(unrealizedPnl)}`}
+                  />
                 </div>
                 <div>
                   <div className="text-[9px] text-muted-foreground/60 uppercase tracking-widest mb-0.5 font-bold">
                     Realized
                   </div>
-                  <div
-                    className={`text-sm font-bold tracking-tight leading-none ${pnlColor(parseFloat(performance?.totalPnl || "0"))}`}
-                  >
-                    <NumberFlow
-                      value={parseFloat(performance?.totalPnl || "0")}
-                      format={{
-                        style: "currency",
-                        currency: "USD",
-                        signDisplay: "always",
-                        minimumFractionDigits: 4,
-                        maximumFractionDigits: 4,
-                      }}
-                    />
-                  </div>
+                  <Money
+                    value={realizedPnl}
+                    className={`block text-sm font-bold tracking-tight leading-none ${pnlColor(realizedPnl)}`}
+                  />
                 </div>
               </div>
             </div>
@@ -216,17 +193,12 @@ export function DashboardPage() {
                 <div className="text-[9px] text-muted-foreground/60 uppercase tracking-widest mb-0.5 font-bold">
                   Portfolio Value
                 </div>
-                <div className="text-2xl font-bold tracking-tight leading-none text-foreground">
-                  <NumberFlow
-                    value={livePortfolioValue}
-                    format={{
-                      style: "currency",
-                      currency: "USD",
-                      minimumFractionDigits: 2,
-                      maximumFractionDigits: 2,
-                    }}
-                  />
-                </div>
+                <Money
+                  value={portfolioValue}
+                  signed={false}
+                  decimals={2}
+                  className="block text-2xl font-bold tracking-tight leading-none text-foreground"
+                />
               </div>
               <div className="flex flex-col gap-1.5 mt-auto">
                 <div className="flex justify-between items-center">
@@ -273,13 +245,13 @@ export function DashboardPage() {
                   ></div>
                 </div>
                 <div className="flex items-center justify-between mt-1.5">
-                  <div className={`text-xs font-bold ${pnlColor(1, "80")}`}>
+                  <div className={`text-xs font-bold ${pnlColor(1, true)}`}>
                     {performance?.wins || 0} wins
                   </div>
                   <div className="text-[11px] text-muted-foreground/60 font-bold">
                     {performance?.totalTrades || 0} trades
                   </div>
-                  <div className={`text-xs font-bold ${pnlColor(-1, "80")}`}>
+                  <div className={`text-xs font-bold ${pnlColor(-1, true)}`}>
                     {performance?.losses || 0} losses
                   </div>
                 </div>
@@ -308,11 +280,9 @@ export function DashboardPage() {
             <div className="flex flex-col gap-4 md:pl-6 lg:pl-6 md:pt-4 lg:pt-0 pt-4">
               <div className="flex flex-col gap-2 mt-3">
                 <div className="flex items-center justify-between bg-card/30 border border-border/20 rounded px-3 py-1.5">
-                  <div className="flex items-center gap-2">
-                    <span className="text-[10px] text-muted-foreground/80 uppercase tracking-widest font-bold">
-                      Engine
-                    </span>
-                  </div>
+                  <span className="text-[10px] text-muted-foreground/80 uppercase tracking-widest font-bold">
+                    Engine
+                  </span>
                   <span
                     className={`text-[10px] font-bold tracking-widest uppercase ${isPaused ? "text-amber-500" : stats?.orchestrator?.running ? "text-emerald-400" : "text-muted-foreground"}`}
                   >
@@ -325,24 +295,20 @@ export function DashboardPage() {
                 </div>
 
                 <div className="flex items-center justify-between bg-card/30 border border-border/20 rounded px-3 py-1.5">
-                  <div className="flex items-center gap-2">
-                    <span className="text-[10px] text-muted-foreground/80 uppercase tracking-widest font-bold">
-                      Feed
-                    </span>
-                  </div>
-                  <div
+                  <span className="text-[10px] text-muted-foreground/80 uppercase tracking-widest font-bold">
+                    Feed
+                  </span>
+                  <span
                     className={`text-[10px] font-bold tracking-widest uppercase ${stats?.orchestrator?.ws?.connected ? "text-emerald-400" : "text-red-400"}`}
                   >
                     {stats?.orchestrator?.ws?.connected ? "LIVE" : "DEAD"}
-                  </div>
+                  </span>
                 </div>
 
                 <div className="flex items-center justify-between bg-card/30 border border-border/20 rounded px-3 py-1.5">
-                  <div className="flex items-center gap-2">
-                    <span className="text-[10px] text-muted-foreground/80 uppercase tracking-widest font-bold">
-                      Polymarket
-                    </span>
-                  </div>
+                  <span className="text-[10px] text-muted-foreground/80 uppercase tracking-widest font-bold">
+                    Polymarket
+                  </span>
                   <span
                     className={`text-[10px] font-bold tracking-widest uppercase ${
                       stats?.orchestrator?.polymarketStatus === "UP"
@@ -395,10 +361,7 @@ export function DashboardPage() {
                     id: "positions",
                     label: `POSITIONS (${openTrades.length})`,
                   },
-                  {
-                    id: "history",
-                    label: `TRADE HISTORY`,
-                  },
+                  { id: "history", label: "TRADE HISTORY" },
                   { id: "campaigns", label: "ACTIVE CAMPAIGNS" },
                   { id: "campaign_history", label: "CAMPAIGN HISTORY" },
                   { id: "diagnostics", label: "DIAGNOSTICS" },
@@ -423,7 +386,7 @@ export function DashboardPage() {
                   type="OPEN"
                   trades={openTrades}
                   loading={positionsLoading}
-                  livePrices={livePricesMap}
+                  positionsPnl={positionsPnl}
                   onTradeClick={setSelectedTrade}
                   onLoadMore={loadMoreTrades}
                   hasMore={hasMoreTrades}
@@ -437,49 +400,29 @@ export function DashboardPage() {
               >
                 <div className="bg-card/50 border-b border-border/20 px-4 py-3 flex items-center justify-between">
                   <div className="flex gap-8">
-                    <div className="flex flex-col">
-                      <span className="text-[9px] text-muted-foreground uppercase tracking-widest">
-                        Realized PnL
-                      </span>
-                      <span
-                        className={`text-sm font-bold ${pnlColor(parseFloat(performance?.totalPnl || "0"))}`}
-                      >
-                        {formatPnl(parseFloat(performance?.totalPnl || "0"))}
-                      </span>
-                    </div>
-
-                    <div className="flex flex-col">
-                      <span className="text-[9px] text-muted-foreground uppercase tracking-widest">
-                        Avg Win
-                      </span>
-                      <span className={`text-sm font-bold ${pnlColor(1)}`}>
-                        {formatPnl(parseFloat(performance?.avgWin || "0"))}
-                      </span>
-                    </div>
-                    <div className="flex flex-col">
-                      <span className="text-[9px] text-muted-foreground uppercase tracking-widest">
-                        Avg Loss
-                      </span>
-                      <span className={`text-sm font-bold ${pnlColor(-1)}`}>
-                        {formatPnl(parseFloat(performance?.avgLoss || "0"))}
-                      </span>
-                    </div>
-                    <div className="flex flex-col">
-                      <span className="text-[9px] text-muted-foreground uppercase tracking-widest">
-                        Total Win
-                      </span>
-                      <span className={`text-sm font-bold ${pnlColor(1)}`}>
-                        {formatPnl(parseFloat(performance?.totalWin || "0"))}
-                      </span>
-                    </div>
-                    <div className="flex flex-col">
-                      <span className="text-[9px] text-muted-foreground uppercase tracking-widest">
-                        Total Loss
-                      </span>
-                      <span className={`text-sm font-bold ${pnlColor(-1)}`}>
-                        {formatPnl(parseFloat(performance?.totalLoss || "0"))}
-                      </span>
-                    </div>
+                    {(
+                      [
+                        ["Realized PnL", performance?.totalPnl, null],
+                        ["Avg Win", performance?.avgWin, 1],
+                        ["Avg Loss", performance?.avgLoss, -1],
+                        ["Total Win", performance?.totalWin, 1],
+                        ["Total Loss", performance?.totalLoss, -1],
+                      ] as const
+                    ).map(([label, value, sign]) => {
+                      const num = parseFloat(value || "0");
+                      return (
+                        <div key={label} className="flex flex-col">
+                          <span className="text-[9px] text-muted-foreground uppercase tracking-widest">
+                            {label}
+                          </span>
+                          <span
+                            className={`text-sm font-bold ${pnlColor(sign ?? num)}`}
+                          >
+                            {formatPnl(num)}
+                          </span>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
                 <TradesTable
@@ -501,7 +444,7 @@ export function DashboardPage() {
                   status="active"
                   campaigns={activeCampaigns}
                   loading={activeLoading}
-                  livePrices={livePricesMap}
+                  positionsPnl={positionsPnl}
                 />
               </TabsContent>
 
@@ -591,22 +534,9 @@ export function DashboardPage() {
                       <div className="absolute left-[7px] top-2 bottom-2 w-px bg-border/40 z-0"></div>
 
                       {closestTrades.map((trade) => {
-                        const entryPrice = parseFloat(trade.entryPrice);
-                        const shares = parseFloat(trade.entryShares || "0");
-                        const fees = parseFloat(trade.entryFees || "0");
-                        const actualCost = parseFloat(trade.actualCost || "1");
-
-                        const livePrice = trade.tokenId
-                          ? (livePricesMap[trade.tokenId] ?? null)
-                          : null;
-                        const liveMid = livePrice?.mid ?? null;
-                        let pnl: number | null = null;
-                        let pnlPct: number | null = null;
-                        if (liveMid !== null) {
-                          pnl = (liveMid - entryPrice) * shares - fees;
-                          pnlPct =
-                            actualCost > 0 ? (pnl / actualCost) * 100 : null;
-                        }
+                        const pp = positionsPnl[trade.id];
+                        const pnl = pp?.pnl ?? null;
+                        const pnlPct = pp?.pnlPct ?? null;
 
                         return (
                           <div
@@ -637,23 +567,13 @@ export function DashboardPage() {
                               <div className="flex flex-col items-end shrink-0 pt-[2px]">
                                 {pnl !== null ? (
                                   <>
-                                    <span
+                                    <Money
+                                      value={pnl}
                                       className={`text-[11px] font-bold tracking-tight leading-none ${pnlColor(pnl)}`}
-                                    >
-                                      <NumberFlow
-                                        value={pnl}
-                                        format={{
-                                          style: "currency",
-                                          currency: "USD",
-                                          signDisplay: "always",
-                                          minimumFractionDigits: 4,
-                                          maximumFractionDigits: 4,
-                                        }}
-                                      />
-                                    </span>
+                                    />
                                     {pnlPct !== null && (
                                       <span
-                                        className={`text-[9px] mt-1 tracking-tight font-bold ${pnlColor(pnlPct, "80")}`}
+                                        className={`text-[9px] mt-1 tracking-tight font-bold ${pnlColor(pnlPct, true)}`}
                                       >
                                         {pnlPct >= 0 ? "+" : ""}
                                         {pnlPct.toFixed(1)}%
@@ -679,38 +599,23 @@ export function DashboardPage() {
                 )}
 
                 <div className="grid grid-cols-2 gap-y-4 gap-x-4 pt-4 mt-2 border-t border-border/10">
-                  <div>
-                    <div className="text-[9px] text-muted-foreground/60 uppercase tracking-widest mb-0.5 font-bold">
-                      &lt; 24h
+                  {(
+                    [
+                      ["< 24h", "<24h"],
+                      ["1-3 Days", "1-3d"],
+                      ["4-7 Days", "4-7d"],
+                      ["> 7 Days", ">7d"],
+                    ] as const
+                  ).map(([label, key]) => (
+                    <div key={key}>
+                      <div className="text-[9px] text-muted-foreground/60 uppercase tracking-widest mb-0.5 font-bold">
+                        {label}
+                      </div>
+                      <div className="text-sm font-bold tracking-tight leading-none text-foreground">
+                        {expirationBuckets[key]}
+                      </div>
                     </div>
-                    <div className="text-sm font-bold tracking-tight leading-none text-foreground">
-                      {expirationBuckets["<24h"]}
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-[9px] text-muted-foreground/60 uppercase tracking-widest mb-0.5 font-bold">
-                      1-3 Days
-                    </div>
-                    <div className="text-sm font-bold tracking-tight leading-none text-foreground">
-                      {expirationBuckets["1-3d"]}
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-[9px] text-muted-foreground/60 uppercase tracking-widest mb-0.5 font-bold">
-                      4-7 Days
-                    </div>
-                    <div className="text-sm font-bold tracking-tight leading-none text-foreground">
-                      {expirationBuckets["4-7d"]}
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-[9px] text-muted-foreground/60 uppercase tracking-widest mb-0.5 font-bold">
-                      &gt; 7 Days
-                    </div>
-                    <div className="text-sm font-bold tracking-tight leading-none text-foreground">
-                      {expirationBuckets[">7d"]}
-                    </div>
-                  </div>
+                  ))}
                 </div>
               </div>
             </div>
@@ -770,11 +675,7 @@ export function DashboardPage() {
         trade={selectedTrade}
         open={!!selectedTrade}
         onClose={() => setSelectedTrade(null)}
-        livePrice={
-          selectedTrade?.tokenId
-            ? (livePricesMap[selectedTrade.tokenId] ?? undefined)
-            : undefined
-        }
+        positionPnl={selectedTrade ? positionsPnl[selectedTrade.id] : undefined}
       />
     </div>
   );

@@ -2,44 +2,33 @@ import React from "react";
 import { ExternalLink, X } from "lucide-react";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { useCampaignDetails } from "@/lib/hooks";
-import type {
-  DistributionCampaign,
-  SimulatedTrade,
-  LiveMarketPrice,
-} from "@/lib/types";
-import {
-  formatPnl,
-  pnlColor,
-  polymarketMarketUrl,
-  calculateTradeUnrealizedPnl,
-} from "@/lib/utils";
+import type { Campaign, Trade, PositionPnl } from "@/lib/types";
+import { formatPnl, pnlColor } from "@/lib/utils";
 import NumberFlow from "@number-flow/react";
 
 export function CampaignDetailPopup({
   campaign: initialCampaign,
   onClose,
-  livePrices = {},
+  positionsPnl = {},
 }: {
-  campaign: DistributionCampaign;
+  campaign: Campaign;
   onClose: () => void;
-  livePrices?: Record<string, LiveMarketPrice>;
+  positionsPnl?: Record<string, PositionPnl>;
 }) {
   const { details: campaign, loading } = useCampaignDetails(initialCampaign.id);
 
   const displayCampaign = campaign || initialCampaign;
   const isHistorical = !displayCampaign.active;
   const buckets = displayCampaign.relevantBuckets || [];
-  const tradesRaw = (displayCampaign as any).historicalTrades;
-  const trades = Array.isArray(tradesRaw)
-    ? (tradesRaw as SimulatedTrade[])
+  const trades = Array.isArray(displayCampaign.historicalTrades)
+    ? (displayCampaign.historicalTrades as Trade[])
     : [];
 
-  const totalTrades = Array.isArray(tradesRaw)
-    ? trades.length
-    : (tradesRaw?.length ?? 0);
-  const realizedPnl = Array.isArray(tradesRaw)
-    ? trades.reduce((sum, t) => sum + parseFloat(t.realizedPnl || "0"), 0)
-    : parseFloat(tradesRaw?.totalPnl || "0");
+  const totalTrades = trades.length;
+  const realizedPnl = trades.reduce(
+    (sum, t) => sum + parseFloat(t.realizedPnl || "0"),
+    0,
+  );
   const winningTrades = trades.filter(
     (t) => parseFloat(t.realizedPnl || "0") > 0,
   ).length;
@@ -188,9 +177,7 @@ export function CampaignDetailPopup({
                 )}
               </Section>
 
-              {buckets.some(
-                (b) => b.hasOpenPosition && b.positions?.length,
-              ) && (
+              {buckets.some((b) => b.hasOpenPosition && b.positions?.length) && (
                 <Section title="OUR POSITIONS">
                   {buckets
                     .filter((b) => b.hasOpenPosition && b.positions?.length)
@@ -216,13 +203,8 @@ export function CampaignDetailPopup({
                         </div>
 
                         <div className="mt-2 bg-card border border-border/20 rounded p-2 flex flex-col gap-1.5">
-                          {b.positions!.map((pos) => {
-                            const livePrice = pos.tokenId
-                              ? livePrices[pos.tokenId] || null
-                              : null;
-                            const { pnl: unPnl, pnlPct: unPnlPct } =
-                              calculateTradeUnrealizedPnl(pos, livePrice);
-                            const entryPrice = parseFloat(pos.entryPrice);
+                          {b.positions.map((pos) => {
+                            const pp = positionsPnl[pos.id];
                             return (
                               <div
                                 key={pos.id}
@@ -232,23 +214,23 @@ export function CampaignDetailPopup({
                                   <span className="text-muted-foreground">
                                     SIZE:{" "}
                                     <span className="text-foreground font-bold">
-                                      {parseFloat(pos.entryShares).toFixed(2)}
+                                      {pos.entryShares.toFixed(2)}
                                     </span>
                                   </span>
                                   <span className="text-muted-foreground">
                                     ENTRY:{" "}
                                     <span className="text-foreground font-bold">
-                                      {Math.round(entryPrice * 100)}¢
+                                      {Math.round(pos.entryPrice * 100)}¢
                                     </span>
                                   </span>
                                 </div>
-                                {unPnl !== null && (
+                                {pp?.pnl != null && (
                                   <div className="flex items-center gap-1.5">
                                     <span
-                                      className={`font-bold tabular-nums tracking-tight ${pnlColor(unPnl)}`}
+                                      className={`font-bold tabular-nums tracking-tight ${pnlColor(pp.pnl)}`}
                                     >
                                       <NumberFlow
-                                        value={unPnl}
+                                        value={pp.pnl}
                                         format={{
                                           style: "currency",
                                           currency: "USD",
@@ -258,12 +240,14 @@ export function CampaignDetailPopup({
                                         }}
                                       />
                                     </span>
-                                    <span
-                                      className={`text-[9px] tracking-tight tabular-nums font-bold ${pnlColor(unPnlPct!, "80")}`}
-                                    >
-                                      ({unPnlPct! >= 0 ? "+" : ""}
-                                      {unPnlPct!.toFixed(1)}%)
-                                    </span>
+                                    {pp.pnlPct != null && (
+                                      <span
+                                        className={`text-[9px] tracking-tight tabular-nums font-bold ${pnlColor(pp.pnlPct, true)}`}
+                                      >
+                                        ({pp.pnlPct >= 0 ? "+" : ""}
+                                        {pp.pnlPct.toFixed(1)}%)
+                                      </span>
+                                    )}
                                   </div>
                                 )}
                               </div>
@@ -368,27 +352,6 @@ function Section({
         </span>
       </div>
       <div>{children}</div>
-    </div>
-  );
-}
-
-function Row2({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="grid grid-cols-2 divide-x divide-y divide-border/10 border-b border-border/10 bg-card/20">
-      {children}
-    </div>
-  );
-}
-
-function Cell({ label, value }: { label: string; value: React.ReactNode }) {
-  return (
-    <div className="px-4 py-3 flex flex-col gap-1.5">
-      <span className="text-[9px] font-mono tracking-widest text-muted-foreground/60 uppercase font-bold">
-        {label}
-      </span>
-      <div className="text-[12px] font-mono text-foreground/90 font-medium">
-        {value}
-      </div>
     </div>
   );
 }

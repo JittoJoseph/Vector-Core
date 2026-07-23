@@ -8,18 +8,13 @@ import { WebSocket, WebSocketServer } from "ws";
 import { desc, asc, eq, inArray, sql } from "drizzle-orm";
 import { createModuleLogger } from "../utils/logger.js";
 import { getConfig } from "../utils/config.js";
-import { getDb, getPortfolio, wipeAndResetPortfolio } from "../db/client.js";
+import { getDb } from "../db/client.js";
 import * as schema from "../db/schema.js";
 import { getMarketOrchestrator } from "./market-orchestrator.js";
 import {
-  calculatePortfolioPerformance,
+  calculatePerformance,
   type TimePeriod,
 } from "./performance-calculator.js";
-import {
-  calculateExpectedNetProfit,
-  calculateLossAmount,
-  calculateWinProfit,
-} from "./execution-simulator.js";
 import {
   parseBucketMinMax,
   findModalBucket,
@@ -64,7 +59,12 @@ export class ApiServer {
     orchestrator.on("tradeResolved", (data) =>
       this.broadcast({ type: "tradeResolved", data }),
     );
-    this.broadcastInterval = setInterval(() => this.broadcastState(), 2000);
+    this.broadcastInterval = setInterval(() => {
+      this.broadcast({
+        type: "systemState",
+        data: { ...this.buildSystemState(), timestamp: Date.now() },
+      });
+    }, 2000);
 
     return new Promise((resolve) => {
       this.server!.listen(config.server.port, config.server.host, () => {
@@ -86,8 +86,23 @@ export class ApiServer {
     this.server = null;
   }
 
-  getExpressApp(): express.Application {
-    return this.app;
+  private buildSystemState() {
+    const orchestrator = getMarketOrchestrator();
+    const config = getConfig();
+    return {
+      orchestrator: orchestrator.getStats(),
+      config: {
+        minNoEntryPrice: config.strategy.minNoEntryPrice,
+        maxNoEntryPrice: config.strategy.maxNoEntryPrice,
+        minExpectedNetProfit: config.strategy.minExpectedNetProfit,
+        startingCapital: config.portfolio.startingCapital,
+        maxPositions: config.strategy.maxSimultaneousPositions,
+        stopLossEnabled: config.strategy.stopLossEnabled,
+        stopLossNoPrice: config.strategy.stopLossNoPrice,
+      },
+      portfolio: orchestrator.getPortfolioSnapshot(),
+      positionsPnl: orchestrator.getOpenPositionsPnl(),
+    };
   }
 
   private corsMiddleware(
@@ -117,36 +132,15 @@ export class ApiServer {
   private setupRoutes(): void {
     this.app.get("/ping", (_req, res) => res.json("pong"));
     this.app.get("/health", (_req, res) => {
-      const orchestrator = getMarketOrchestrator();
       res.json({
         status: "ok",
         uptime: process.uptime(),
-        ...orchestrator.getStats(),
+        ...getMarketOrchestrator().getStats(),
       });
     });
 
     this.app.get(["/api/system/stats", "/api/stats"], (_req, res) => {
-      const orchestrator = getMarketOrchestrator();
-      const config = getConfig();
-      const pm = orchestrator.portfolioManager;
-      res.json({
-        orchestrator: orchestrator.getStats(),
-        config: {
-          minNoEntryPrice: config.strategy.minNoEntryPrice,
-          maxNoEntryPrice: config.strategy.maxNoEntryPrice,
-          minExpectedNetProfit: config.strategy.minExpectedNetProfit,
-          startingCapital: config.portfolio.startingCapital,
-          maxPositions: config.strategy.maxSimultaneousPositions,
-          stopLossEnabled: config.strategy.stopLossEnabled,
-          stopLossNoPrice: config.strategy.stopLossNoPrice,
-        },
-        openPositionPrices: orchestrator.getOpenPositionPrices(),
-        portfolio: {
-          cashBalance: pm.getCashBalance(),
-          initialCapital: pm.getInitialCapital(),
-          openPositionsValue: orchestrator.computeOpenPositionsValue(),
-        },
-      });
+      res.json(this.buildSystemState());
     });
 
     this.app.get("/api/campaigns", async (req, res) => {
@@ -159,9 +153,9 @@ export class ApiServer {
         if (status === "history") {
           const campaigns = await db
             .select()
-            .from(schema.distributionCampaigns)
-            .where(eq(schema.distributionCampaigns.active, false))
-            .orderBy(desc(schema.distributionCampaigns.updatedAt))
+            .from(schema.campaigns)
+            .where(eq(schema.campaigns.active, false))
+            .orderBy(desc(schema.campaigns.updatedAt))
             .limit(limit);
 
           if (campaigns.length === 0) {
@@ -169,52 +163,48 @@ export class ApiServer {
             return;
           }
 
-          const campaignIds = campaigns.map((c) => c.id);
-          const tradeStatsRows = await db
+          const statsRows = await db
             .select({
-              campaignId: schema.simulatedTrades.campaignId,
+              campaignId: schema.trades.campaignId,
               tradeCount: sql<number>`count(*)`,
-              realizedPnl: sql<string>`sum(CAST(${schema.simulatedTrades.realizedPnl} AS NUMERIC))`,
+              realizedPnl: sql<string>`COALESCE(SUM(${schema.trades.realizedPnl}), 0)`,
             })
-            .from(schema.simulatedTrades)
-            .where(inArray(schema.simulatedTrades.campaignId, campaignIds))
-            .groupBy(schema.simulatedTrades.campaignId);
+            .from(schema.trades)
+            .where(
+              inArray(
+                schema.trades.campaignId,
+                campaigns.map((c) => c.id),
+              ),
+            )
+            .groupBy(schema.trades.campaignId);
+          const statsMap = new Map(statsRows.map((r) => [r.campaignId, r]));
 
-          const statsMap = new Map(
-            tradeStatsRows.map((r) => [r.campaignId, r]),
+          res.json(
+            campaigns.map((c) => {
+              const stats = statsMap.get(c.id);
+              return {
+                ...c,
+                historicalTrades: {
+                  length: Number(stats?.tradeCount ?? 0),
+                  totalPnl: parseFloat(stats?.realizedPnl ?? "0"),
+                },
+              };
+            }),
           );
-
-          const results = campaigns.map((c) => {
-            const stats = statsMap.get(c.id);
-            return {
-              ...c,
-              historicalTrades: {
-                length: Number(stats?.tradeCount || 0),
-                totalPnl: parseFloat(stats?.realizedPnl || "0"),
-              },
-            };
-          });
-          res.json(results);
-          return;
         } else {
           const campaigns = await db
             .select()
-            .from(schema.distributionCampaigns)
-            .where(eq(schema.distributionCampaigns.active, true))
-            .orderBy(desc(schema.distributionCampaigns.updatedAt))
+            .from(schema.campaigns)
+            .where(eq(schema.campaigns.active, true))
+            .orderBy(desc(schema.campaigns.updatedAt))
             .limit(limit);
 
-          const results = campaigns.map((c) => {
-            const metrics = orchestrator.getActiveCampaignMetrics(c.id);
-            return {
+          res.json(
+            campaigns.map((c) => ({
               ...c,
-              candidateCount: metrics.candidateCount,
-              trackedCount: metrics.trackedCount,
-              positionCount: metrics.positionCount,
-            };
-          });
-          res.json(results);
-          return;
+              ...orchestrator.getActiveCampaignMetrics(c.id),
+            })),
+          );
         }
       } catch (error) {
         logger.error({ error }, "Campaigns list error");
@@ -231,8 +221,8 @@ export class ApiServer {
 
         const [campaign] = await db
           .select()
-          .from(schema.distributionCampaigns)
-          .where(eq(schema.distributionCampaigns.id, campaignId));
+          .from(schema.campaigns)
+          .where(eq(schema.campaigns.id, campaignId));
         if (!campaign) {
           res.status(404).json({ error: "Campaign not found" });
           return;
@@ -241,15 +231,15 @@ export class ApiServer {
         const buckets = campaign.active
           ? await db
               .select()
-              .from(schema.distributionBuckets)
-              .where(eq(schema.distributionBuckets.campaignId, campaignId))
+              .from(schema.buckets)
+              .where(eq(schema.buckets.campaignId, campaignId))
           : [];
 
         const historicalTrades = !campaign.active
           ? await db
               .select()
-              .from(schema.simulatedTrades)
-              .where(eq(schema.simulatedTrades.campaignId, campaignId))
+              .from(schema.trades)
+              .where(eq(schema.trades.campaignId, campaignId))
           : [];
 
         const modalBucket = findModalBucket(buckets);
@@ -264,49 +254,45 @@ export class ApiServer {
           const [modalMin] = parseBucketMinMax(modalBucket.groupItemTitle);
           for (const b of buckets) {
             const isCandidate = isCandidateBucket(b.groupItemTitle, modalMin);
-            const noPrice = parseFloat(b.noPrice?.toString() ?? "1");
+            const noPrice = parseFloat(b.noPrice ?? "1");
             const isModal = b.id === modalBucket.id;
             const bucketPositions = openPositions.filter(
-              (p) => p.tokenId === b.yesTokenId || p.tokenId === b.noTokenId,
+              (p) => p.bucketId === b.id,
             );
             const hasOpenPosition = bucketPositions.length > 0;
 
             if (isCandidate) candidateCount++;
             if (hasOpenPosition) positionCount++;
 
-            const isRelevant = isRelevantBucket(
-              isCandidate,
-              isModal,
-              noPrice,
-              config.strategy.maxNoEntryPrice,
-              hasOpenPosition,
-            );
-
-            if (isRelevant) {
+            if (
+              isRelevantBucket(
+                isCandidate,
+                isModal,
+                noPrice,
+                config.strategy.maxNoEntryPrice,
+                hasOpenPosition,
+              )
+            ) {
               trackedCount++;
               relevantBuckets.push({
                 id: b.id,
                 slug: b.slug,
                 groupItemTitle: b.groupItemTitle,
                 noPrice: b.noPrice,
-                volume24h: b.volume24h,
                 hasOpenPosition,
                 positions: bucketPositions.map((p) => ({
                   id: p.tradeId,
-                  tokenId: p.tokenId,
-                  entryPrice: p.entryPrice.toString(),
-                  entryShares: p.entryShares.toString(),
-                  actualCost: p.actualCost.toString(),
-                  entryFees: p.fees.toString(),
+                  entryPrice: p.entryPrice,
+                  entryShares: p.entryShares,
                 })),
               });
             }
           }
-          relevantBuckets.sort((a, b) => {
-            const [aMin] = parseBucketMinMax(a.groupItemTitle);
-            const [bMin] = parseBucketMinMax(b.groupItemTitle);
-            return aMin - bMin;
-          });
+          relevantBuckets.sort(
+            (a, b) =>
+              parseBucketMinMax(a.groupItemTitle)[0] -
+              parseBucketMinMax(b.groupItemTitle)[0],
+          );
         }
 
         res.json({
@@ -324,49 +310,24 @@ export class ApiServer {
       }
     });
 
-    this.app.get("/api/positions", async (req, res) => {
+    this.app.get("/api/positions", async (_req, res) => {
       try {
-        const db = getDb();
-        const orchestrator = getMarketOrchestrator();
-
-        const rawRows = await db
+        const rows = await getDb()
           .select({
-            trade: schema.simulatedTrades,
-            campaign: schema.distributionCampaigns,
+            trade: schema.trades,
+            campaignEndDate: schema.campaigns.endDate,
           })
-          .from(schema.simulatedTrades)
+          .from(schema.trades)
           .leftJoin(
-            schema.distributionCampaigns,
-            eq(
-              schema.simulatedTrades.campaignId,
-              schema.distributionCampaigns.id,
-            ),
+            schema.campaigns,
+            eq(schema.trades.campaignId, schema.campaigns.id),
           )
-          .where(eq(schema.simulatedTrades.status, "OPEN"))
-          .orderBy(asc(schema.distributionCampaigns.endDate));
+          .where(eq(schema.trades.status, "OPEN"))
+          .orderBy(asc(schema.campaigns.endDate));
 
-        const openPositionsMap = new Map(
-          orchestrator.getOpenPositions().map((p) => [p.tradeId, p]),
+        res.json(
+          rows.map((r) => ({ ...r.trade, campaignEndDate: r.campaignEndDate })),
         );
-
-        const rows = rawRows.map((r) => {
-          let minPrice = r.trade.minNoPriceDuringPosition;
-          const livePos = openPositionsMap.get(r.trade.id);
-          if (livePos?.minNoPriceDuringPosition !== undefined) {
-            minPrice =
-              livePos.minNoPriceDuringPosition === null
-                ? null
-                : livePos.minNoPriceDuringPosition.toString();
-          }
-
-          return {
-            ...r.trade,
-            minNoPriceDuringPosition: minPrice,
-            campaignEndDate: r.campaign?.endDate,
-          };
-        });
-
-        res.json(rows);
       } catch (error) {
         logger.error({ error }, "Positions fetch error");
         res.status(500).json({ error: "Failed to fetch positions" });
@@ -375,34 +336,27 @@ export class ApiServer {
 
     this.app.get("/api/trades/history", async (req, res) => {
       try {
-        const db = getDb();
         const limit = Math.min(parseInt(req.query.limit as string) || 25, 200);
         const offset = Math.max(parseInt(req.query.offset as string) || 0, 0);
 
-        const rawRows = await db
+        const rows = await getDb()
           .select({
-            trade: schema.simulatedTrades,
-            campaign: schema.distributionCampaigns,
+            trade: schema.trades,
+            campaignEndDate: schema.campaigns.endDate,
           })
-          .from(schema.simulatedTrades)
+          .from(schema.trades)
           .leftJoin(
-            schema.distributionCampaigns,
-            eq(
-              schema.simulatedTrades.campaignId,
-              schema.distributionCampaigns.id,
-            ),
+            schema.campaigns,
+            eq(schema.trades.campaignId, schema.campaigns.id),
           )
-          .where(eq(schema.simulatedTrades.status, "SETTLED"))
-          .orderBy(desc(schema.simulatedTrades.exitTs))
+          .where(eq(schema.trades.status, "SETTLED"))
+          .orderBy(desc(schema.trades.exitTs))
           .limit(limit)
           .offset(offset);
 
-        const rows = rawRows.map((r) => ({
-          ...r.trade,
-          campaignEndDate: r.campaign?.endDate,
-        }));
-
-        res.json(rows);
+        res.json(
+          rows.map((r) => ({ ...r.trade, campaignEndDate: r.campaignEndDate })),
+        );
       } catch (error) {
         logger.error({ error }, "Trades error");
         res.status(500).json({ error: "Failed to get trades" });
@@ -412,12 +366,7 @@ export class ApiServer {
     this.app.get("/api/performance", async (req, res) => {
       try {
         const period = (req.query.period as TimePeriod) || "ALL";
-        const metrics = await calculatePortfolioPerformance(
-          period,
-          undefined,
-          getMarketOrchestrator().computeOpenPositionsValue(),
-        );
-        res.json(metrics);
+        res.json(await calculatePerformance(period));
       } catch (error) {
         logger.error({ error }, "Performance error");
         res.status(500).json({ error: "Failed to calculate performance" });
@@ -426,9 +375,8 @@ export class ApiServer {
 
     this.app.get("/api/audit", async (req, res) => {
       try {
-        const db = getDb();
         const limit = Math.min(parseInt(req.query.limit as string) || 50, 200);
-        const rows = await db
+        const rows = await getDb()
           .select()
           .from(schema.auditLogs)
           .orderBy(desc(schema.auditLogs.createdAt))
@@ -461,8 +409,7 @@ export class ApiServer {
       "/api/admin/wipe",
       (req, res, next) => this.adminAuth(req, res, next),
       async (_req, res) => {
-        const orchestrator = getMarketOrchestrator();
-        await orchestrator.wipe();
+        await getMarketOrchestrator().wipe();
         res.json({ success: true });
       },
     );
@@ -474,34 +421,6 @@ export class ApiServer {
     for (const client of this.wss.clients) {
       if (client.readyState === WebSocket.OPEN) client.send(data);
     }
-  }
-
-  private broadcastState(): void {
-    const orchestrator = getMarketOrchestrator();
-    const config = getConfig();
-    const pm = orchestrator.portfolioManager;
-    this.broadcast({
-      type: "systemState",
-      data: {
-        orchestrator: orchestrator.getStats(),
-        config: {
-          minNoEntryPrice: config.strategy.minNoEntryPrice,
-          maxNoEntryPrice: config.strategy.maxNoEntryPrice,
-          minExpectedNetProfit: config.strategy.minExpectedNetProfit,
-          startingCapital: config.portfolio.startingCapital,
-          maxPositions: config.strategy.maxSimultaneousPositions,
-          stopLossEnabled: config.strategy.stopLossEnabled,
-          stopLossNoPrice: config.strategy.stopLossNoPrice,
-        },
-        openPositionPrices: orchestrator.getOpenPositionPrices(),
-        portfolio: {
-          cashBalance: pm.getCashBalance(),
-          initialCapital: pm.getInitialCapital(),
-          openPositionsValue: orchestrator.computeOpenPositionsValue(),
-        },
-        timestamp: Date.now(),
-      },
-    });
   }
 }
 

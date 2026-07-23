@@ -162,6 +162,3 @@ export const OrderbookSchema = z.object({
 
 export type Orderbook = z.infer<typeof OrderbookSchema>;
 export type OrderbookLevel = z.infer<typeof OrderbookLevelSchema>;
-
-export const MidpointResponseSchema = z.object({ mid: z.string() });
-export type MidpointResponse = z.infer<typeof MidpointResponseSchema>;

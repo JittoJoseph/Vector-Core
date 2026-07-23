@@ -1,4 +1,4 @@
-export interface DistributionCampaign {
+export interface Campaign {
   id: string;
   slug: string;
   title: string;
@@ -15,78 +15,64 @@ export interface DistributionCampaign {
   candidateCount?: number;
   trackedCount?: number;
   positionCount?: number;
-  relevantBuckets?: DistributionBucket[];
+  relevantBuckets?: CampaignBucket[];
+  historicalTrades?: Trade[] | { length: number; totalPnl: number };
 }
 
-export interface DistributionBucket {
+export interface CampaignBucket {
   id: string;
-  campaignId: string;
-  conditionId: string | null;
   slug: string | null;
   groupItemTitle: string;
-  yesTokenId: string;
-  noTokenId: string;
-  yesPrice: string | null;
   noPrice: string | null;
-  spread: string | null;
-  liquidityNum: string | null;
-  volume24h: string | null;
-  lastFetchedAt: string;
-  createdAt: string;
-  updatedAt: string;
-  hasOpenPosition?: boolean;
-  positions?: SimulatedTrade[];
+  hasOpenPosition: boolean;
+  positions: { id: string; entryPrice: number; entryShares: number }[];
 }
 
-export interface LiveMarketPrice {
-  bid: number;
-  ask: number;
-  mid: number;
-}
-
-export interface LiveMarketInfo {
-  marketId: string;
-  yesTokenId: string;
-  noTokenId: string;
-  noPrice: number | null;
-  markPrice: Record<string, { bid: number; ask: number; mid: number }>;
-  status: "OPEN" | "AWAITING_RESOLUTION" | "RESOLVED";
-}
-
-export interface SimulatedTrade {
+export interface Trade {
   id: string;
-  campaignId?: string | null;
-  campaignSlug?: string | null;
-  campaignTitle?: string | null;
-  bucketId?: string | null;
+  campaignId: string | null;
+  campaignSlug: string | null;
+  campaignTitle: string | null;
+  bucketId: string | null;
   bucketSlug: string | null;
-  bucketGroupTitle?: string | null;
+  bucketGroupTitle: string | null;
   campaignEndDate: string | null;
   tokenId: string | null;
-  outcomeLabel: string | null;
-  side: string;
-  orderType: string;
   entryTs: string;
   entryPrice: string;
   entryShares: string;
-  positionBudget: string;
   actualCost: string;
-  entryFees: string | null;
-  fillStatus: string | null;
+  entryFees: string;
   expectedNetProfit: string | null;
-  noBestBidAtEntry: string | null;
-  noBestAskAtEntry: string | null;
-  depthAtLimit: string | null;
+  modalBucketAtEntry: string | null;
+  minNoPriceDuringPosition: string | null;
   exitPrice: string | null;
   exitTs: string | null;
   exitOutcome: string | null;
   exitReason: string | null;
   realizedPnl: string | null;
   status: string;
-  modalBucketAtEntry?: string | null;
-  minNoPriceDuringPosition?: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface PositionPnl {
+  mid: number | null;
+  pnl: number | null;
+  pnlPct: number | null;
+  minNoPrice: number | null;
+}
+
+export interface PortfolioSnapshot {
+  initialCapital: number;
+  realizedPnl: number;
+  unrealizedPnl: number;
+  netPnl: number;
+  portfolioValue: number;
+  roi: number;
+  cashBalance: number;
+  openPositionsValue: number;
+  openPositions: number;
 }
 
 export interface SystemStats {
@@ -104,35 +90,26 @@ export interface SystemStats {
     };
     risk?: {
       consecutiveLossCount: number;
-      consecutiveLossPauseLimit: number;
       pausedByRiskGuard: boolean;
-      riskPauseTriggeredAt: number | null;
     };
     polymarketStatus?: "UNKNOWN" | "UP" | "HASISSUES" | "UNDERMAINTENANCE";
   };
   config: {
     minNoEntryPrice: number;
     maxNoEntryPrice: number;
-
     minExpectedNetProfit: number;
     startingCapital: number;
     maxPositions: number;
     stopLossEnabled: boolean;
     stopLossNoPrice: number;
   };
-  openPositionPrices?: Record<string, LiveMarketPrice>;
-  portfolio?: {
-    cashBalance: number;
-    initialCapital: number;
-    openPositionsValue: number;
-  };
+  portfolio?: PortfolioSnapshot;
+  positionsPnl?: Record<string, PositionPnl>;
 }
 
 export interface PerformanceMetrics {
   period: string;
   totalPnl: string;
-  totalDeployed: string;
-  roi: string;
   totalTrades: number;
   wins: number;
   losses: number;
@@ -141,14 +118,6 @@ export interface PerformanceMetrics {
   avgLoss: string;
   totalWin: string;
   totalLoss: string;
-  largestWin: string;
-  largestLoss: string;
-  totalFees: string;
-  openPositions: number;
-  unrealizedPnl: string;
-  cashBalance: string;
-  initialCapital: string;
-  openPositionsValue: string;
 }
 
 export interface AuditLog {
@@ -174,7 +143,7 @@ export interface ActivityEntry {
   title: string;
   detail: string;
   ts: number;
-  trade?: SimulatedTrade;
+  trade?: Trade;
   pnl?: number;
 }
 

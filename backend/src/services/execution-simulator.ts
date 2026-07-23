@@ -33,15 +33,6 @@ export function calculateFeePerShare(
   return Math.round(fee * 10000) / 10000;
 }
 
-export function estimateDepthAtOrBelow(
-  orderbook: Orderbook,
-  limitPrice: number,
-): number {
-  return [...orderbook.asks]
-    .filter((level) => parseFloat(level.price) <= limitPrice)
-    .reduce((sum, level) => sum + parseFloat(level.size), 0);
-}
-
 export function getTopOfBook(orderbook: Orderbook): {
   bestBid: number | null;
   bestAsk: number | null;
@@ -226,8 +217,4 @@ export function calculateLossAmount(
   fees: number,
 ): number {
   return -(entryPrice * shares + fees);
-}
-
-export function calculateExpectedNetProfit(result: ExecutionResult): number {
-  return calculateWinProfit(result.averagePrice, result.totalShares, result.fees);
 }

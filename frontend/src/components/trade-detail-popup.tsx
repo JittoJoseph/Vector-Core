@@ -1,23 +1,24 @@
 "use client";
 
-import type { SimulatedTrade, LiveMarketPrice } from "@/lib/types";
-import { formatPnl, pnlColor, polymarketMarketUrl, calculateTradeUnrealizedPnl } from "@/lib/utils";
+import { useEffect, useState } from "react";
+import type { Trade, PositionPnl } from "@/lib/types";
+import { formatPnl, pnlColor, polymarketMarketUrl } from "@/lib/utils";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { ExternalLink, X } from "lucide-react";
 import NumberFlow from "@number-flow/react";
 
 interface TradeDetailPopupProps {
-  trade: SimulatedTrade | null;
+  trade: Trade | null;
   open: boolean;
   onClose: () => void;
-  livePrice?: LiveMarketPrice;
+  positionPnl?: PositionPnl;
 }
 
 export function TradeDetailPopup({
   trade,
   open,
   onClose,
-  livePrice,
+  positionPnl,
 }: TradeDetailPopupProps) {
   if (!trade) return null;
 
@@ -27,9 +28,7 @@ export function TradeDetailPopup({
   const pnl = parseFloat(trade.realizedPnl || "0");
   const exitPrice = trade.exitPrice ? parseFloat(trade.exitPrice) : null;
   const expectedProfit = parseFloat(trade.expectedNetProfit || "0");
-  
   const shares = parseFloat(trade.entryShares);
-  const budget = parseFloat(trade.positionBudget);
   const actualCost = parseFloat(trade.actualCost);
 
   const outcome = trade.exitOutcome;
@@ -41,7 +40,6 @@ export function TradeDetailPopup({
   });
 
   const returnPct = actualCost > 0 ? (pnl / actualCost) * 100 : 0;
-  const exitReason = trade.exitReason;
 
   const statusBadgeCls = !isClosed
     ? "text-blue-400 border-blue-400/25 bg-blue-400/5"
@@ -49,7 +47,16 @@ export function TradeDetailPopup({
       ? "text-emerald-400 border-emerald-500/25 bg-emerald-500/5"
       : "text-red-400 border-red-500/25 bg-red-500/5";
 
-  const { pnl: unrealizedPnl, pnlPct: unrealizedPnlPct } = (!isClosed) ? calculateTradeUnrealizedPnl(trade, livePrice || null) : { pnl: null, pnlPct: null };
+  const unrealizedPnl = !isClosed ? (positionPnl?.pnl ?? null) : null;
+  const unrealizedPnlPct = !isClosed ? (positionPnl?.pnlPct ?? null) : null;
+  const minNoPrice = !isClosed
+    ? (positionPnl?.minNoPrice ??
+      (trade.minNoPriceDuringPosition
+        ? parseFloat(trade.minNoPriceDuringPosition)
+        : null))
+    : trade.minNoPriceDuringPosition
+      ? parseFloat(trade.minNoPriceDuringPosition)
+      : null;
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
@@ -57,11 +64,12 @@ export function TradeDetailPopup({
         <div className="shrink-0 px-4 pt-4 pb-3 border-b border-border/20">
           <div className="flex items-start justify-between gap-3">
             <div className="flex items-center gap-1.5 flex-wrap">
-              <span className={`inline-flex items-center text-[10px] font-semibold tracking-[0.15em] px-2 py-0.5 rounded border ${statusBadgeCls}`}>
+              <span
+                className={`inline-flex items-center text-[10px] font-semibold tracking-[0.15em] px-2 py-0.5 rounded border ${statusBadgeCls}`}
+              >
                 {isClosed ? (outcome ?? "SETTLED") : "OPEN"}
               </span>
-              <Chip>{trade.side}</Chip>
-              {trade.orderType && <Chip>{trade.orderType}</Chip>}
+              <Chip>BUY NO</Chip>
             </div>
 
             <div className="flex items-center gap-0.5 shrink-0 -mr-1 -mt-0.5">
@@ -94,14 +102,18 @@ export function TradeDetailPopup({
           {trade.bucketGroupTitle && (
             <div className="mt-2 mb-1 flex flex-wrap items-center gap-x-4 gap-y-2">
               <div className="flex items-center gap-2">
-                <span className="text-[10px] uppercase tracking-widest text-muted-foreground/60 font-bold">TEMP BUCKET:</span>
+                <span className="text-[10px] uppercase tracking-widest text-muted-foreground/60 font-bold">
+                  TEMP BUCKET:
+                </span>
                 <span className="text-[11px] font-semibold text-foreground/90 bg-muted/20 px-2 py-0.5 rounded border border-border/10">
                   {trade.bucketGroupTitle}
                 </span>
               </div>
               {trade.modalBucketAtEntry && (
                 <div className="flex items-center gap-2">
-                  <span className="text-[10px] uppercase tracking-widest text-muted-foreground/60 font-bold">MODAL AT ENTRY:</span>
+                  <span className="text-[10px] uppercase tracking-widest text-muted-foreground/60 font-bold">
+                    MODAL AT ENTRY:
+                  </span>
                   <span className="text-[11px] font-semibold text-foreground/90 bg-muted/20 px-2 py-0.5 rounded border border-border/10">
                     {trade.modalBucketAtEntry}
                   </span>
@@ -112,47 +124,73 @@ export function TradeDetailPopup({
         </div>
 
         <div className="overflow-y-auto flex-1 overscroll-contain">
-          
           <Section title="POSITION FINANCIALS">
             <Row2>
               <Cell label="COST BASIS" value={`$${actualCost.toFixed(2)}`} />
               <Cell label="SHARES" value={shares.toFixed(2)} />
-              <Cell label="ENTRY PRICE" value={`${(entryPrice * 100).toFixed(1)}¢`} />
-              <Cell label="ENTRY FEES" value={`$${entryFees.toFixed(4)}`} />
-              <Cell 
-                label={isClosed ? "EXIT PRICE" : "EXPECTED PNL (IF 100¢)"} 
-                value={
-                  isClosed 
-                    ? (exitPrice !== null ? `${(exitPrice * 100).toFixed(1)}¢` : "—")
-                    : (expectedProfit > 0 ? <span className="text-emerald-400">{formatPnl(expectedProfit)}</span> : "—")
-                } 
+              <Cell
+                label="ENTRY PRICE"
+                value={`${(entryPrice * 100).toFixed(1)}¢`}
               />
-              <Cell 
-                label={isClosed ? "REALIZED PNL" : "UNREALIZED PNL"} 
+              <Cell label="ENTRY FEES" value={`$${entryFees.toFixed(4)}`} />
+              <Cell
+                label={isClosed ? "EXIT PRICE" : "EXPECTED PNL (IF 100¢)"}
+                value={
+                  isClosed
+                    ? exitPrice !== null
+                      ? `${(exitPrice * 100).toFixed(1)}¢`
+                      : "—"
+                    : expectedProfit > 0
+                      ? (
+                          <span className="text-emerald-400">
+                            {formatPnl(expectedProfit)}
+                          </span>
+                        )
+                      : "—"
+                }
+              />
+              <Cell
+                label={isClosed ? "REALIZED PNL" : "UNREALIZED PNL"}
                 value={
                   isClosed ? (
                     <span className={pnlColor(pnl)}>
-                      {formatPnl(pnl)} ({returnPct >= 0 ? "+" : ""}{returnPct.toFixed(1)}%)
+                      {formatPnl(pnl)} ({returnPct >= 0 ? "+" : ""}
+                      {returnPct.toFixed(1)}%)
                     </span>
                   ) : unrealizedPnl !== null ? (
                     <div className="flex items-center gap-1.5">
-                      <span className={`font-bold tabular-nums tracking-tight ${pnlColor(unrealizedPnl)}`}>
+                      <span
+                        className={`font-bold tabular-nums tracking-tight ${pnlColor(unrealizedPnl)}`}
+                      >
                         <NumberFlow
                           value={unrealizedPnl}
-                          format={{ style: "currency", currency: "USD", signDisplay: "always", minimumFractionDigits: 4, maximumFractionDigits: 4 }}
+                          format={{
+                            style: "currency",
+                            currency: "USD",
+                            signDisplay: "always",
+                            minimumFractionDigits: 4,
+                            maximumFractionDigits: 4,
+                          }}
                         />
                       </span>
-                      <span className={`text-[10px] tracking-tight tabular-nums font-bold ${pnlColor(unrealizedPnlPct!, "80")}`}>
-                        ({unrealizedPnlPct! >= 0 ? "+" : ""}{unrealizedPnlPct!.toFixed(1)}%)
-                      </span>
+                      {unrealizedPnlPct !== null && (
+                        <span
+                          className={`text-[10px] tracking-tight tabular-nums font-bold ${pnlColor(unrealizedPnlPct, true)}`}
+                        >
+                          ({unrealizedPnlPct >= 0 ? "+" : ""}
+                          {unrealizedPnlPct.toFixed(1)}%)
+                        </span>
+                      )}
                     </div>
-                  ) : "—"
-                } 
+                  ) : (
+                    "—"
+                  )
+                }
               />
-              {trade.minNoPriceDuringPosition && (
-                <Cell 
-                  label="MIN PRICE (DURING POS)" 
-                  value={`${(parseFloat(trade.minNoPriceDuringPosition) * 100).toFixed(1)}¢`} 
+              {minNoPrice !== null && (
+                <Cell
+                  label="MIN PRICE (DURING POS)"
+                  value={`${(minNoPrice * 100).toFixed(1)}¢`}
                 />
               )}
             </Row2>
@@ -168,14 +206,16 @@ export function TradeDetailPopup({
                 SETTLED
               </span>
               <span className="text-muted-foreground/20">·</span>
-              <span className={`text-[12px] font-mono font-bold tracking-wider ${isWin ? "text-emerald-400" : "text-red-400"}`}>
+              <span
+                className={`text-[12px] font-mono font-bold tracking-wider ${isWin ? "text-emerald-400" : "text-red-400"}`}
+              >
                 {outcome}
               </span>
-              {exitReason && (
+              {trade.exitReason && (
                 <>
                   <span className="text-muted-foreground/20">·</span>
                   <span className="text-[11px] font-mono tracking-wider text-muted-foreground/70">
-                    {exitReason}
+                    {trade.exitReason}
                   </span>
                 </>
               )}
@@ -185,15 +225,43 @@ export function TradeDetailPopup({
           <Section title="TIMESTAMPS">
             <Row2>
               <Cell label="ENTERED" value={formatTs(trade.entryTs)} />
-              <Cell label="MARKET DEADLINE" value={trade.campaignEndDate ? formatTs(trade.campaignEndDate) : "—"} />
-              <Cell label="CLOSED" value={trade.exitTs ? formatTs(trade.exitTs) : "—"} />
-              <Cell label="HOLD DURATION" value={trade.exitTs ? formatDuration(trade.entryTs, trade.exitTs) : "—"} />
+              <Cell
+                label="MARKET DEADLINE"
+                value={
+                  trade.campaignEndDate ? formatTs(trade.campaignEndDate) : "—"
+                }
+              />
+              <Cell
+                label="CLOSED"
+                value={trade.exitTs ? formatTs(trade.exitTs) : "—"}
+              />
+              <Cell
+                label="HOLD DURATION"
+                value={
+                  trade.exitTs ? (
+                    formatDuration(trade.entryTs, trade.exitTs)
+                  ) : (
+                    <LiveHoldDuration entryTs={trade.entryTs} />
+                  )
+                }
+              />
             </Row2>
           </Section>
         </div>
       </DialogContent>
     </Dialog>
   );
+}
+
+function LiveHoldDuration({ entryTs }: { entryTs: string }) {
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  return <span>{formatDurationMs(now - new Date(entryTs).getTime())}</span>;
 }
 
 function Chip({ children }: { children: React.ReactNode }) {
@@ -204,7 +272,13 @@ function Chip({ children }: { children: React.ReactNode }) {
   );
 }
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+function Section({
+  title,
+  children,
+}: {
+  title: string;
+  children: React.ReactNode;
+}) {
   return (
     <div className="border-b border-border/15 last:border-b-0">
       <div className="px-4 pt-3 pb-2">
@@ -250,8 +324,11 @@ function formatTs(iso: string): string {
 }
 
 function formatDuration(start: string, end: string): string {
-  const diffMs = new Date(end).getTime() - new Date(start).getTime();
-  const secs = Math.floor(diffMs / 1000);
+  return formatDurationMs(new Date(end).getTime() - new Date(start).getTime());
+}
+
+function formatDurationMs(diffMs: number): string {
+  const secs = Math.max(0, Math.floor(diffMs / 1000));
   if (secs < 60) return `${secs}s`;
   const mins = Math.floor(secs / 60);
   if (mins < 60) return `${mins}m ${secs % 60}s`;

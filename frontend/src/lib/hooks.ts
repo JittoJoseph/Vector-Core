@@ -1,14 +1,12 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { getApiClient, getWsClient } from "./api-client";
 import { formatPnl } from "./utils";
 import type {
-  SimulatedTrade,
+  Trade,
   SystemStats,
-  LiveMarketInfo,
-  DistributionBucket,
-  DistributionCampaign,
+  Campaign,
   PerformanceMetrics,
   AuditLog,
   ActivityEntry,
@@ -40,19 +38,18 @@ function useWsEvent<T>(eventName: string, handler: (data: T) => void) {
 }
 
 export function usePositions() {
-  const [positions, setPositions] = useState<SimulatedTrade[]>([]);
+  const [positions, setPositions] = useState<Trade[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
 
   const fetchPositions = useCallback(async () => {
     try {
       setLoading(true);
-      const api = getApiClient();
-      const response = await api.getPositions();
+      const response = await getApiClient().getPositions();
       setPositions((prev) => {
         const existingIds = new Set(prev.map((t) => t.id));
-        const missingFromWs = response.filter((t) => !existingIds.has(t.id));
-        return [...missingFromWs, ...prev];
+        const missing = response.filter((t) => !existingIds.has(t.id));
+        return [...missing, ...prev];
       });
       setError(null);
     } catch (err) {
@@ -66,19 +63,18 @@ export function usePositions() {
     fetchPositions();
   }, [fetchPositions]);
 
-  useWsEvent<{ trade?: SimulatedTrade }>(
+  useWsEvent<{ trade?: Trade }>(
     "tradeOpened",
     useCallback((data) => {
       const trade = data?.trade;
       if (!trade || trade.status !== "OPEN") return;
-      setPositions((prev) => {
-        if (prev.some((t) => t.id === trade.id)) return prev;
-        return [trade, ...prev];
-      });
+      setPositions((prev) =>
+        prev.some((t) => t.id === trade.id) ? prev : [trade, ...prev],
+      );
     }, []),
   );
 
-  useWsEvent<{ trade?: SimulatedTrade }>(
+  useWsEvent<{ trade?: Trade }>(
     "tradeResolved",
     useCallback((data) => {
       const trade = data?.trade;
@@ -91,7 +87,7 @@ export function usePositions() {
 }
 
 export function useTradeHistory(enabled: boolean = true) {
-  const [trades, setTrades] = useState<SimulatedTrade[]>([]);
+  const [trades, setTrades] = useState<Trade[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(false);
@@ -102,15 +98,13 @@ export function useTradeHistory(enabled: boolean = true) {
     try {
       setLoading(true);
       dbFetchedRef.current = 0;
-      const api = getApiClient();
-      const response = await api.getTradeHistory({
+      const response = await getApiClient().getTradeHistory({
         limit: PAGE_SIZE,
         offset: 0,
       });
       setTrades((prev) => {
         const existingIds = new Set(prev.map((t) => t.id));
-        const missingFromWs = response.filter((t) => !existingIds.has(t.id));
-        return [...prev, ...missingFromWs];
+        return [...prev, ...response.filter((t) => !existingIds.has(t.id))];
       });
       dbFetchedRef.current = response.length;
       setHasMore(response.length === PAGE_SIZE);
@@ -126,8 +120,7 @@ export function useTradeHistory(enabled: boolean = true) {
     if (loadingMore) return;
     try {
       setLoadingMore(true);
-      const api = getApiClient();
-      const response = await api.getTradeHistory({
+      const response = await getApiClient().getTradeHistory({
         limit: PAGE_SIZE,
         offset: dbFetchedRef.current,
       });
@@ -145,15 +138,14 @@ export function useTradeHistory(enabled: boolean = true) {
 
   useFetchOnce(enabled, fetchTrades, [fetchTrades]);
 
-  useWsEvent<{ trade?: SimulatedTrade }>(
+  useWsEvent<{ trade?: Trade }>(
     "tradeResolved",
     useCallback((data) => {
       const trade = data?.trade;
       if (!trade) return;
-      setTrades((prev) => {
-        if (prev.some((t) => t.id === trade.id)) return prev;
-        return [trade, ...prev];
-      });
+      setTrades((prev) =>
+        prev.some((t) => t.id === trade.id) ? prev : [trade, ...prev],
+      );
     }, []),
   );
 
@@ -175,9 +167,8 @@ export function useSystemStats() {
 
   const fetchStats = useCallback(async () => {
     try {
-      const api = getApiClient();
-      const response = await api.getSystemStats();
-      setStats((prev) => ({ ...response, ...prev }));
+      const response = await getApiClient().getSystemStats();
+      setStats(response);
       setError(null);
     } catch (err) {
       setError(err as Error);
@@ -193,7 +184,7 @@ export function useSystemStats() {
   useWsEvent<SystemStats>(
     "systemState",
     useCallback((data) => {
-      setStats((prev) => ({ ...prev, ...data }));
+      setStats(data);
     }, []),
   );
 
@@ -204,15 +195,17 @@ export function useCampaigns(
   status: "active" | "history" = "active",
   enabled: boolean = true,
 ) {
-  const [campaigns, setCampaigns] = useState<DistributionCampaign[]>([]);
+  const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
 
   const fetchCampaigns = useCallback(async () => {
     try {
       setLoading(true);
-      const api = getApiClient();
-      const response = await api.getCampaigns({ limit: 100, status });
+      const response = await getApiClient().getCampaigns({
+        limit: 100,
+        status,
+      });
       setCampaigns(response);
       setError(null);
     } catch (err) {
@@ -220,23 +213,22 @@ export function useCampaigns(
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [status]);
 
-  useFetchOnce(enabled, fetchCampaigns, [fetchCampaigns, status]);
+  useFetchOnce(enabled, fetchCampaigns, [fetchCampaigns]);
 
   return { campaigns, loading, error, refetch: fetchCampaigns };
 }
 
 export function useCampaignDetails(id: string | null) {
-  const [details, setDetails] = useState<DistributionCampaign | null>(null);
+  const [details, setDetails] = useState<Campaign | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
 
   const fetchDetails = useCallback(async (campaignId: string) => {
     try {
       setLoading(true);
-      const api = getApiClient();
-      const response = await api.getCampaignDetails(campaignId);
+      const response = await getApiClient().getCampaignDetails(campaignId);
       setDetails(response);
       setError(null);
     } catch (err) {
@@ -257,9 +249,7 @@ export function useCampaignDetails(id: string | null) {
   return { details, loading, error, refetch: () => id && fetchDetails(id) };
 }
 
-export function usePerformanceRealtime(
-  period: "1D" | "1W" | "1M" | "ALL" = "1D",
-) {
+export function usePerformance(period: "1D" | "1W" | "1M" | "ALL" = "ALL") {
   const [performance, setPerformance] = useState<PerformanceMetrics | null>(
     null,
   );
@@ -268,9 +258,8 @@ export function usePerformanceRealtime(
 
   const fetchPerformance = useCallback(async () => {
     try {
-      setLoading(true);
       const data = await getApiClient().getPerformance(period);
-      setPerformance((prev) => ({ ...data, ...prev }));
+      setPerformance(data);
       setError(null);
     } catch (err) {
       setError(err as Error);
@@ -280,91 +269,13 @@ export function usePerformanceRealtime(
   }, [period]);
 
   useEffect(() => {
-    let cancelled = false;
+    fetchPerformance();
+  }, [fetchPerformance]);
 
-    const doFetch = async () => {
-      try {
-        setLoading(true);
-        const data = await getApiClient().getPerformance(period);
-        if (!cancelled) {
-          setPerformance((prev) => ({ ...data, ...prev }));
-          setError(null);
-        }
-      } catch (err) {
-        if (!cancelled) {
-          setError(err as Error);
-        }
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    };
-
-    doFetch();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [period]);
-
-  useWsEvent<{ trade?: SimulatedTrade }>(
-    "tradeOpened",
-    useCallback((data) => {
-      const trade = data?.trade;
-      if (!trade) return;
-
-      setPerformance((prev) => {
-        if (!prev) return prev;
-        return {
-          ...prev,
-          openPositions: prev.openPositions + 1,
-        };
-      });
-    }, []),
-  );
-
-  useWsEvent<any>(
-    "tradeResolved",
-    useCallback((d) => {
-      const trade = d?.trade as SimulatedTrade | undefined;
-      const isWin = d?.isWin as boolean | undefined;
-      const pnl = typeof d?.pnl === "number" ? (d.pnl as number) : 0;
-
-      if (!trade) return;
-
-      setPerformance((prev) => {
-        if (!prev) return prev;
-
-        const newWins = prev.wins + (isWin ? 1 : 0);
-        const newLosses = prev.losses + (isWin ? 0 : 1);
-        const newClosedPositions = newWins + newLosses;
-        const oldTotalPnl = parseFloat(prev.totalPnl || "0");
-        const newTotalPnl = oldTotalPnl + pnl;
-
-        const newWinRate =
-          newClosedPositions > 0
-            ? ((newWins / newClosedPositions) * 100).toFixed(2)
-            : "0.00";
-
-        const oldBestTrade = parseFloat(prev.largestWin || "0");
-        const oldWorstTrade = parseFloat(prev.largestLoss || "0");
-        const newBestTrade = Math.max(oldBestTrade, Math.max(0, pnl));
-        const newWorstTrade = Math.min(oldWorstTrade, Math.min(0, pnl));
-
-        const newOpenPositions = Math.max(0, prev.openPositions - 1);
-
-        return {
-          ...prev,
-          totalPnl: newTotalPnl.toString(),
-          wins: newWins,
-          losses: newLosses,
-          winRate: newWinRate,
-          largestWin: newBestTrade.toFixed(4),
-          largestLoss: newWorstTrade.toFixed(4),
-          openPositions: newOpenPositions,
-        };
-      });
-    }, []),
-  );
+  const refetchOnTrade = useCallback(() => {
+    fetchPerformance();
+  }, [fetchPerformance]);
+  useWsEvent("tradeResolved", refetchOnTrade);
 
   return { performance, loading, error, refetch: fetchPerformance };
 }
@@ -406,17 +317,10 @@ export function useSystemStatus() {
   const wsConnected = useWsConnection();
 
   useEffect(() => {
-    const checkBackend = async () => {
-      try {
-        const api = getApiClient();
-        await api.ping();
-        setBackendActive(true);
-      } catch {
-        setBackendActive(false);
-      }
-    };
-
-    checkBackend();
+    getApiClient()
+      .ping()
+      .then(() => setBackendActive(true))
+      .catch(() => setBackendActive(false));
   }, []);
 
   return { backendActive, wsConnected };
@@ -425,11 +329,9 @@ export function useSystemStatus() {
 function auditLogToActivity(log: AuditLog): ActivityEntry {
   const cat = log.category?.toUpperCase() ?? "";
   let kind: ActivityEntry["kind"] = "INFO";
-  if (cat.includes("TRADE_RESOLVED") || cat.includes("TRADE_SETTLED"))
-    kind = "TRADE_WIN";
+  if (cat.includes("TRADE_RESOLVED")) kind = "TRADE_WIN";
   else if (cat.includes("TRADE_OPENED")) kind = "TRADE_OPENED";
-  else if (cat.includes("TRADE_FORCE") || cat.includes("LOSS"))
-    kind = "TRADE_LOSS";
+  else if (cat.includes("LOSS")) kind = "TRADE_LOSS";
   else if (cat.includes("MARKET")) kind = "MARKET_RESOLVED";
   else if (log.level === "warn") kind = "WARN";
   else if (log.level === "error") kind = "ERROR";
@@ -471,11 +373,8 @@ export function useActivityLog(enabled: boolean = true) {
         entries.forEach((e) => seenIds.current.add(e.id));
         setActivities(entries);
       })
-      .catch(() => {
-      })
-      .finally(() => {
-        setLoading(false);
-      });
+      .catch(() => {})
+      .finally(() => setLoading(false));
   }, []);
 
   useFetchOnce(enabled, fetchAuditLogs, [fetchAuditLogs]);
@@ -485,32 +384,29 @@ export function useActivityLog(enabled: boolean = true) {
     ws.connect();
 
     const unsubOpened = ws.on("tradeOpened", (msg: WsMessage) => {
-      const trade = (msg.data as any)?.trade as SimulatedTrade | undefined;
+      const trade = (msg.data as any)?.trade as Trade | undefined;
       if (!trade) return;
       const id = `opened-${trade.id}`;
       if (seenIds.current.has(id)) return;
       seenIds.current.add(id);
 
-      const outcome = trade.outcomeLabel ?? "??";
       const price = trade.entryPrice
         ? `@${(parseFloat(trade.entryPrice) * 100).toFixed(1)}¢`
         : "";
-
       const entry: ActivityEntry = {
         id,
         kind: "TRADE_OPENED",
         title: "TRADE OPENED",
-        detail: `${outcome} ${price} — $${trade.actualCost}`,
+        detail: `${trade.bucketGroupTitle ?? "?"} ${price} — $${parseFloat(trade.actualCost).toFixed(2)}`,
         ts: Date.now(),
         trade,
       };
-
       setActivities((prev) => [entry, ...prev].slice(0, MAX_ACTIVITY_ENTRIES));
     });
 
     const unsubResolved = ws.on("tradeResolved", (msg: WsMessage) => {
       const d = msg.data as any;
-      const trade = d?.trade as SimulatedTrade | undefined;
+      const trade = d?.trade as Trade | undefined;
       const isWin = d?.isWin as boolean | undefined;
       const pnl = typeof d?.pnl === "number" ? (d.pnl as number) : undefined;
 
@@ -518,20 +414,15 @@ export function useActivityLog(enabled: boolean = true) {
       if (seenIds.current.has(id)) return;
       seenIds.current.add(id);
 
-      const kind: ActivityEntry["kind"] = isWin ? "TRADE_WIN" : "TRADE_LOSS";
-      const outcome = trade?.outcomeLabel ?? "??";
-      const pnlStr = pnl !== undefined ? ` PnL: ${formatPnl(pnl)}` : "";
-
       const entry: ActivityEntry = {
         id,
-        kind,
+        kind: isWin ? "TRADE_WIN" : "TRADE_LOSS",
         title: isWin ? "TRADE WIN ✅" : "TRADE LOSS ❌",
-        detail: `${outcome}${pnlStr}`,
+        detail: `${trade?.bucketGroupTitle ?? "?"}${pnl !== undefined ? ` PnL: ${formatPnl(pnl)}` : ""}`,
         ts: Date.now(),
         trade,
         pnl,
       };
-
       setActivities((prev) => [entry, ...prev].slice(0, MAX_ACTIVITY_ENTRIES));
     });
 

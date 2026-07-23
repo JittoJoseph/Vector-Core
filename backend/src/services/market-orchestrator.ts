@@ -1,23 +1,24 @@
 import { EventEmitter } from "events";
-import { and, desc, eq, sql, inArray } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
+import Decimal from "decimal.js";
 import { createModuleLogger } from "../utils/logger.js";
 import { getConfig } from "../utils/config.js";
 import {
   getDb,
-  createSimulatedTrade,
-  loadOpenTradesWithBuckets,
+  createTrade,
+  loadOpenTrades,
   logAudit,
   resolveTrade,
-  wipeAndResetPortfolio,
+  sumRealizedPnl,
   updateTradePositionSize,
+  wipeAllData,
 } from "../db/client.js";
 import * as schema from "../db/schema.js";
 import { getPolymarketClient, PolymarketClient } from "./polymarket-client.js";
-import { PortfolioManager } from "./portfolio-manager.js";
 import {
+  calculateFeePerShare,
   calculateLossAmount,
   calculateWinProfit,
-  estimateDepthAtOrBelow,
   getTopOfBook,
   simulateTakerSell,
   simulateLimitBuy,
@@ -26,12 +27,14 @@ import {
   getMarketWebSocketWatcher,
   MarketWebSocketWatcher,
 } from "./market-ws-watcher.js";
-import type { FeeSchedule, GammaEvent, GammaMarket } from "../types/index.js";
+import {
+  POLYMARKET_MIN_ORDER_SIZE,
+  type FeeSchedule,
+  type GammaEvent,
+  type GammaMarket,
+} from "../types/index.js";
 import type { MarketResolvedEvent } from "../interfaces/websocket-types.js";
 import { executionPolicy } from "./execution-policy.js";
-
-const logger = createModuleLogger("market-orchestrator");
-
 import {
   parseBucketMinMax,
   findModalBucket,
@@ -41,17 +44,17 @@ import {
   WEATHER_TAG_ID,
 } from "../utils/weather-logic.js";
 
+const logger = createModuleLogger("market-orchestrator");
+
 interface TrackedBucket {
   bucketId: string;
   campaignId: string;
   groupItemTitle: string;
   noTokenId: string;
   yesTokenId: string;
-  noPrice: number | null;
   feeSchedule: FeeSchedule | null;
   lastPrices: Record<string, { bid: number; ask: number; mid: number }>;
   resolved: boolean;
-  endDate: Date | null;
   acceptingOrders: boolean;
 }
 
@@ -68,24 +71,37 @@ interface OpenPosition {
   isExiting?: boolean;
 }
 
-export type MarketLifecycle = "OPEN" | "AWAITING_RESOLUTION" | "RESOLVED";
+export interface PortfolioSnapshot {
+  initialCapital: number;
+  realizedPnl: number;
+  unrealizedPnl: number;
+  netPnl: number;
+  portfolioValue: number;
+  roi: number;
+  cashBalance: number;
+  openPositionsValue: number;
+  openPositions: number;
+}
+
+export interface PositionPnl {
+  mid: number | null;
+  pnl: number | null;
+  pnlPct: number | null;
+  minNoPrice: number | null;
+}
 
 interface Candidate {
-  bucket: typeof schema.distributionBuckets.$inferSelect;
-  campaign: typeof schema.distributionCampaigns.$inferSelect;
+  bucket: typeof schema.buckets.$inferSelect;
+  campaign: typeof schema.campaigns.$inferSelect;
   expectedNetProfit: number;
   expectedReturnPercent: number;
-  budget: number;
-  execResult: any;
-  top: any;
-  depthAtLimit: number;
+  execResult: ReturnType<typeof simulateLimitBuy>;
   modalBucketTitle: string;
 }
 
 export class MarketOrchestrator extends EventEmitter {
   private client = getPolymarketClient();
   private wsWatcher: MarketWebSocketWatcher = getMarketWebSocketWatcher();
-  readonly portfolioManager = new PortfolioManager();
 
   private syncTimer: ReturnType<typeof setInterval> | null = null;
   private evaluateTimer: ReturnType<typeof setInterval> | null = null;
@@ -95,7 +111,8 @@ export class MarketOrchestrator extends EventEmitter {
   private tokenToBucket = new Map<string, string>();
   private conditionIdToBucket = new Map<string, string>();
   private openPositions = new Map<string, OpenPosition>();
-  private inFlightTokens: Set<string> = new Set();
+  private inFlightTokens = new Set<string>();
+  private realizedPnl = 0;
 
   private running = false;
   private paused = false;
@@ -113,60 +130,28 @@ export class MarketOrchestrator extends EventEmitter {
   async start(): Promise<void> {
     if (this.running) return;
     this.running = true;
-    await this.portfolioManager.init();
-    await this.loadOpenPositions();
+    await this.loadState();
     this.wireEvents();
     this.wsWatcher.start();
     executionPolicy.start();
     await this.syncCampaigns();
     await this.evaluateOpportunities();
-    const config = getConfig();
-    this.syncTimer = setInterval(() => {
-      this.syncCampaigns().catch((error) =>
-        logger.error({ error }, "Distribution sync failed"),
-      );
-    }, 60_000);
-    this.evaluateTimer = setInterval(() => {
-      this.evaluateOpportunities().catch((error) =>
-        logger.error({ error }, "Distribution evaluate failed"),
-      );
-    }, config.strategy.scanIntervalMs);
-    this.settlementTimer = setInterval(() => {
-      this.pollOpenPositionSettlements().catch((error) =>
-        logger.error({ error }, "Settlement polling failed"),
-      );
-    }, 60_000);
-    logger.info("Distribution market orchestrator started");
+    this.startTimers();
+    logger.info("Market orchestrator started");
   }
 
   stop(): void {
     this.running = false;
-    if (this.syncTimer) clearInterval(this.syncTimer);
-    if (this.evaluateTimer) clearInterval(this.evaluateTimer);
-    if (this.settlementTimer) clearInterval(this.settlementTimer);
+    this.clearTimers();
     if (this.riskAutoResumeTimer) clearTimeout(this.riskAutoResumeTimer);
-    this.syncTimer = null;
-    this.evaluateTimer = null;
-    this.settlementTimer = null;
     this.wsWatcher.stop();
     executionPolicy.stop();
-    logger.info("Distribution market orchestrator stopped");
+    logger.info("Market orchestrator stopped");
   }
 
   pause(): void {
     this.paused = true;
-    if (this.syncTimer) {
-      clearInterval(this.syncTimer);
-      this.syncTimer = null;
-    }
-    if (this.evaluateTimer) {
-      clearInterval(this.evaluateTimer);
-      this.evaluateTimer = null;
-    }
-    if (this.settlementTimer) {
-      clearInterval(this.settlementTimer);
-      this.settlementTimer = null;
-    }
+    this.clearTimers();
     this.wsWatcher.stop();
   }
 
@@ -176,37 +161,22 @@ export class MarketOrchestrator extends EventEmitter {
     this.pausedByRiskGuard = false;
     this.consecutiveLossCount = 0;
     this.wsWatcher.start();
-    await this.portfolioManager.reload();
+    await this.loadState();
     await this.syncCampaigns();
     await this.evaluateOpportunities();
-    const config = getConfig();
-    if (!this.syncTimer)
-      this.syncTimer = setInterval(
-        () => this.syncCampaigns().catch(console.error),
-        60_000,
-      );
-    if (!this.evaluateTimer)
-      this.evaluateTimer = setInterval(
-        () => this.evaluateOpportunities().catch(console.error),
-        config.strategy.scanIntervalMs,
-      );
-    if (!this.settlementTimer)
-      this.settlementTimer = setInterval(
-        () => this.pollOpenPositionSettlements().catch(console.error),
-        60_000,
-      );
+    this.startTimers();
   }
 
   async wipe(): Promise<void> {
     this.pause();
-    const config = getConfig();
-    await wipeAndResetPortfolio(config.portfolio.startingCapital);
+    await wipeAllData();
     this.trackedBuckets.clear();
     this.tokenToBucket.clear();
     this.conditionIdToBucket.clear();
     this.openPositions.clear();
     this.inFlightTokens.clear();
     this.wsWatcher.clear();
+    this.realizedPnl = 0;
     this.cycleCount = 0;
     this.consecutiveLossCount = 0;
     this.pausedByRiskGuard = false;
@@ -216,19 +186,55 @@ export class MarketOrchestrator extends EventEmitter {
     return this.paused;
   }
 
-  private isMarketActivelyTrading(state: TrackedBucket): boolean {
-    return !state.resolved && state.acceptingOrders;
+  private startTimers(): void {
+    const config = getConfig();
+    if (!this.syncTimer)
+      this.syncTimer = setInterval(() => {
+        this.syncCampaigns().catch((error) =>
+          logger.error({ error }, "Campaign sync failed"),
+        );
+      }, 60_000);
+    if (!this.evaluateTimer)
+      this.evaluateTimer = setInterval(() => {
+        this.evaluateOpportunities().catch((error) =>
+          logger.error({ error }, "Opportunity evaluation failed"),
+        );
+      }, config.strategy.scanIntervalMs);
+    if (!this.settlementTimer)
+      this.settlementTimer = setInterval(() => {
+        this.pollOpenPositionSettlements().catch((error) =>
+          logger.error({ error }, "Settlement polling failed"),
+        );
+      }, 60_000);
   }
 
-  private getAuthoritativePriceSignal(bestAsk: number): number | null {
-    if (Number.isNaN(bestAsk) || bestAsk <= 0) {
-      return null;
+  private clearTimers(): void {
+    if (this.syncTimer) clearInterval(this.syncTimer);
+    if (this.evaluateTimer) clearInterval(this.evaluateTimer);
+    if (this.settlementTimer) clearInterval(this.settlementTimer);
+    this.syncTimer = null;
+    this.evaluateTimer = null;
+    this.settlementTimer = null;
+  }
+
+  private async loadState(): Promise<void> {
+    this.realizedPnl = await sumRealizedPnl();
+    this.openPositions.clear();
+    for (const trade of await loadOpenTrades()) {
+      this.openPositions.set(trade.id, {
+        tradeId: trade.id,
+        bucketId: trade.bucketId ?? "",
+        tokenId: trade.tokenId ?? "",
+        entryPrice: parseFloat(trade.entryPrice),
+        entryShares: parseFloat(trade.entryShares),
+        fees: parseFloat(trade.entryFees),
+        actualCost: parseFloat(trade.actualCost),
+        minNoPriceDuringPosition:
+          trade.minNoPriceDuringPosition !== null
+            ? parseFloat(trade.minNoPriceDuringPosition)
+            : null,
+      });
     }
-    return bestAsk;
-  }
-
-  public getOpenPositions(): OpenPosition[] {
-    return Array.from(this.openPositions.values());
   }
 
   getStats() {
@@ -247,26 +253,64 @@ export class MarketOrchestrator extends EventEmitter {
     };
   }
 
-  getOpenPositionPrices(): Record<
-    string,
-    { bid: number; ask: number; mid: number }
-  > {
-    const prices: Record<string, { bid: number; ask: number; mid: number }> =
-      {};
-    for (const pos of this.openPositions.values()) {
-      const bucket = this.trackedBuckets.get(pos.bucketId);
-      const price = bucket?.lastPrices[pos.tokenId];
-      if (price) {
-        prices[pos.tokenId] = price;
-      }
-    }
-    return prices;
+  getOpenPositions(): OpenPosition[] {
+    return Array.from(this.openPositions.values());
   }
 
-  computeOpenPositionsValue(): number {
-    let total = 0;
-    for (const pos of this.openPositions.values()) total += pos.actualCost;
-    return total;
+  private getPositionMid(pos: OpenPosition): number | null {
+    const price = this.trackedBuckets.get(pos.bucketId)?.lastPrices[
+      pos.tokenId
+    ];
+    return price ? price.mid : null;
+  }
+
+  getOpenPositionsPnl(): Record<string, PositionPnl> {
+    const result: Record<string, PositionPnl> = {};
+    for (const pos of this.openPositions.values()) {
+      const mid = this.getPositionMid(pos);
+      const pnl =
+        mid !== null
+          ? (mid - pos.entryPrice) * pos.entryShares - pos.fees
+          : null;
+      result[pos.tradeId] = {
+        mid,
+        pnl,
+        pnlPct:
+          pnl !== null && pos.actualCost > 0
+            ? (pnl / pos.actualCost) * 100
+            : null,
+        minNoPrice: pos.minNoPriceDuringPosition,
+      };
+    }
+    return result;
+  }
+
+  getPortfolioSnapshot(): PortfolioSnapshot {
+    const config = getConfig();
+    const initialCapital = config.portfolio.startingCapital;
+
+    let openPositionsValue = 0;
+    let unrealizedPnl = 0;
+    for (const pos of this.openPositions.values()) {
+      openPositionsValue += pos.actualCost;
+      const mid = this.getPositionMid(pos);
+      if (mid !== null) {
+        unrealizedPnl += (mid - pos.entryPrice) * pos.entryShares - pos.fees;
+      }
+    }
+
+    const netPnl = this.realizedPnl + unrealizedPnl;
+    return {
+      initialCapital,
+      realizedPnl: this.realizedPnl,
+      unrealizedPnl,
+      netPnl,
+      portfolioValue: initialCapital + netPnl,
+      roi: initialCapital > 0 ? (netPnl / initialCapital) * 100 : 0,
+      cashBalance: initialCapital + this.realizedPnl - openPositionsValue,
+      openPositionsValue,
+      openPositions: this.openPositions.size,
+    };
   }
 
   getActiveCampaignMetrics(campaignId: string) {
@@ -277,6 +321,28 @@ export class MarketOrchestrator extends EventEmitter {
         positionCount: 0,
       }
     );
+  }
+
+  private computePositionBudget(): number {
+    const config = getConfig();
+    const maxPrice = config.strategy.maxNoEntryPrice;
+    const minBudget = new Decimal(maxPrice)
+      .plus(calculateFeePerShare(maxPrice))
+      .mul(POLYMARKET_MIN_ORDER_SIZE);
+
+    const snapshot = this.getPortfolioSnapshot();
+    const sizingValue = snapshot.initialCapital + snapshot.realizedPnl;
+    const budget = Decimal.max(
+      new Decimal(sizingValue).div(config.strategy.maxSimultaneousPositions),
+      minBudget,
+    );
+
+    if (config.portfolio.allowNegativeBalance) {
+      return budget.toDP(8).toNumber();
+    }
+    const cash = new Decimal(snapshot.cashBalance);
+    if (cash.lt(minBudget)) return 0;
+    return Decimal.min(budget, cash).toDP(8).toNumber();
   }
 
   private wireEvents(): void {
@@ -295,7 +361,9 @@ export class MarketOrchestrator extends EventEmitter {
       ),
     );
     this.wsWatcher.on("marketResolved", (ev: MarketResolvedEvent) =>
-      this.onMarketResolved(ev).catch(console.error),
+      this.onMarketResolved(ev).catch((error) =>
+        logger.error({ error }, "Market resolution handling failed"),
+      ),
     );
   }
 
@@ -310,7 +378,6 @@ export class MarketOrchestrator extends EventEmitter {
     });
 
     const db = getDb();
-
     const activeApiEventIds = new Set(result.events.map((e) => String(e.id)));
 
     for (const event of result.events) {
@@ -321,15 +388,15 @@ export class MarketOrchestrator extends EventEmitter {
 
     const activeDbCampaigns = await db
       .select()
-      .from(schema.distributionCampaigns)
-      .where(eq(schema.distributionCampaigns.active, true));
+      .from(schema.campaigns)
+      .where(eq(schema.campaigns.active, true));
     for (const c of activeDbCampaigns) {
       if (this.paused) break;
       if (!isSupportedWeatherCampaign(c.title)) {
         await db
-          .update(schema.distributionCampaigns)
+          .update(schema.campaigns)
           .set({ active: false, updatedAt: new Date() })
-          .where(eq(schema.distributionCampaigns.id, c.id));
+          .where(eq(schema.campaigns.id, c.id));
         continue;
       }
       if (!activeApiEventIds.has(c.id)) {
@@ -338,7 +405,7 @@ export class MarketOrchestrator extends EventEmitter {
           if (fullEvent && (fullEvent.closed || !fullEvent.active)) {
             logger.info(
               { campaignId: c.id },
-              "Campaign dropped from active API list, fetching final state...",
+              "Campaign dropped from active API list, fetching final state",
             );
             await this.persistCampaign(fullEvent);
           }
@@ -353,18 +420,15 @@ export class MarketOrchestrator extends EventEmitter {
   }
 
   private async persistCampaign(event: GammaEvent): Promise<void> {
+    if (!isSupportedWeatherCampaign(event.title)) return;
+
     const db = getDb();
     const eventId = String(event.id);
-
-    if (!isSupportedWeatherCampaign(event.title)) {
-      return;
-    }
-
     const isClosed = event.closed ?? false;
     const isActive = isClosed ? false : (event.active ?? true);
 
     await db
-      .insert(schema.distributionCampaigns)
+      .insert(schema.campaigns)
       .values({
         id: eventId,
         slug: event.slug ?? eventId,
@@ -378,7 +442,7 @@ export class MarketOrchestrator extends EventEmitter {
         updatedAt: new Date(),
       })
       .onConflictDoUpdate({
-        target: schema.distributionCampaigns.id,
+        target: schema.campaigns.id,
         set: {
           title: event.title ?? eventId,
           active: isActive,
@@ -395,54 +459,40 @@ export class MarketOrchestrator extends EventEmitter {
       }
     }
 
-    if (event.markets && Array.isArray(event.markets)) {
-      for (const market of event.markets) {
-        if (!market.groupItemTitle) continue;
-        const clobTokenIds = PolymarketClient.parseClobTokenIds(market);
-        if (clobTokenIds.length < 2) continue;
+    for (const market of event.markets ?? []) {
+      if (!market.groupItemTitle) continue;
+      const clobTokenIds = PolymarketClient.parseClobTokenIds(market);
+      if (clobTokenIds.length < 2) continue;
 
-        await db
-          .insert(schema.distributionBuckets)
-          .values({
-            id: market.id,
-            campaignId: eventId,
-            conditionId: market.conditionId ?? null,
-            slug: market.slug ?? null,
-            groupItemTitle: market.groupItemTitle,
-            yesTokenId: clobTokenIds[0]!,
-            noTokenId: clobTokenIds[1]!,
-            yesPrice: market.outcomePrices
-              ? JSON.parse(market.outcomePrices)[0]
-              : null,
-            noPrice: market.outcomePrices
-              ? JSON.parse(market.outcomePrices)[1]
-              : null,
-            spread: market.spread?.toString() ?? null,
-            liquidityNum: (market.liquidityNum ?? 0).toString(),
-            volume24h: (market.volumeNum ?? 0).toString(),
-            lastFetchedAt: new Date(),
-            updatedAt: new Date(),
-          })
-          .onConflictDoUpdate({
-            target: schema.distributionBuckets.id,
-            set: {
-              slug: market.slug ?? null,
-              yesPrice: market.outcomePrices
-                ? JSON.parse(market.outcomePrices)[0]
-                : null,
-              noPrice: market.outcomePrices
-                ? JSON.parse(market.outcomePrices)[1]
-                : null,
-              spread: market.spread?.toString() ?? null,
-              liquidityNum: (market.liquidityNum ?? 0).toString(),
-              volume24h: (market.volumeNum ?? 0).toString(),
-              lastFetchedAt: new Date(),
-              updatedAt: new Date(),
-            },
-          });
+      const prices = PolymarketClient.parseOutcomePrices(market);
+      const bucketValues = {
+        slug: market.slug ?? null,
+        yesPrice: prices[0]?.toString() ?? null,
+        noPrice: prices[1]?.toString() ?? null,
+        spread: market.spread?.toString() ?? null,
+        liquidityNum: (market.liquidityNum ?? 0).toString(),
+        volume24h: (market.volumeNum ?? 0).toString(),
+        lastFetchedAt: new Date(),
+        updatedAt: new Date(),
+      };
 
-        this.trackBucket(market, eventId, clobTokenIds[1]!, clobTokenIds[0]!);
-      }
+      await db
+        .insert(schema.buckets)
+        .values({
+          id: market.id,
+          campaignId: eventId,
+          conditionId: market.conditionId ?? null,
+          groupItemTitle: market.groupItemTitle,
+          yesTokenId: clobTokenIds[0]!,
+          noTokenId: clobTokenIds[1]!,
+          ...bucketValues,
+        })
+        .onConflictDoUpdate({
+          target: schema.buckets.id,
+          set: bucketValues,
+        });
+
+      this.trackBucket(market, eventId, clobTokenIds[1]!, clobTokenIds[0]!);
     }
   }
 
@@ -459,13 +509,9 @@ export class MarketOrchestrator extends EventEmitter {
       groupItemTitle: market.groupItemTitle ?? "",
       noTokenId,
       yesTokenId,
-      noPrice: market.outcomePrices
-        ? parseFloat(JSON.parse(market.outcomePrices)[1])
-        : null,
       feeSchedule: (market.feeSchedule as FeeSchedule | null) ?? null,
       lastPrices: {},
       resolved: false,
-      endDate: market.endDate ? new Date(market.endDate) : null,
       acceptingOrders: market.acceptingOrders ?? true,
     });
     this.tokenToBucket.set(noTokenId, market.id);
@@ -482,16 +528,16 @@ export class MarketOrchestrator extends EventEmitter {
       const result = await this.findCandidateOpportunities();
       if (!result) return;
 
-      const { allCandidates, requiredTokens } = result;
+      const { candidates, requiredTokens } = result;
       this.updateWsSubscriptions(requiredTokens);
-      await this.executeCandidates(allCandidates);
+      await this.executeCandidates(candidates);
     } finally {
       this.isEvaluating = false;
     }
   }
 
   private async findCandidateOpportunities(): Promise<{
-    allCandidates: Candidate[];
+    candidates: Candidate[];
     requiredTokens: Set<string>;
   } | null> {
     const config = getConfig();
@@ -499,17 +545,21 @@ export class MarketOrchestrator extends EventEmitter {
 
     const campaigns = await db
       .select()
-      .from(schema.distributionCampaigns)
-      .where(eq(schema.distributionCampaigns.active, true));
-
+      .from(schema.campaigns)
+      .where(eq(schema.campaigns.active, true));
     if (campaigns.length === 0) return null;
-    const campaignIds = campaigns.map((c) => c.id);
+
     const allBuckets = await db
       .select()
-      .from(schema.distributionBuckets)
-      .where(inArray(schema.distributionBuckets.campaignId, campaignIds));
+      .from(schema.buckets)
+      .where(
+        inArray(
+          schema.buckets.campaignId,
+          campaigns.map((c) => c.id),
+        ),
+      );
 
-    let allCandidates: Candidate[] = [];
+    const candidates: Candidate[] = [];
     const requiredTokens = new Set<string>();
 
     for (const p of this.openPositions.values()) {
@@ -530,7 +580,6 @@ export class MarketOrchestrator extends EventEmitter {
       if (!modalBucket) continue;
 
       const [modalMin] = parseBucketMinMax(modalBucket.groupItemTitle);
-
       requiredTokens.add(modalBucket.noTokenId);
       requiredTokens.add(modalBucket.yesTokenId);
 
@@ -539,87 +588,73 @@ export class MarketOrchestrator extends EventEmitter {
       let positionCount = 0;
 
       for (const bucket of buckets) {
-        const isCandidate = isCandidateBucket(bucket.groupItemTitle, modalMin);
+        if (!isCandidateBucket(bucket.groupItemTitle, modalMin)) continue;
+        candidateCount++;
 
-        if (isCandidate) {
-          candidateCount++;
-          const noPrice = parseFloat(bucket.noPrice?.toString() ?? "1");
-          const bucketHasPosition = Array.from(
-            this.openPositions.values(),
-          ).some((p) => p.bucketId === bucket.id);
+        const noPrice = parseFloat(bucket.noPrice ?? "1");
+        const bucketHasPosition = [...this.openPositions.values()].some(
+          (p) => p.bucketId === bucket.id,
+        );
+        if (bucketHasPosition) positionCount++;
 
-          if (bucketHasPosition) positionCount++;
-
-          const isRelevant = isRelevantBucket(
-            isCandidate,
+        if (
+          isRelevantBucket(
+            true,
             false,
             noPrice,
             config.strategy.maxNoEntryPrice,
             bucketHasPosition,
-          );
-
-          if (isRelevant) {
-            trackedCount++;
-            requiredTokens.add(bucket.noTokenId);
-            requiredTokens.add(bucket.yesTokenId);
-          }
-
-          if (
-            noPrice >= config.strategy.minNoEntryPrice &&
-            noPrice <= config.strategy.maxNoEntryPrice
-          ) {
-            if (bucketHasPosition) continue;
-            if (this.inFlightTokens.has(bucket.noTokenId)) continue;
-
-            const { data: book } = await this.client.getOrderbook(
-              bucket.noTokenId,
-            );
-            const top = getTopOfBook(book);
-            if (
-              top.bestAsk == null ||
-              top.bestAsk < config.strategy.minNoEntryPrice ||
-              top.bestAsk > config.strategy.maxNoEntryPrice
-            )
-              continue;
-
-            const budget = this.portfolioManager.computePositionBudget(
-              this.computeOpenPositionsValue(),
-            );
-            if (budget <= 0) continue;
-
-            const state = this.trackedBuckets.get(bucket.id);
-            if (state && !this.isMarketActivelyTrading(state)) continue;
-
-            const execResult = simulateLimitBuy(
-              book,
-              budget,
-              config.strategy.maxNoEntryPrice,
-              state?.feeSchedule ?? null,
-            );
-            if (execResult.totalCost < 5) continue;
-
-            const actualCost = execResult.netCost;
-            const shares = execResult.totalShares;
-            const expectedNetProfit = shares - actualCost;
-
-            if (expectedNetProfit < config.strategy.minExpectedNetProfit)
-              continue;
-
-            const expectedReturnPercent = expectedNetProfit / actualCost;
-
-            allCandidates.push({
-              bucket,
-              campaign,
-              expectedNetProfit,
-              expectedReturnPercent,
-              budget: actualCost,
-              execResult,
-              top,
-              depthAtLimit: 0,
-              modalBucketTitle: modalBucket.groupItemTitle,
-            });
-          }
+          )
+        ) {
+          trackedCount++;
+          requiredTokens.add(bucket.noTokenId);
+          requiredTokens.add(bucket.yesTokenId);
         }
+
+        if (
+          noPrice < config.strategy.minNoEntryPrice ||
+          noPrice > config.strategy.maxNoEntryPrice
+        )
+          continue;
+        if (bucketHasPosition) continue;
+        if (this.inFlightTokens.has(bucket.noTokenId)) continue;
+
+        const state = this.trackedBuckets.get(bucket.id);
+        if (state && (state.resolved || !state.acceptingOrders)) continue;
+
+        const { data: book } = await this.client.getOrderbook(
+          bucket.noTokenId,
+        );
+        const top = getTopOfBook(book);
+        if (
+          top.bestAsk == null ||
+          top.bestAsk < config.strategy.minNoEntryPrice ||
+          top.bestAsk > config.strategy.maxNoEntryPrice
+        )
+          continue;
+
+        const budget = this.computePositionBudget();
+        if (budget <= 0) continue;
+
+        const execResult = simulateLimitBuy(
+          book,
+          budget,
+          config.strategy.maxNoEntryPrice,
+          state?.feeSchedule ?? null,
+        );
+        if (execResult.totalCost < POLYMARKET_MIN_ORDER_SIZE) continue;
+
+        const expectedNetProfit = execResult.totalShares - execResult.netCost;
+        if (expectedNetProfit < config.strategy.minExpectedNetProfit) continue;
+
+        candidates.push({
+          bucket,
+          campaign,
+          expectedNetProfit,
+          expectedReturnPercent: expectedNetProfit / execResult.netCost,
+          execResult,
+          modalBucketTitle: modalBucket.groupItemTitle,
+        });
       }
 
       this.activeCampaignMetrics.set(campaign.id, {
@@ -629,30 +664,25 @@ export class MarketOrchestrator extends EventEmitter {
       });
     }
 
-    return { allCandidates, requiredTokens };
+    return { candidates, requiredTokens };
   }
 
   private updateWsSubscriptions(requiredTokens: Set<string>): void {
     const currentlySubscribed = this.wsWatcher.getSubscribedTokens();
-    const tokensToSubscribe = Array.from(requiredTokens).filter(
+    const toSubscribe = [...requiredTokens].filter(
       (t) => !currentlySubscribed.has(t),
     );
-    const tokensToUnsubscribe = Array.from(currentlySubscribed).filter(
+    const toUnsubscribe = [...currentlySubscribed].filter(
       (t) => !requiredTokens.has(t),
     );
-
-    if (tokensToSubscribe.length > 0) {
-      this.wsWatcher.subscribe(tokensToSubscribe);
-    }
-    if (tokensToUnsubscribe.length > 0) {
-      this.wsWatcher.unsubscribe(tokensToUnsubscribe);
-    }
+    if (toSubscribe.length > 0) this.wsWatcher.subscribe(toSubscribe);
+    if (toUnsubscribe.length > 0) this.wsWatcher.unsubscribe(toUnsubscribe);
   }
 
-  private async executeCandidates(allCandidates: Candidate[]): Promise<void> {
+  private async executeCandidates(candidates: Candidate[]): Promise<void> {
     const config = getConfig();
 
-    allCandidates.sort((a, b) => {
+    candidates.sort((a, b) => {
       if (b.expectedReturnPercent !== a.expectedReturnPercent)
         return b.expectedReturnPercent - a.expectedReturnPercent;
       return (
@@ -661,7 +691,7 @@ export class MarketOrchestrator extends EventEmitter {
       );
     });
 
-    for (const cand of allCandidates) {
+    for (const cand of candidates) {
       if (
         this.openPositions.size >= config.strategy.maxSimultaneousPositions &&
         !config.portfolio.allowNegativeBalance
@@ -669,21 +699,67 @@ export class MarketOrchestrator extends EventEmitter {
         break;
 
       this.inFlightTokens.add(cand.bucket.noTokenId);
-
       try {
-        const deducted = await this.portfolioManager.deductCash(cand.budget);
-        if (!deducted) continue;
-
         await this.executeMarketEntry(cand);
       } catch (err) {
         logger.error(
           { err, bucketId: cand.bucket.id },
-          "Failed to execute Taker entry",
+          "Failed to execute entry",
         );
       } finally {
         this.inFlightTokens.delete(cand.bucket.noTokenId);
       }
     }
+  }
+
+  private async executeMarketEntry(cand: Candidate): Promise<void> {
+    if (!executionPolicy.canOpenNewPositions()) {
+      logger.info(
+        "Skipping market entry: Polymarket status restricts new positions",
+      );
+      return;
+    }
+
+    const execResult = cand.execResult;
+    const trade = await createTrade({
+      campaignId: cand.campaign.id,
+      campaignSlug: cand.campaign.slug,
+      campaignTitle: cand.campaign.title,
+      bucketId: cand.bucket.id,
+      bucketSlug: cand.bucket.slug,
+      bucketGroupTitle: cand.bucket.groupItemTitle,
+      tokenId: cand.bucket.noTokenId,
+      entryTs: new Date(),
+      entryPrice: execResult.averagePrice.toFixed(8),
+      entryShares: execResult.totalShares.toFixed(8),
+      actualCost: execResult.netCost.toFixed(8),
+      entryFees: execResult.fees.toFixed(8),
+      expectedNetProfit: cand.expectedNetProfit.toFixed(8),
+      modalBucketAtEntry: cand.modalBucketTitle,
+    });
+    if (!trade) return;
+
+    this.openPositions.set(trade.id, {
+      tradeId: trade.id,
+      bucketId: cand.bucket.id,
+      tokenId: cand.bucket.noTokenId,
+      entryPrice: execResult.averagePrice,
+      entryShares: execResult.totalShares,
+      fees: execResult.fees,
+      actualCost: execResult.netCost,
+      minNoPriceDuringPosition: null,
+    });
+    await logAudit(
+      "info",
+      "TRADE_OPENED",
+      `Opened simulated NO trade for ${cand.bucket.groupItemTitle}`,
+      { tradeId: trade.id },
+    );
+    logger.info(
+      { tradeId: trade.id, bucketId: cand.bucket.id },
+      "Entry executed",
+    );
+    this.emit("tradeOpened", { trade });
   }
 
   private onTokenPriceUpdate(
@@ -694,8 +770,7 @@ export class MarketOrchestrator extends EventEmitter {
     const bucketId = this.tokenToBucket.get(tokenId);
     if (!bucketId) return;
     const state = this.trackedBuckets.get(bucketId);
-    if (!state) return;
-    if (state.resolved) return;
+    if (!state || state.resolved) return;
     state.lastPrices[tokenId] = {
       bid: bestBid,
       ask: bestAsk,
@@ -703,122 +778,49 @@ export class MarketOrchestrator extends EventEmitter {
     };
 
     const config = getConfig();
+    const validAsk = !Number.isNaN(bestAsk) && bestAsk > 0 ? bestAsk : null;
+    if (validAsk === null) return;
 
     for (const pos of this.openPositions.values()) {
-      if (pos.tokenId === tokenId && pos.bucketId === bucketId) {
-        if (this.isMarketActivelyTrading(state)) {
-          const currentPrice = this.getAuthoritativePriceSignal(bestAsk);
-          if (currentPrice !== null) {
-            if (
-              pos.minNoPriceDuringPosition === null ||
-              currentPrice < pos.minNoPriceDuringPosition
-            ) {
-              pos.minNoPriceDuringPosition = currentPrice;
-            }
-          }
-        }
+      if (pos.tokenId !== tokenId || pos.bucketId !== bucketId) continue;
 
-        if (config.strategy.stopLossEnabled) {
-          const currentPrice = this.getAuthoritativePriceSignal(bestAsk);
-          if (
-            currentPrice !== null &&
-            currentPrice <= config.strategy.stopLossNoPrice
-          ) {
-            const now = Date.now();
-            if (!pos.stopLossConditionFirstSeen) {
-              pos.stopLossConditionFirstSeen = now;
-            } else if (now - pos.stopLossConditionFirstSeen >= 10000) {
-              if (executionPolicy.canExecuteStopLoss()) {
-                this.executeStopLoss(pos, state.feeSchedule).catch((e) =>
-                  logger.error({ err: e }, "Failed to execute stop loss"),
-                );
-              }
-            }
-          } else {
-            pos.stopLossConditionFirstSeen = null;
-          }
-        }
+      if (
+        state.acceptingOrders &&
+        (pos.minNoPriceDuringPosition === null ||
+          validAsk < pos.minNoPriceDuringPosition)
+      ) {
+        pos.minNoPriceDuringPosition = validAsk;
       }
-    }
-  }
 
-  private async executeMarketEntry(cand: any) {
-    if (!executionPolicy.canOpenNewPositions()) {
-      logger.info(
-        "Skipping market entry: Polymarket status restricts new positions.",
-      );
-      return;
-    }
-
-    try {
-      const execResult = cand.execResult;
-
-      const trade = await createSimulatedTrade({
-        campaignId: cand.campaign.id,
-        campaignSlug: cand.campaign.slug,
-        campaignTitle: cand.campaign.title,
-        bucketId: cand.bucket.id,
-        bucketSlug: cand.bucket.slug,
-        bucketGroupTitle: cand.bucket.groupItemTitle,
-        tokenId: cand.bucket.noTokenId,
-        entryTs: new Date(),
-        entryPrice: execResult.averagePrice.toFixed(8),
-        entryShares: execResult.totalShares.toFixed(8),
-        positionBudget: cand.budget.toFixed(8),
-        actualCost: execResult.netCost.toFixed(8),
-        entryFees: execResult.fees.toFixed(8),
-        fillStatus: execResult.isPartialFill ? "PARTIAL" : "FULL",
-        expectedNetProfit: cand.expectedNetProfit.toFixed(8),
-        expectedReturnPercent: cand.expectedReturnPercent.toFixed(8),
-        noBestBidAtEntry: cand.top.bestBid?.toFixed(8),
-        noBestAskAtEntry: cand.top.bestAsk?.toFixed(8),
-        depthAtLimit: cand.depthAtLimit.toFixed(8),
-        modalBucketAtEntry: cand.modalBucketTitle,
-      });
-
-      if (trade) {
-        this.openPositions.set(trade.id, {
-          tradeId: trade.id,
-          bucketId: cand.bucket.id,
-          tokenId: cand.bucket.noTokenId,
-          entryPrice: execResult.averagePrice,
-          entryShares: execResult.totalShares,
-          fees: execResult.fees,
-          actualCost: execResult.netCost,
-          minNoPriceDuringPosition: null,
-        });
-        await logAudit(
-          "info",
-          "TRADE_OPENED",
-          `Opened simulated Taker NO trade for ${cand.bucket.groupItemTitle}`,
-          { tradeId: trade.id },
-        );
-        logger.info(
-          {
-            tradeId: trade.id,
-            bucketId: cand.bucket.id,
-            fillStatus: execResult.isPartialFill ? "PARTIAL" : "FULL",
-          },
-          "Taker entry executed",
-        );
-        this.emit("tradeOpened", { trade });
+      if (!config.strategy.stopLossEnabled) continue;
+      if (validAsk <= config.strategy.stopLossNoPrice) {
+        const now = Date.now();
+        if (!pos.stopLossConditionFirstSeen) {
+          pos.stopLossConditionFirstSeen = now;
+        } else if (
+          now - pos.stopLossConditionFirstSeen >= 10_000 &&
+          executionPolicy.canExecuteStopLoss()
+        ) {
+          this.executeStopLoss(pos, state.feeSchedule).catch((e) =>
+            logger.error({ err: e }, "Failed to execute stop loss"),
+          );
+        }
+      } else {
+        pos.stopLossConditionFirstSeen = null;
       }
-    } catch (err) {
-      logger.error({ err }, "Simulated trade creation failed");
-      throw err;
     }
   }
 
   private async executeStopLoss(
     pos: OpenPosition,
     feeSchedule: FeeSchedule | null,
-  ) {
+  ): Promise<void> {
     if (pos.isExiting) return;
     pos.isExiting = true;
     try {
       logger.warn(
         { tradeId: pos.tradeId, bucketId: pos.bucketId },
-        "Executing Stop-Loss!",
+        "Executing stop-loss",
       );
       const { data: book } = await this.client.getOrderbook(pos.tokenId);
 
@@ -826,54 +828,42 @@ export class MarketOrchestrator extends EventEmitter {
       if (exit.totalShares <= 0) {
         logger.warn(
           { tradeId: pos.tradeId },
-          "Stop-Loss failed: No bids available",
+          "Stop-loss failed: no bids available",
         );
         pos.isExiting = false;
         return;
       }
 
-      await this.portfolioManager.addCash(exit.netCost);
-
       if (exit.isPartialFill) {
-        logger.warn(
-          {
-            tradeId: pos.tradeId,
-            soldShares: exit.totalShares,
-            remainingShares: pos.entryShares - exit.totalShares,
-          },
-          "Stop-Loss partial fill",
-        );
         const ratioRemaining = 1 - exit.totalShares / pos.entryShares;
-        const newShares = pos.entryShares - exit.totalShares;
-        const newActualCost = pos.actualCost * ratioRemaining;
-        const newFees = pos.fees * ratioRemaining;
-
-        pos.entryShares = newShares;
-        pos.actualCost = newActualCost;
-        pos.fees = newFees;
-
+        pos.entryShares -= exit.totalShares;
+        pos.actualCost *= ratioRemaining;
+        pos.fees *= ratioRemaining;
+        logger.warn(
+          { tradeId: pos.tradeId, remainingShares: pos.entryShares },
+          "Stop-loss partial fill",
+        );
         await updateTradePositionSize(
           pos.tradeId,
-          newShares.toFixed(8),
-          newActualCost.toFixed(8),
-          newFees.toFixed(8),
+          pos.entryShares.toFixed(8),
+          pos.actualCost.toFixed(8),
+          pos.fees.toFixed(8),
         );
         pos.isExiting = false;
       } else {
-        logger.info(
-          { tradeId: pos.tradeId, avgPrice: exit.averagePrice },
-          "Stop-Loss fully executed",
-        );
         const realizedPnl = exit.netCost - pos.actualCost;
+        this.realizedPnl += realizedPnl;
+        logger.info(
+          { tradeId: pos.tradeId, avgPrice: exit.averagePrice, realizedPnl },
+          "Stop-loss fully executed",
+        );
         await resolveTrade(
           pos.tradeId,
           "LOSS",
           realizedPnl.toFixed(8),
           exit.averagePrice.toFixed(8),
-          {
-            exitReason: "EARLY_EXIT",
-            minNoPriceDuringPosition: pos.minNoPriceDuringPosition?.toFixed(8),
-          },
+          "EARLY_EXIT",
+          pos.minNoPriceDuringPosition?.toFixed(8),
         );
         this.openPositions.delete(pos.tradeId);
         this.emit("tradeResolved", { bucketId: pos.bucketId });
@@ -887,11 +877,7 @@ export class MarketOrchestrator extends EventEmitter {
   private async onMarketResolved(ev: MarketResolvedEvent): Promise<void> {
     const bucketId = this.conditionIdToBucket.get(ev.conditionId);
     if (!bucketId) return;
-    await this.resolvePositionsForBucket(
-      bucketId,
-      ev.winningAssetId,
-      ev.winningOutcome,
-    );
+    await this.resolvePositionsForBucket(bucketId, ev.winningAssetId);
   }
 
   private async pollOpenPositionSettlements(): Promise<void> {
@@ -908,23 +894,17 @@ export class MarketOrchestrator extends EventEmitter {
       }
 
       if (!market.closed) continue;
-      const outcomes = PolymarketClient.parseOutcomes(market);
       const tokens = PolymarketClient.parseClobTokenIds(market);
       const prices = PolymarketClient.parseOutcomePrices(market);
       const winnerIndex = prices.findIndex((p) => p >= 0.99);
       if (winnerIndex < 0 || !tokens[winnerIndex]) continue;
-      await this.resolvePositionsForBucket(
-        bucketId,
-        tokens[winnerIndex]!,
-        outcomes[winnerIndex] ?? "Unknown",
-      );
+      await this.resolvePositionsForBucket(bucketId, tokens[winnerIndex]!);
     }
   }
 
   private async resolvePositionsForBucket(
     bucketId: string,
     winningTokenId: string,
-    winningOutcome: string,
   ): Promise<void> {
     const positions = [...this.openPositions.values()].filter(
       (p) => p.bucketId === bucketId,
@@ -936,33 +916,26 @@ export class MarketOrchestrator extends EventEmitter {
       const db = getDb();
       const [bucket] = await db
         .select()
-        .from(schema.distributionBuckets)
-        .where(eq(schema.distributionBuckets.id, bucketId));
+        .from(schema.buckets)
+        .where(eq(schema.buckets.id, bucketId));
       if (bucket) {
         const isYesWinner = bucket.yesTokenId === winningTokenId;
         await db
-          .update(schema.distributionBuckets)
+          .update(schema.buckets)
           .set({
             yesPrice: isYesWinner ? "1" : "0",
             noPrice: isYesWinner ? "0" : "1",
             updatedAt: new Date(),
           })
-          .where(eq(schema.distributionBuckets.id, bucketId));
+          .where(eq(schema.buckets.id, bucketId));
 
         await db
-          .update(schema.distributionCampaigns)
-          .set({
-            active: false,
-            closed: true,
-            updatedAt: new Date(),
-          })
-          .where(eq(schema.distributionCampaigns.id, bucket.campaignId));
+          .update(schema.campaigns)
+          .set({ active: false, closed: true, updatedAt: new Date() })
+          .where(eq(schema.campaigns.id, bucket.campaignId));
       }
     } catch (err) {
-      logger.error(
-        { err, bucketId },
-        "Failed to update bucket resolution in DB",
-      );
+      logger.error({ err, bucketId }, "Failed to persist bucket resolution");
     }
 
     for (const pos of positions) {
@@ -970,17 +943,14 @@ export class MarketOrchestrator extends EventEmitter {
       const pnl = isWin
         ? calculateWinProfit(pos.entryPrice, pos.entryShares, pos.fees)
         : calculateLossAmount(pos.entryPrice, pos.entryShares, pos.fees);
-      const cashReturn = pos.actualCost + pnl;
-      if (cashReturn > 0) await this.portfolioManager.addCash(cashReturn);
+      this.realizedPnl += pnl;
       const trade = await resolveTrade(
         pos.tradeId,
         isWin ? "WIN" : "LOSS",
         pnl.toFixed(8),
         isWin ? "1" : "0",
-        {
-          exitReason: "RESOLUTION",
-          minNoPriceDuringPosition: pos.minNoPriceDuringPosition?.toFixed(8),
-        },
+        "RESOLUTION",
+        pos.minNoPriceDuringPosition?.toFixed(8),
       );
       this.openPositions.delete(pos.tradeId);
       this.updateConsecutiveLossState(isWin);
@@ -1011,29 +981,12 @@ export class MarketOrchestrator extends EventEmitter {
     this.pause();
     if (config.strategy.riskAutoResumeEnabled) {
       this.riskAutoResumeTimer = setTimeout(
-        () => this.resume().catch(console.error),
+        () =>
+          this.resume().catch((error) =>
+            logger.error({ error }, "Risk auto-resume failed"),
+          ),
         config.strategy.riskAutoResumeCooldownMs,
       );
-    }
-  }
-
-  private async loadOpenPositions(): Promise<void> {
-    const rows = await loadOpenTradesWithBuckets();
-    for (const { trade, bucket } of rows) {
-      this.openPositions.set(trade.id, {
-        tradeId: trade.id,
-        bucketId: trade.bucketId ?? "",
-        tokenId: trade.tokenId ?? "",
-        entryPrice: parseFloat(trade.entryPrice),
-        entryShares: parseFloat(trade.entryShares),
-        fees: parseFloat(trade.entryFees ?? "0"),
-        actualCost: parseFloat(trade.actualCost),
-        minNoPriceDuringPosition:
-          trade.minNoPriceDuringPosition !== null &&
-          trade.minNoPriceDuringPosition !== undefined
-            ? parseFloat(trade.minNoPriceDuringPosition)
-            : null,
-      });
     }
   }
 }

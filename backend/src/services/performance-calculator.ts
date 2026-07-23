@@ -1,18 +1,12 @@
-import { createModuleLogger } from "../utils/logger.js";
-import { getDb, getPortfolio } from "../db/client.js";
+import { getDb } from "../db/client.js";
 import * as schema from "../db/schema.js";
-import { eq, desc, and, gte } from "drizzle-orm";
-import Decimal from "decimal.js";
-
-const logger = createModuleLogger("performance-calculator");
+import { and, eq, gte, sql } from "drizzle-orm";
 
 export type TimePeriod = "1D" | "1W" | "1M" | "ALL";
 
 export interface PerformanceMetrics {
   period: TimePeriod;
   totalPnl: string;
-  totalDeployed: string;
-  roi: string;
   totalTrades: number;
   wins: number;
   losses: number;
@@ -21,142 +15,53 @@ export interface PerformanceMetrics {
   avgLoss: string;
   totalWin: string;
   totalLoss: string;
-  largestWin: string;
-  largestLoss: string;
-  totalFees: string;
-  openPositions: number;
-  unrealizedPnl: string;
-  cashBalance: string;
-  initialCapital: string;
-  openPositionsValue: string;
 }
 
-function getPeriodStart(period: TimePeriod): Date | null {
-  if (period === "ALL") return null;
-  const now = new Date();
-  switch (period) {
-    case "1D":
-      return new Date(now.getTime() - 24 * 60 * 60 * 1000);
-    case "1W":
-      return new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-    case "1M":
-      return new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-  }
-}
+const PERIOD_MS: Record<Exclude<TimePeriod, "ALL">, number> = {
+  "1D": 24 * 60 * 60 * 1000,
+  "1W": 7 * 24 * 60 * 60 * 1000,
+  "1M": 30 * 24 * 60 * 60 * 1000,
+};
 
-export async function calculatePortfolioPerformance(
+export async function calculatePerformance(
   period: TimePeriod,
-  livePriceMap?: Map<string, number>,
-  openPositionsValue?: number,
 ): Promise<PerformanceMetrics> {
-  const db = getDb();
-  const periodStart = getPeriodStart(period);
-
-  const conditions = [];
-  if (periodStart) {
-    conditions.push(gte(schema.simulatedTrades.entryTs, periodStart));
+  const conditions = [eq(schema.trades.status, "SETTLED")];
+  if (period !== "ALL") {
+    conditions.push(
+      gte(schema.trades.entryTs, new Date(Date.now() - PERIOD_MS[period])),
+    );
   }
 
-  const baseQuery = db
-    .select()
-    .from(schema.simulatedTrades)
-    .orderBy(desc(schema.simulatedTrades.entryTs));
+  const pnl = schema.trades.realizedPnl;
+  const [row] = await getDb()
+    .select({
+      totalPnl: sql<string>`COALESCE(SUM(${pnl}), 0)`,
+      totalTrades: sql<number>`COUNT(*)`,
+      wins: sql<number>`COUNT(*) FILTER (WHERE ${pnl} > 0)`,
+      losses: sql<number>`COUNT(*) FILTER (WHERE ${pnl} <= 0)`,
+      totalWin: sql<string>`COALESCE(SUM(${pnl}) FILTER (WHERE ${pnl} > 0), 0)`,
+      totalLoss: sql<string>`COALESCE(SUM(${pnl}) FILTER (WHERE ${pnl} <= 0), 0)`,
+    })
+    .from(schema.trades)
+    .where(and(...conditions));
 
-  const trades =
-    conditions.length > 0
-      ? await baseQuery.where(and(...conditions))
-      : await baseQuery;
+  const wins = Number(row?.wins ?? 0);
+  const losses = Number(row?.losses ?? 0);
+  const totalWin = parseFloat(row?.totalWin ?? "0");
+  const totalLoss = parseFloat(row?.totalLoss ?? "0");
+  const closed = wins + losses;
 
-  const portfolio = await getPortfolio();
-  const cashBalance = portfolio
-    ? new Decimal(portfolio.cashBalance)
-    : new Decimal(0);
-  const initialCapital = portfolio
-    ? new Decimal(portfolio.initialCapital)
-    : new Decimal(0);
-  const positionsValue = new Decimal(openPositionsValue ?? 0);
-
-  let totalPnl = new Decimal(0);
-  let totalDeployed = new Decimal(0);
-  let totalFees = new Decimal(0);
-  let wins = 0;
-  let losses = 0;
-  let winPnlSum = new Decimal(0);
-  let lossPnlSum = new Decimal(0);
-  let largestWin = new Decimal(0);
-  let largestLoss = new Decimal(0);
-  let openPositions = 0;
-  let unrealizedPnl = new Decimal(0);
-
-  for (const trade of trades) {
-    const cost = new Decimal(trade.actualCost);
-    totalDeployed = totalDeployed.plus(cost);
-    totalFees = totalFees.plus(new Decimal(trade.entryFees ?? "0"));
-
-    if (trade.status === "SETTLED" && trade.realizedPnl !== null) {
-      const pnl = new Decimal(trade.realizedPnl);
-      totalPnl = totalPnl.plus(pnl);
-
-      if (trade.exitOutcome === "WIN") {
-        wins++;
-        winPnlSum = winPnlSum.plus(pnl);
-        if (pnl.gt(largestWin)) largestWin = pnl;
-      } else {
-        losses++;
-        lossPnlSum = lossPnlSum.plus(pnl);
-        if (pnl.lt(largestLoss)) largestLoss = pnl;
-      }
-    } else if (trade.status === "OPEN") {
-      openPositions++;
-      if (livePriceMap && trade.tokenId) {
-        const currentPrice = livePriceMap.get(trade.tokenId);
-        if (currentPrice !== undefined) {
-          const entryPrice = parseFloat(trade.entryPrice);
-          const shares = parseFloat(trade.entryShares);
-          const fees = parseFloat(trade.entryFees ?? "0");
-          const uPnl = (currentPrice - entryPrice) * shares - fees;
-          unrealizedPnl = unrealizedPnl.plus(uPnl);
-        }
-      }
-    }
-  }
-
-  const closedTrades = wins + losses;
-  const totalTrades = trades.length;
-  const winRate =
-    closedTrades > 0 ? ((wins / closedTrades) * 100).toFixed(2) : "0.00";
-
-  const portfolioValue = cashBalance.plus(positionsValue);
-  const roi = initialCapital.gt(0)
-    ? portfolioValue
-        .minus(initialCapital)
-        .div(initialCapital)
-        .mul(100)
-        .toFixed(2)
-    : "0.00";
-
-  const avgWin = wins > 0 ? winPnlSum.div(wins).toFixed(6) : "0";
-  const avgLoss = losses > 0 ? lossPnlSum.div(losses).toFixed(6) : "0";
   return {
     period,
-    totalPnl: totalPnl.toFixed(6),
-    totalDeployed: totalDeployed.toFixed(2),
-    roi,
-    totalTrades,
+    totalPnl: parseFloat(row?.totalPnl ?? "0").toFixed(6),
+    totalTrades: Number(row?.totalTrades ?? 0),
     wins,
     losses,
-    winRate,
-    avgWin,
-    avgLoss,
-    totalWin: winPnlSum.toFixed(6),
-    totalLoss: lossPnlSum.toFixed(6),
-    largestWin: largestWin.toFixed(6),
-    largestLoss: largestLoss.toFixed(6),
-    totalFees: totalFees.toFixed(6),
-    openPositions,
-    unrealizedPnl: unrealizedPnl.toFixed(6),
-    cashBalance: cashBalance.toFixed(2),
-    initialCapital: initialCapital.toFixed(2),
-    openPositionsValue: positionsValue.toFixed(2),
+    winRate: closed > 0 ? ((wins / closed) * 100).toFixed(2) : "0.00",
+    avgWin: wins > 0 ? (totalWin / wins).toFixed(6) : "0",
+    avgLoss: losses > 0 ? (totalLoss / losses).toFixed(6) : "0",
+    totalWin: totalWin.toFixed(6),
+    totalLoss: totalLoss.toFixed(6),
   };
 }

@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  calculateExpectedNetProfit,
   calculateFeePerShare,
   getTopOfBook,
   simulateLimitBuy,
@@ -48,7 +47,7 @@ describe("execution simulator", () => {
     expect(result.averagePrice).toBeLessThanOrEqual(0.98);
     expect(result.belowMinimumOrderSize).toBe(false);
     expect(result.fillDetails.map((fill) => fill.price)).toEqual([0.96, 0.98]);
-    expect(calculateExpectedNetProfit(result)).toBeGreaterThan(0);
+    expect(result.totalShares - result.netCost).toBeGreaterThan(0);
   });
 
   it("flags fills below the protocol minimum", () => {

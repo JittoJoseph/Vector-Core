@@ -5,14 +5,13 @@ import {
   timestamp,
   jsonb,
   decimal,
-  integer,
   index,
   uniqueIndex,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
-export const distributionCampaigns = pgTable(
-  "distribution_campaigns",
+export const campaigns = pgTable(
+  "campaigns",
   {
     id: text("id").primaryKey(),
     slug: text("slug").notNull(),
@@ -27,14 +26,13 @@ export const distributionCampaigns = pgTable(
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
   },
   (table) => ({
-    slugIdx: uniqueIndex("dc_slug_idx").on(table.slug),
-    seriesIdx: index("dc_series_idx").on(table.seriesSlug),
-    updatedAtIdx: index("dc_updated_at_idx").on(table.updatedAt),
+    slugIdx: uniqueIndex("c_slug_idx").on(table.slug),
+    updatedAtIdx: index("c_updated_at_idx").on(table.updatedAt),
   }),
 );
 
-export const distributionBuckets = pgTable(
-  "distribution_buckets",
+export const buckets = pgTable(
+  "buckets",
   {
     id: text("id").primaryKey(),
     campaignId: text("campaign_id").notNull(),
@@ -53,24 +51,13 @@ export const distributionBuckets = pgTable(
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
   },
   (table) => ({
-    campaignIdx: index("db_campaign_idx").on(table.campaignId),
-    noTokenIdx: index("db_no_token_idx").on(table.noTokenId),
+    campaignIdx: index("b_campaign_idx").on(table.campaignId),
+    noTokenIdx: index("b_no_token_idx").on(table.noTokenId),
   }),
 );
 
-export const portfolio = pgTable("portfolio", {
-  id: integer("id").primaryKey().default(1),
-  initialCapital: decimal("initial_capital", {
-    precision: 18,
-    scale: 8,
-  }).notNull(),
-  cashBalance: decimal("cash_balance", { precision: 18, scale: 8 }).notNull(),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-  updatedAt: timestamp("updated_at").defaultNow().notNull(),
-});
-
-export const simulatedTrades = pgTable(
-  "simulated_trades",
+export const trades = pgTable(
+  "trades",
   {
     id: text("id")
       .primaryKey()
@@ -82,51 +69,35 @@ export const simulatedTrades = pgTable(
     bucketSlug: text("bucket_slug"),
     bucketGroupTitle: text("bucket_group_title"),
     tokenId: text("token_id"),
-    outcomeLabel: text("outcome_label").default("No").notNull(),
-    side: text("side").default("BUY").notNull(),
-    orderType: text("order_type").default("FAK").notNull(),
     entryTs: timestamp("entry_ts").notNull(),
     entryPrice: decimal("entry_price", { precision: 18, scale: 8 }).notNull(),
     entryShares: decimal("entry_shares", { precision: 18, scale: 8 }).notNull(),
-    positionBudget: decimal("position_budget", {
-      precision: 18,
-      scale: 8,
-    }).notNull(),
     actualCost: decimal("actual_cost", { precision: 18, scale: 8 }).notNull(),
-    entryFees: decimal("entry_fees", { precision: 18, scale: 8 }).default("0"),
-    fillStatus: text("fill_status").default("FULL"),
+    entryFees: decimal("entry_fees", { precision: 18, scale: 8 })
+      .default("0")
+      .notNull(),
     expectedNetProfit: decimal("expected_net_profit", {
       precision: 18,
       scale: 8,
     }),
-    expectedReturnPercent: decimal("expected_return_percent", {
+    modalBucketAtEntry: text("modal_bucket_at_entry"),
+    minNoPriceDuringPosition: decimal("min_no_price_during_position", {
       precision: 18,
       scale: 8,
     }),
-    noBestBidAtEntry: decimal("no_best_bid_at_entry", {
-      precision: 18,
-      scale: 8,
-    }),
-    noBestAskAtEntry: decimal("no_best_ask_at_entry", {
-      precision: 18,
-      scale: 8,
-    }),
-    depthAtLimit: decimal("depth_at_limit", { precision: 18, scale: 8 }),
     exitPrice: decimal("exit_price", { precision: 18, scale: 8 }),
     exitTs: timestamp("exit_ts"),
     exitOutcome: text("exit_outcome"),
     exitReason: text("exit_reason"),
     realizedPnl: decimal("realized_pnl", { precision: 18, scale: 8 }),
     status: text("status").default("OPEN").notNull(),
-    modalBucketAtEntry: text("modal_bucket_at_entry"),
-    minNoPriceDuringPosition: decimal("min_no_price_during_position", { precision: 18, scale: 8 }),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
   },
   (table) => ({
-    bucketIdIdx: index("st_bucket_id_idx").on(table.bucketId),
-    statusIdx: index("st_status_idx").on(table.status),
-    entryTsIdx: index("st_entry_ts_idx").on(table.entryTs),
+    bucketIdIdx: index("t_bucket_id_idx").on(table.bucketId),
+    statusIdx: index("t_status_idx").on(table.status),
+    entryTsIdx: index("t_entry_ts_idx").on(table.entryTs),
     uqOpenTradePerToken: uniqueIndex("uq_open_trade_per_bucket_token")
       .on(table.bucketId, table.tokenId)
       .where(sql`status = 'OPEN'`),
@@ -146,8 +117,6 @@ export const auditLogs = pgTable(
     createdAt: timestamp("created_at").defaultNow().notNull(),
   },
   (table) => ({
-    levelIdx: index("al_level_idx").on(table.level),
-    categoryIdx: index("al_category_idx").on(table.category),
     createdAtIdx: index("al_created_at_idx").on(table.createdAt),
   }),
 );

@@ -1,9 +1,7 @@
 import type {
-  SimulatedTrade,
+  Trade,
   SystemStats,
-  LiveMarketInfo,
-  DistributionBucket,
-  DistributionCampaign,
+  Campaign,
   PerformanceMetrics,
   AuditLog,
   WsMessage,
@@ -62,7 +60,7 @@ export class ApiClient {
   async getCampaigns(params?: {
     limit?: number;
     status?: string;
-  }): Promise<DistributionCampaign[]> {
+  }): Promise<Campaign[]> {
     const searchParams = new URLSearchParams();
     if (params?.limit) searchParams.set("limit", String(params.limit));
     if (params?.status) searchParams.set("status", params.status);
@@ -70,11 +68,11 @@ export class ApiClient {
     return fetchWithRetry(`${this.baseUrl}/api/campaigns${qs ? `?${qs}` : ""}`);
   }
 
-  async getCampaignDetails(id: string): Promise<DistributionCampaign> {
+  async getCampaignDetails(id: string): Promise<Campaign> {
     return fetchWithRetry(`${this.baseUrl}/api/campaigns/${id}`);
   }
 
-  async getPositions(): Promise<SimulatedTrade[]> {
+  async getPositions(): Promise<Trade[]> {
     return fetchWithRetry(`${this.baseUrl}/api/positions`);
   }
 
@@ -85,7 +83,7 @@ export class ApiClient {
   async getTradeHistory(params?: {
     limit?: number;
     offset?: number;
-  }): Promise<SimulatedTrade[]> {
+  }): Promise<Trade[]> {
     const searchParams = new URLSearchParams();
     if (params?.limit) searchParams.set("limit", String(params.limit));
     if (params?.offset) searchParams.set("offset", String(params.offset));

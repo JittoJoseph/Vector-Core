@@ -1,20 +1,22 @@
 import React, { useState } from "react";
-import { ExternalLink, ChevronRight } from "lucide-react";
+import { ChevronRight } from "lucide-react";
 import { CampaignDetailPopup } from "./campaign-detail-popup";
-import type { DistributionCampaign, LiveMarketPrice } from "@/lib/types";
+import type { Campaign, PositionPnl } from "@/lib/types";
+
 export function CampaignsTable({
   status = "active",
   campaigns,
   loading,
-  livePrices,
+  positionsPnl,
 }: {
   status?: "active" | "history";
-  campaigns: DistributionCampaign[];
+  campaigns: Campaign[];
   loading: boolean;
-  livePrices?: Record<string, LiveMarketPrice>;
+  positionsPnl?: Record<string, PositionPnl>;
 }) {
-  const [selectedCampaign, setSelectedCampaign] =
-    useState<DistributionCampaign | null>(null);
+  const [selectedCampaign, setSelectedCampaign] = useState<Campaign | null>(
+    null,
+  );
 
   if (loading) {
     return (
@@ -84,75 +86,73 @@ export function CampaignsTable({
             </tr>
           </thead>
           <tbody className="divide-y divide-border/10">
-            {campaigns.map((c) => (
-              <tr
-                key={c.id}
-                className="hover:bg-muted/15 cursor-pointer transition-colors"
-                onClick={() => setSelectedCampaign(c)}
-              >
-                <td className="py-3 px-4 text-muted-foreground">
-                  <ChevronRight size={14} />
-                </td>
-                <td className="py-3 px-4 min-w-[300px]">
-                  <div className="flex flex-col gap-0.5">
-                    <span className="font-medium text-foreground truncate max-w-[400px]">
+            {campaigns.map((c) => {
+              const historical =
+                !Array.isArray(c.historicalTrades) && c.historicalTrades
+                  ? c.historicalTrades
+                  : null;
+              const pnl = historical?.totalPnl ?? 0;
+              return (
+                <tr
+                  key={c.id}
+                  className="hover:bg-muted/15 cursor-pointer transition-colors"
+                  onClick={() => setSelectedCampaign(c)}
+                >
+                  <td className="py-3 px-4 text-muted-foreground">
+                    <ChevronRight size={14} />
+                  </td>
+                  <td className="py-3 px-4 min-w-[300px]">
+                    <span className="font-medium text-foreground truncate max-w-[400px] block">
                       {c.title}
                     </span>
-                  </div>
-                </td>
-                <td className="py-3 px-4 text-right text-muted-foreground">
-                  {c.seriesSlug ? (
-                    <span className="inline-flex items-center text-[9px] font-bold tracking-wider px-2 py-0.5 rounded border border-purple-500/25 bg-purple-500/5 text-purple-400">
-                      {c.seriesSlug}
-                    </span>
+                  </td>
+                  <td className="py-3 px-4 text-right text-muted-foreground">
+                    {c.seriesSlug ? (
+                      <span className="inline-flex items-center text-[9px] font-bold tracking-wider px-2 py-0.5 rounded border border-purple-500/25 bg-purple-500/5 text-purple-400">
+                        {c.seriesSlug}
+                      </span>
+                    ) : (
+                      "—"
+                    )}
+                  </td>
+                  {status === "active" ? (
+                    <>
+                      <td className="py-3 px-4 text-right">
+                        <span className="tabular-nums font-medium text-emerald-400">
+                          {c.candidateCount ?? 0}
+                        </span>
+                      </td>
+                      <td className="py-3 px-4 text-right">
+                        <span className="tabular-nums font-medium text-blue-400">
+                          {c.trackedCount ?? 0}
+                        </span>
+                      </td>
+                      <td className="py-3 px-4 text-right">
+                        <span className="tabular-nums font-medium">
+                          {c.positionCount ?? 0}
+                        </span>
+                      </td>
+                    </>
                   ) : (
-                    "—"
+                    <>
+                      <td className="py-3 px-4 text-right">
+                        <span className="tabular-nums font-medium">
+                          {historical?.length ?? 0}
+                        </span>
+                      </td>
+                      <td className="py-3 px-4 text-right">
+                        <span
+                          className={`tabular-nums font-bold ${pnl > 0 ? "text-emerald-400" : pnl < 0 ? "text-red-400" : ""}`}
+                        >
+                          {pnl > 0 ? "+" : ""}
+                          {pnl.toFixed(4)}
+                        </span>
+                      </td>
+                    </>
                   )}
-                </td>
-                {status === "active" ? (
-                  <>
-                    <td className="py-3 px-4 text-right">
-                      <span className="tabular-nums font-medium text-emerald-400">
-                        {c.candidateCount ?? 0}
-                      </span>
-                    </td>
-                    <td className="py-3 px-4 text-right">
-                      <span className="tabular-nums font-medium text-blue-400">
-                        {c.trackedCount ?? 0}
-                      </span>
-                    </td>
-                    <td className="py-3 px-4 text-right">
-                      <span className="tabular-nums font-medium">
-                        {c.positionCount ?? 0}
-                      </span>
-                    </td>
-                  </>
-                ) : (
-                  <>
-                    <td className="py-3 px-4 text-right">
-                      <span className="tabular-nums font-medium">
-                        {(c as any).historicalTrades?.length ?? 0}
-                      </span>
-                    </td>
-                    <td className="py-3 px-4 text-right">
-                      {(() => {
-                        const pnl = parseFloat(
-                          (c as any).historicalTrades?.totalPnl || "0",
-                        );
-                        return (
-                          <span
-                            className={`tabular-nums font-medium font-bold ${pnl > 0 ? "text-emerald-400" : pnl < 0 ? "text-red-400" : ""}`}
-                          >
-                            {pnl > 0 ? "+" : ""}
-                            {pnl.toFixed(4)}
-                          </span>
-                        );
-                      })()}
-                    </td>
-                  </>
-                )}
-              </tr>
-            ))}
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -160,7 +160,7 @@ export function CampaignsTable({
         <CampaignDetailPopup
           campaign={selectedCampaign}
           onClose={() => setSelectedCampaign(null)}
-          livePrices={livePrices}
+          positionsPnl={positionsPnl}
         />
       )}
     </div>
