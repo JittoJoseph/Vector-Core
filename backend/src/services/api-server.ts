@@ -154,7 +154,7 @@ export class ApiServer {
           const campaigns = await db
             .select()
             .from(schema.campaigns)
-            .where(eq(schema.campaigns.active, false))
+            .where(eq(schema.campaigns.closed, true))
             .orderBy(desc(schema.campaigns.updatedAt))
             .limit(limit);
 
@@ -195,7 +195,7 @@ export class ApiServer {
           const campaigns = await db
             .select()
             .from(schema.campaigns)
-            .where(eq(schema.campaigns.active, true))
+            .where(eq(schema.campaigns.closed, false))
             .orderBy(desc(schema.campaigns.updatedAt))
             .limit(limit);
 
@@ -228,14 +228,14 @@ export class ApiServer {
           return;
         }
 
-        const buckets = campaign.active
+        const buckets = !campaign.closed
           ? await db
               .select()
               .from(schema.buckets)
               .where(eq(schema.buckets.campaignId, campaignId))
           : [];
 
-        const historicalTrades = !campaign.active
+        const historicalTrades = campaign.closed
           ? await db
               .select()
               .from(schema.trades)

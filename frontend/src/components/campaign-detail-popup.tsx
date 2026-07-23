@@ -18,7 +18,7 @@ export function CampaignDetailPopup({
   const { details: campaign, loading } = useCampaignDetails(initialCampaign.id);
 
   const displayCampaign = campaign || initialCampaign;
-  const isHistorical = !displayCampaign.active;
+  const isHistorical = displayCampaign.closed;
   const buckets = displayCampaign.relevantBuckets || [];
   const trades = Array.isArray(displayCampaign.historicalTrades)
     ? (displayCampaign.historicalTrades as Trade[])

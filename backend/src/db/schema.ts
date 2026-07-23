@@ -19,7 +19,6 @@ export const campaigns = pgTable(
     seriesSlug: text("series_slug"),
     startDate: timestamp("start_date"),
     endDate: timestamp("end_date"),
-    active: boolean("active").default(true).notNull(),
     closed: boolean("closed").default(false).notNull(),
     lastFetchedAt: timestamp("last_fetched_at").defaultNow().notNull(),
     createdAt: timestamp("created_at").defaultNow().notNull(),

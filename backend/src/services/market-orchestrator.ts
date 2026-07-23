@@ -117,6 +117,7 @@ export class MarketOrchestrator extends EventEmitter {
   private paused = false;
   private cycleCount = 0;
   private isEvaluating = false;
+  private isSyncing = false;
 
   private pausedByRiskGuard = false;
   private consecutiveLossCount = 0;
@@ -350,54 +351,59 @@ export class MarketOrchestrator extends EventEmitter {
   }
 
   async syncCampaigns(): Promise<void> {
-    if (this.paused) return;
+    if (this.paused || this.isSyncing) return;
+    this.isSyncing = true;
+    try {
+      const events: GammaEvent[] = [];
+      let cursor: string | undefined;
+      do {
+        const page = await this.client.listEventsKeyset({
+          limit: 100,
+          active: true,
+          closed: false,
+          tag_id: WEATHER_TAG_ID,
+          after_cursor: cursor,
+        });
+        events.push(...page.events);
+        cursor = page.nextCursor ?? undefined;
+      } while (cursor && events.length < 1000);
 
-    const result = await this.client.listEventsKeyset({
-      limit: 100,
-      active: true,
-      closed: false,
-      tag_id: WEATHER_TAG_ID,
-    });
+      const openApiEventIds = new Set(events.map((e) => String(e.id)));
 
-    const db = getDb();
-    const activeApiEventIds = new Set(result.events.map((e) => String(e.id)));
-
-    for (const event of result.events) {
-      if (this.paused) break;
-      if (!event.negRisk) continue;
-      await this.persistCampaign(event);
-    }
-
-    const activeDbCampaigns = await db
-      .select()
-      .from(schema.campaigns)
-      .where(eq(schema.campaigns.active, true));
-    for (const c of activeDbCampaigns) {
-      if (this.paused) break;
-      if (!isSupportedWeatherCampaign(c.title)) {
-        await db
-          .update(schema.campaigns)
-          .set({ active: false, updatedAt: new Date() })
-          .where(eq(schema.campaigns.id, c.id));
-        continue;
+      for (const event of events) {
+        if (this.paused) break;
+        if (!event.negRisk) continue;
+        await this.persistCampaign(event);
       }
-      if (!activeApiEventIds.has(c.id)) {
-        try {
-          const fullEvent = await this.client.getEventById(c.id);
-          if (fullEvent && (fullEvent.closed || !fullEvent.active)) {
-            logger.info(
-              { campaignId: c.id },
-              "Campaign dropped from active API list, fetching final state",
+
+      const db = getDb();
+      const openDbCampaigns = await db
+        .select()
+        .from(schema.campaigns)
+        .where(eq(schema.campaigns.closed, false));
+      for (const c of openDbCampaigns) {
+        if (this.paused) break;
+        if (!isSupportedWeatherCampaign(c.title)) {
+          await db
+            .update(schema.campaigns)
+            .set({ closed: true, updatedAt: new Date() })
+            .where(eq(schema.campaigns.id, c.id));
+          continue;
+        }
+        if (!openApiEventIds.has(c.id)) {
+          try {
+            const fullEvent = await this.client.getEventById(c.id);
+            if (fullEvent) await this.persistCampaign(fullEvent);
+          } catch (err) {
+            logger.error(
+              { err, campaignId: c.id },
+              "Failed to refresh dropped campaign",
             );
-            await this.persistCampaign(fullEvent);
           }
-        } catch (err) {
-          logger.error(
-            { err, campaignId: c.id },
-            "Failed to fetch dropped campaign state",
-          );
         }
       }
+    } finally {
+      this.isSyncing = false;
     }
   }
 
@@ -407,7 +413,6 @@ export class MarketOrchestrator extends EventEmitter {
     const db = getDb();
     const eventId = String(event.id);
     const isClosed = event.closed ?? false;
-    const isActive = isClosed ? false : (event.active ?? true);
 
     await db
       .insert(schema.campaigns)
@@ -418,7 +423,6 @@ export class MarketOrchestrator extends EventEmitter {
         seriesSlug: (event as any).seriesSlug ?? null,
         startDate: event.startDate ? new Date(event.startDate) : null,
         endDate: event.endDate ? new Date(event.endDate) : null,
-        active: isActive,
         closed: isClosed,
         lastFetchedAt: new Date(),
         updatedAt: new Date(),
@@ -427,7 +431,6 @@ export class MarketOrchestrator extends EventEmitter {
         target: schema.campaigns.id,
         set: {
           title: event.title ?? eventId,
-          active: isActive,
           closed: isClosed,
           lastFetchedAt: new Date(),
           updatedAt: new Date(),
@@ -529,7 +532,7 @@ export class MarketOrchestrator extends EventEmitter {
     const campaigns = await db
       .select()
       .from(schema.campaigns)
-      .where(eq(schema.campaigns.active, true));
+      .where(eq(schema.campaigns.closed, false));
     if (campaigns.length === 0) return null;
 
     const allBuckets = await db
@@ -906,11 +909,6 @@ export class MarketOrchestrator extends EventEmitter {
             updatedAt: new Date(),
           })
           .where(eq(schema.buckets.id, bucketId));
-
-        await db
-          .update(schema.campaigns)
-          .set({ active: false, closed: true, updatedAt: new Date() })
-          .where(eq(schema.campaigns.id, bucket.campaignId));
       }
     } catch (err) {
       logger.error({ err, bucketId }, "Failed to persist bucket resolution");
