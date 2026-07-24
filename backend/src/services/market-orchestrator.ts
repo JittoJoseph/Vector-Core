@@ -25,11 +25,7 @@ import {
   getMarketWebSocketWatcher,
   MarketWebSocketWatcher,
 } from "./market-ws-watcher.js";
-import type {
-  FeeSchedule,
-  GammaEvent,
-  GammaMarket,
-} from "../types/index.js";
+import type { FeeSchedule, GammaEvent, GammaMarket } from "../types/index.js";
 import type { MarketResolvedEvent } from "../interfaces/websocket-types.js";
 import { executionPolicy } from "./execution-policy.js";
 import {
@@ -45,6 +41,7 @@ const logger = createModuleLogger("market-orchestrator");
 
 const MAX_ENTRY_SPREAD = 0.02;
 const TRADE_BUDGET = 5;
+const ENTRY_WINDOW_HOURS = 12;
 
 interface TrackedBucket {
   bucketId: string;
@@ -421,8 +418,9 @@ export class MarketOrchestrator extends EventEmitter {
       }
     }
 
-    const gameStart = event.markets?.find((m) => m.gameStartTime)
-      ?.gameStartTime;
+    const gameStart = event.markets?.find(
+      (m) => m.gameStartTime,
+    )?.gameStartTime;
     const endDate = gameStart
       ? new Date(new Date(gameStart).getTime() + 24 * 60 * 60 * 1000)
       : event.endDate
@@ -523,10 +521,8 @@ export class MarketOrchestrator extends EventEmitter {
 
     try {
       await this.loadState();
-      const result = await this.findCandidateOpportunities();
-      if (!result) return;
-
-      const { candidates, requiredTokens } = result;
+      const { candidates, requiredTokens } =
+        await this.findCandidateOpportunities();
       this.updateWsSubscriptions(requiredTokens);
       await this.executeCandidates(candidates);
     } finally {
@@ -537,29 +533,12 @@ export class MarketOrchestrator extends EventEmitter {
   private async findCandidateOpportunities(): Promise<{
     candidates: Candidate[];
     requiredTokens: Set<string>;
-  } | null> {
+  }> {
     const config = getConfig();
     const db = getDb();
 
-    const campaigns = await db
-      .select()
-      .from(schema.campaigns)
-      .where(eq(schema.campaigns.closed, false));
-    if (campaigns.length === 0) return null;
-
-    const allBuckets = await db
-      .select()
-      .from(schema.buckets)
-      .where(
-        inArray(
-          schema.buckets.campaignId,
-          campaigns.map((c) => c.id),
-        ),
-      );
-
     const candidates: Candidate[] = [];
     const requiredTokens = new Set<string>();
-
     for (const p of this.openPositions.values()) {
       const b = this.trackedBuckets.get(p.bucketId);
       if (b) {
@@ -570,7 +549,30 @@ export class MarketOrchestrator extends EventEmitter {
 
     this.activeCampaignMetrics.clear();
 
-    for (const campaign of campaigns) {
+    const now = Date.now();
+    const windowMs = ENTRY_WINDOW_HOURS * 60 * 60 * 1000;
+    const openCampaigns = await db
+      .select()
+      .from(schema.campaigns)
+      .where(eq(schema.campaigns.closed, false));
+    const eligible = openCampaigns.filter((c) => {
+      if (!c.endDate) return false;
+      const remaining = c.endDate.getTime() - now;
+      return remaining > 0 && remaining <= windowMs;
+    });
+    if (eligible.length === 0) return { candidates, requiredTokens };
+
+    const allBuckets = await db
+      .select()
+      .from(schema.buckets)
+      .where(
+        inArray(
+          schema.buckets.campaignId,
+          eligible.map((c) => c.id),
+        ),
+      );
+
+    for (const campaign of eligible) {
       const buckets = allBuckets.filter((b) => b.campaignId === campaign.id);
       if (buckets.length === 0) continue;
 
@@ -619,9 +621,7 @@ export class MarketOrchestrator extends EventEmitter {
         const state = this.trackedBuckets.get(bucket.id);
         if (state && (state.resolved || !state.acceptingOrders)) continue;
 
-        const { data: book } = await this.client.getOrderbook(
-          bucket.noTokenId,
-        );
+        const { data: book } = await this.client.getOrderbook(bucket.noTokenId);
         const top = getTopOfBook(book);
         if (
           top.bestAsk == null ||
