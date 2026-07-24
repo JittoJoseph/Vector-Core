@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { ChevronRight } from "lucide-react";
 import { CampaignDetailPopup } from "./campaign-detail-popup";
+import { MarketCountdown } from "./trades-table";
 import type { Campaign, PositionPnl } from "@/lib/types";
 
 export function CampaignsTable({
@@ -53,7 +54,7 @@ export function CampaignsTable({
                 CAMPAIGN
               </th>
               <th className="text-right py-2.5 px-4 font-medium text-muted-foreground tracking-wider text-[10px]">
-                SERIES
+                {status === "active" ? "TIME LEFT" : "SERIES"}
               </th>
               {status === "active" ? (
                 <>
@@ -106,13 +107,21 @@ export function CampaignsTable({
                       {c.title}
                     </span>
                   </td>
-                  <td className="py-3 px-4 text-right text-muted-foreground">
-                    {c.seriesSlug ? (
+                  <td className="py-3 px-4 text-right">
+                    {status === "active" ? (
+                      c.endDate ? (
+                        <span className="tabular-nums font-medium text-foreground">
+                          <MarketCountdown endDate={c.endDate} />
+                        </span>
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )
+                    ) : c.seriesSlug ? (
                       <span className="inline-flex items-center text-[9px] font-bold tracking-wider px-2 py-0.5 rounded border border-purple-500/25 bg-purple-500/5 text-purple-400">
                         {c.seriesSlug}
                       </span>
                     ) : (
-                      "—"
+                      <span className="text-muted-foreground">—</span>
                     )}
                   </td>
                   {status === "active" ? (

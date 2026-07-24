@@ -377,8 +377,9 @@ export function MarketCountdown({
         else if (minutes > 0) setTimeLeft(`${minutes}m ${seconds}s`);
         else setTimeLeft(`${seconds}s`);
       } else {
+        const mm = String(minutes).padStart(2, "0");
         if (days > 0) setTimeLeft(`${days}d ${hours}h`);
-        else if (hours > 0) setTimeLeft(`${hours}h ${minutes}m`);
+        else if (hours > 0) setTimeLeft(`${hours}h ${mm}m`);
         else setTimeLeft(`${minutes}m`);
       }
     };
