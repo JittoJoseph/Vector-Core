@@ -121,6 +121,17 @@ export function TradeDetailPopup({
                   </span>
                 </div>
               )}
+              {trade.posFromModal != null && (
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] uppercase tracking-widest text-muted-foreground/60 font-bold">
+                    POS FROM MODAL:
+                  </span>
+                  <span className="text-[11px] font-semibold text-foreground/90 bg-muted/20 px-2 py-0.5 rounded border border-border/10 tabular-nums">
+                    {trade.posFromModal > 0 ? "+" : ""}
+                    {trade.posFromModal}
+                  </span>
+                </div>
+              )}
             </div>
           )}
         </div>

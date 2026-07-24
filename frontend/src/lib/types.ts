@@ -45,6 +45,7 @@ export interface Trade {
   entryFees: string;
   expectedNetProfit: string | null;
   modalBucketAtEntry: string | null;
+  posFromModal: number | null;
   minNoPriceDuringPosition: string | null;
   exitPrice: string | null;
   exitTs: string | null;

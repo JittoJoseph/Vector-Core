@@ -65,26 +65,26 @@ export function findModalBucket<T extends { yesPrice?: any }>(
   return modalBucket;
 }
 
-export function isCandidateBucket(
-  bucketGroupTitle: string,
-  modalMin: number,
-): boolean {
-  const [, bMax] = parseBucketMinMax(bucketGroupTitle);
-  return bMax < modalMin;
+export function bucketOffsetsFromModal<
+  T extends { id: string; groupItemTitle: string },
+>(buckets: T[], modalId: string): Map<string, number> {
+  const sorted = [...buckets].sort(
+    (a, b) =>
+      parseBucketMinMax(a.groupItemTitle)[0] -
+      parseBucketMinMax(b.groupItemTitle)[0],
+  );
+  const modalIndex = sorted.findIndex((b) => b.id === modalId);
+  const offsets = new Map<string, number>();
+  sorted.forEach((b, i) => offsets.set(b.id, i - modalIndex));
+  return offsets;
 }
 
 export function isRelevantBucket(
-  isCandidate: boolean,
   isModal: boolean,
   noPrice: number,
   maxNoEntryPrice: number,
   hasOpenPosition: boolean,
 ): boolean {
   if (hasOpenPosition || isModal) return true;
-  if (
-    isCandidate &&
-    (noPrice <= maxNoEntryPrice + 0.1 || Number.isNaN(noPrice))
-  )
-    return true;
-  return false;
+  return noPrice <= maxNoEntryPrice + 0.1 || Number.isNaN(noPrice);
 }

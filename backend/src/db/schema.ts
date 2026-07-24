@@ -5,6 +5,7 @@ import {
   timestamp,
   jsonb,
   decimal,
+  integer,
   index,
   uniqueIndex,
 } from "drizzle-orm/pg-core";
@@ -81,6 +82,7 @@ export const trades = pgTable(
       scale: 8,
     }),
     modalBucketAtEntry: text("modal_bucket_at_entry"),
+    posFromModal: integer("pos_from_modal"),
     minNoPriceDuringPosition: decimal("min_no_price_during_position", {
       precision: 18,
       scale: 8,

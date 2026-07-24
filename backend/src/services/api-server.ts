@@ -18,7 +18,6 @@ import {
 import {
   parseBucketMinMax,
   findModalBucket,
-  isCandidateBucket,
   isRelevantBucket,
 } from "../utils/weather-logic.js";
 
@@ -256,9 +255,7 @@ export class ApiServer {
         let trackedCount = 0;
 
         if (modalBucket) {
-          const [modalMin] = parseBucketMinMax(modalBucket.groupItemTitle);
           for (const b of buckets) {
-            const isCandidate = isCandidateBucket(b.groupItemTitle, modalMin);
             const noPrice = parseFloat(b.noPrice ?? "1");
             const isModal = b.id === modalBucket.id;
             const bucketPositions = openPositions.filter(
@@ -266,12 +263,11 @@ export class ApiServer {
             );
             const hasOpenPosition = bucketPositions.length > 0;
 
-            if (isCandidate) candidateCount++;
+            if (!isModal) candidateCount++;
             if (hasOpenPosition) positionCount++;
 
             if (
               isRelevantBucket(
-                isCandidate,
                 isModal,
                 noPrice,
                 config.strategy.maxNoEntryPrice,

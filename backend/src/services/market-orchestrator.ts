@@ -29,9 +29,8 @@ import type { FeeSchedule, GammaEvent, GammaMarket } from "../types/index.js";
 import type { MarketResolvedEvent } from "../interfaces/websocket-types.js";
 import { executionPolicy } from "./execution-policy.js";
 import {
-  parseBucketMinMax,
+  bucketOffsetsFromModal,
   findModalBucket,
-  isCandidateBucket,
   isRelevantBucket,
   isSupportedWeatherCampaign,
   WEATHER_TAG_ID,
@@ -94,6 +93,7 @@ interface Candidate {
   expectedReturnPercent: number;
   execResult: ReturnType<typeof simulateLimitBuy>;
   modalBucketTitle: string;
+  posFromModal: number;
 }
 
 export class MarketOrchestrator extends EventEmitter {
@@ -579,7 +579,7 @@ export class MarketOrchestrator extends EventEmitter {
       const modalBucket = findModalBucket(buckets);
       if (!modalBucket) continue;
 
-      const [modalMin] = parseBucketMinMax(modalBucket.groupItemTitle);
+      const offsets = bucketOffsetsFromModal(buckets, modalBucket.id);
       requiredTokens.add(modalBucket.noTokenId);
       requiredTokens.add(modalBucket.yesTokenId);
 
@@ -588,7 +588,7 @@ export class MarketOrchestrator extends EventEmitter {
       let positionCount = 0;
 
       for (const bucket of buckets) {
-        if (!isCandidateBucket(bucket.groupItemTitle, modalMin)) continue;
+        if (bucket.id === modalBucket.id) continue;
         candidateCount++;
 
         const noPrice = parseFloat(bucket.noPrice ?? "1");
@@ -599,7 +599,6 @@ export class MarketOrchestrator extends EventEmitter {
 
         if (
           isRelevantBucket(
-            true,
             false,
             noPrice,
             config.strategy.maxNoEntryPrice,
@@ -650,6 +649,7 @@ export class MarketOrchestrator extends EventEmitter {
           expectedReturnPercent: expectedNetProfit / execResult.netCost,
           execResult,
           modalBucketTitle: modalBucket.groupItemTitle,
+          posFromModal: offsets.get(bucket.id) ?? 0,
         });
       }
 
@@ -729,6 +729,7 @@ export class MarketOrchestrator extends EventEmitter {
       entryFees: execResult.fees.toFixed(8),
       expectedNetProfit: cand.expectedNetProfit.toFixed(8),
       modalBucketAtEntry: cand.modalBucketTitle,
+      posFromModal: cand.posFromModal,
     });
     if (!trade) return;
 
