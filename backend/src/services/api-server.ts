@@ -47,8 +47,7 @@ export class ApiServer {
           const msg = JSON.parse(raw.toString()) as { type?: string };
           if (msg.type === "ping")
             ws.send(JSON.stringify({ type: "pong", ts: Date.now() }));
-        } catch {
-        }
+        } catch {}
       });
     });
 
@@ -155,7 +154,10 @@ export class ApiServer {
             .select()
             .from(schema.campaigns)
             .where(eq(schema.campaigns.closed, true))
-            .orderBy(desc(schema.campaigns.updatedAt))
+            .orderBy(
+              desc(schema.campaigns.closedTime),
+              desc(schema.campaigns.updatedAt),
+            )
             .limit(limit);
 
           if (campaigns.length === 0) {
@@ -196,7 +198,10 @@ export class ApiServer {
             .select()
             .from(schema.campaigns)
             .where(eq(schema.campaigns.closed, false))
-            .orderBy(desc(schema.campaigns.updatedAt))
+            .orderBy(
+              asc(schema.campaigns.endDate),
+              desc(schema.campaigns.updatedAt),
+            )
             .limit(limit);
 
           res.json(
