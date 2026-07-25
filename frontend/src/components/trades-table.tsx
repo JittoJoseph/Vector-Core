@@ -57,6 +57,7 @@ export function TradesTable({
       : [
           "MARKET",
           "RESOLUTION DATE",
+          "HELD DURATION",
           "COST BASIS",
           "PRICE DRIFT",
           "OUTCOME",
@@ -260,6 +261,16 @@ export function TradesTable({
                 </td>
 
                 <td className="py-3 px-3 text-right">
+                  {exitTs ? (
+                    <span className="text-foreground/90 tabular-nums font-medium">
+                      {formatDuration(trade.entryTs, trade.exitTs ?? "")}
+                    </span>
+                  ) : (
+                    <span className="text-muted-foreground/40">—</span>
+                  )}
+                </td>
+
+                <td className="py-3 px-3 text-right">
                   <span className="text-foreground font-medium tabular-nums">
                     ${actualCost.toFixed(2)}
                   </span>
@@ -345,6 +356,21 @@ export function TradesTable({
       )}
     </div>
   );
+}
+
+function formatDuration(start: string, end: string): string {
+  return formatDurationMs(new Date(end).getTime() - new Date(start).getTime());
+}
+
+function formatDurationMs(diffMs: number): string {
+  const secs = Math.max(0, Math.floor(diffMs / 1000));
+  if (secs < 60) return `${secs}s`;
+  const mins = Math.floor(secs / 60);
+  if (mins < 60) return `${mins}m ${secs % 60}s`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ${mins % 60}m`;
+  const days = Math.floor(hrs / 24);
+  return `${days}d ${hrs % 24}h`;
 }
 
 export function MarketCountdown({

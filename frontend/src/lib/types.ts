@@ -101,8 +101,9 @@ export interface SystemStats {
     minExpectedNetProfit: number;
     startingCapital: number;
     maxPositions: number;
+    entryWindowHours: number;
     stopLossEnabled: boolean;
-    stopLossNoPrice: number;
+    stopLossDelta: number;
   };
   portfolio?: PortfolioSnapshot;
   positionsPnl?: Record<string, PositionPnl>;

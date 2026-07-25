@@ -373,6 +373,18 @@ export function SettingsPage() {
                       label="Min Expected Net Profit"
                       value={`$${stats.config.minExpectedNetProfit}`}
                     />
+                    <ConfigItem
+                      label="Hours to End"
+                      value={`${stats.config.entryWindowHours}h`}
+                    />
+                    <ConfigItem
+                      label="Stop Loss Delta"
+                      value={
+                        stats.config.stopLossEnabled
+                          ? `${(stats.config.stopLossDelta * 100).toFixed(1)}¢`
+                          : "Disabled"
+                      }
+                    />
                   </div>
                 ) : (
                   <div className="text-center py-12 text-xs text-muted-foreground">

@@ -10,7 +10,10 @@ import { createModuleLogger } from "../utils/logger.js";
 import { getConfig } from "../utils/config.js";
 import { getDb } from "../db/client.js";
 import * as schema from "../db/schema.js";
-import { getMarketOrchestrator } from "./market-orchestrator.js";
+import {
+  ENTRY_WINDOW_HOURS,
+  getMarketOrchestrator,
+} from "./market-orchestrator.js";
 import {
   calculatePerformance,
   type TimePeriod,
@@ -95,8 +98,9 @@ export class ApiServer {
         minExpectedNetProfit: config.strategy.minExpectedNetProfit,
         startingCapital: config.portfolio.startingCapital,
         maxPositions: config.strategy.maxSimultaneousPositions,
+        entryWindowHours: ENTRY_WINDOW_HOURS,
         stopLossEnabled: config.strategy.stopLossEnabled,
-        stopLossNoPrice: config.strategy.stopLossNoPrice,
+        stopLossDelta: config.strategy.stopLossDelta,
       },
       portfolio: orchestrator.getPortfolioSnapshot(),
       positionsPnl: orchestrator.getOpenPositionsPnl(),

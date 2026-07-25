@@ -40,7 +40,7 @@ const logger = createModuleLogger("market-orchestrator");
 
 const MAX_ENTRY_SPREAD = 0.02;
 const TRADE_BUDGET = 5;
-const ENTRY_WINDOW_HOURS = 12;
+export const ENTRY_WINDOW_HOURS = 12;
 
 interface TrackedBucket {
   bucketId: string;
@@ -787,7 +787,8 @@ export class MarketOrchestrator extends EventEmitter {
       }
 
       if (!config.strategy.stopLossEnabled) continue;
-      if (validAsk <= config.strategy.stopLossNoPrice) {
+      const stopLossPrice = pos.entryPrice - config.strategy.stopLossDelta;
+      if (validAsk <= stopLossPrice) {
         const now = Date.now();
         if (!pos.stopLossConditionFirstSeen) {
           pos.stopLossConditionFirstSeen = now;

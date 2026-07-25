@@ -25,7 +25,7 @@ export const ConfigSchema = z.object({
     riskAutoResumeEnabled: z.boolean(),
     riskAutoResumeCooldownMs: z.number().int().positive(),
     stopLossEnabled: z.boolean(),
-    stopLossNoPrice: z.number().min(0).max(1),
+    stopLossDelta: z.number().min(0).max(1),
   }),
   admin: z.object({
     password: z.string().min(1),

@@ -650,6 +650,15 @@ export function DashboardPage() {
 
                 <div className="flex justify-between items-end">
                   <span className="text-[10px] text-muted-foreground uppercase tracking-widest">
+                    Hours To End
+                  </span>
+                  <span className="text-[11px] font-mono text-foreground tabular-nums">
+                    {stats?.config.entryWindowHours ?? 0}h
+                  </span>
+                </div>
+
+                <div className="flex justify-between items-end">
+                  <span className="text-[10px] text-muted-foreground uppercase tracking-widest">
                     Stop Loss Enabled
                   </span>
                   <span className="text-[11px] font-mono text-foreground tabular-nums">
@@ -659,10 +668,10 @@ export function DashboardPage() {
 
                 <div className="flex justify-between items-end">
                   <span className="text-[10px] text-muted-foreground uppercase tracking-widest">
-                    Stop Loss Trigger
+                    Stop Loss Delta
                   </span>
                   <span className="text-[11px] font-mono text-foreground tabular-nums">
-                    {Math.round((stats?.config.stopLossNoPrice || 0) * 100)}¢
+                    {Math.round((stats?.config.stopLossDelta || 0) * 100)}¢
                   </span>
                 </div>
               </div>
