@@ -585,8 +585,8 @@ export class MarketOrchestrator extends EventEmitter {
       let trackedCount = 0;
       let positionCount = 0;
 
-      for (const [i, bucket] of ladder.sorted.entries()) {
-        if (i === ladder.modalIndex) continue;
+      for (let i = ladder.modalIndex + 1; i < ladder.sorted.length; i++) {
+        const bucket = ladder.sorted[i]!;
         candidateCount++;
 
         const noPrice = parseFloat(bucket.noPrice ?? "1");
@@ -607,6 +607,7 @@ export class MarketOrchestrator extends EventEmitter {
           requiredTokens.add(bucket.yesTokenId);
         }
 
+        if (!ladder.isPeaked) continue;
         if (
           noPrice < config.strategy.minNoEntryPrice ||
           noPrice > config.strategy.maxNoEntryPrice

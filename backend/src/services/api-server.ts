@@ -263,7 +263,7 @@ export class ApiServer {
             );
             const hasOpenPosition = bucketPositions.length > 0;
 
-            if (!isModal) candidateCount++;
+            if (i > ladder.modalIndex) candidateCount++;
             if (hasOpenPosition) positionCount++;
 
             if (
@@ -280,6 +280,7 @@ export class ApiServer {
                 slug: b.slug,
                 groupItemTitle: b.groupItemTitle,
                 noPrice: b.noPrice,
+                posFromModal: i - ladder.modalIndex,
                 hasOpenPosition,
                 positions: bucketPositions.map((p) => ({
                   id: p.tradeId,
@@ -294,6 +295,8 @@ export class ApiServer {
         res.json({
           ...campaign,
           modalBucketTitle: ladder?.modal.groupItemTitle ?? "N/A",
+          modalConviction: ladder?.conviction ?? null,
+          isPeaked: ladder?.isPeaked ?? false,
           candidateCount,
           trackedCount,
           positionCount,

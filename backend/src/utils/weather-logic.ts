@@ -49,10 +49,14 @@ export function parseBucketMinMax(title: string): [number, number] {
   return [value, value];
 }
 
+export const MIN_MODAL_CONVICTION = 0.65;
+
 export interface Ladder<T> {
   sorted: T[];
   modalIndex: number;
   modal: T;
+  conviction: number;
+  isPeaked: boolean;
 }
 
 export function analyzeLadder<
@@ -65,15 +69,21 @@ export function analyzeLadder<
       parseBucketMinMax(b.groupItemTitle)[0],
   );
   let modalIndex = 0;
-  let maxYes = -1;
+  let conviction = -1;
   sorted.forEach((b, i) => {
     const yes = parseFloat(b.yesPrice ?? "0");
-    if (yes > maxYes) {
-      maxYes = yes;
+    if (yes > conviction) {
+      conviction = yes;
       modalIndex = i;
     }
   });
-  return { sorted, modalIndex, modal: sorted[modalIndex]! };
+  return {
+    sorted,
+    modalIndex,
+    modal: sorted[modalIndex]!,
+    conviction,
+    isPeaked: conviction >= MIN_MODAL_CONVICTION,
+  };
 }
 
 export function isRelevantBucket(
