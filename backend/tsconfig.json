@@ -19,11 +19,7 @@
     "noFallthroughCasesInSwitch": true,
     "noUncheckedIndexedAccess": true,
     "noImplicitOverride": true,
-    "exactOptionalPropertyTypes": false,
-    "paths": {
-      "@/*": ["./src/*"]
-    },
-    "baseUrl": "."
+    "exactOptionalPropertyTypes": false
   },
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist", "**/*.test.ts"]
