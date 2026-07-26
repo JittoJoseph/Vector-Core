@@ -29,8 +29,7 @@ import type { FeeSchedule, GammaEvent, GammaMarket } from "../types/index.js";
 import type { MarketResolvedEvent } from "../interfaces/websocket-types.js";
 import { executionPolicy } from "./execution-policy.js";
 import {
-  bucketOffsetsFromModal,
-  findModalBucket,
+  analyzeLadder,
   isRelevantBucket,
   isSupportedWeatherCampaign,
   WEATHER_TAG_ID,
@@ -576,19 +575,18 @@ export class MarketOrchestrator extends EventEmitter {
       const buckets = allBuckets.filter((b) => b.campaignId === campaign.id);
       if (buckets.length === 0) continue;
 
-      const modalBucket = findModalBucket(buckets);
-      if (!modalBucket) continue;
+      const ladder = analyzeLadder(buckets);
+      if (!ladder) continue;
 
-      const offsets = bucketOffsetsFromModal(buckets, modalBucket.id);
-      requiredTokens.add(modalBucket.noTokenId);
-      requiredTokens.add(modalBucket.yesTokenId);
+      requiredTokens.add(ladder.modal.noTokenId);
+      requiredTokens.add(ladder.modal.yesTokenId);
 
       let candidateCount = 0;
       let trackedCount = 0;
       let positionCount = 0;
 
-      for (const bucket of buckets) {
-        if (bucket.id === modalBucket.id) continue;
+      for (const [i, bucket] of ladder.sorted.entries()) {
+        if (i === ladder.modalIndex) continue;
         candidateCount++;
 
         const noPrice = parseFloat(bucket.noPrice ?? "1");
@@ -599,7 +597,6 @@ export class MarketOrchestrator extends EventEmitter {
 
         if (
           isRelevantBucket(
-            false,
             noPrice,
             config.strategy.maxNoEntryPrice,
             bucketHasPosition,
@@ -648,8 +645,8 @@ export class MarketOrchestrator extends EventEmitter {
           expectedNetProfit,
           expectedReturnPercent: expectedNetProfit / execResult.netCost,
           execResult,
-          modalBucketTitle: modalBucket.groupItemTitle,
-          posFromModal: offsets.get(bucket.id) ?? 0,
+          modalBucketTitle: ladder.modal.groupItemTitle,
+          posFromModal: i - ladder.modalIndex,
         });
       }
 

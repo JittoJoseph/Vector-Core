@@ -49,42 +49,39 @@ export function parseBucketMinMax(title: string): [number, number] {
   return [value, value];
 }
 
-export function findModalBucket<T extends { yesPrice?: any }>(
-  buckets: T[],
-): T | undefined {
-  if (!buckets || buckets.length === 0) return undefined;
-  let modalBucket = buckets[0];
-  let maxYes = parseFloat(buckets[0]?.yesPrice?.toString() ?? "0");
-  for (const b of buckets) {
-    const y = parseFloat(b.yesPrice?.toString() ?? "0");
-    if (y > maxYes) {
-      maxYes = y;
-      modalBucket = b;
-    }
-  }
-  return modalBucket;
+export interface Ladder<T> {
+  sorted: T[];
+  modalIndex: number;
+  modal: T;
 }
 
-export function bucketOffsetsFromModal<
-  T extends { id: string; groupItemTitle: string },
->(buckets: T[], modalId: string): Map<string, number> {
+export function analyzeLadder<
+  T extends { groupItemTitle: string; yesPrice: string | null },
+>(buckets: T[]): Ladder<T> | null {
+  if (buckets.length === 0) return null;
   const sorted = [...buckets].sort(
     (a, b) =>
       parseBucketMinMax(a.groupItemTitle)[0] -
       parseBucketMinMax(b.groupItemTitle)[0],
   );
-  const modalIndex = sorted.findIndex((b) => b.id === modalId);
-  const offsets = new Map<string, number>();
-  sorted.forEach((b, i) => offsets.set(b.id, i - modalIndex));
-  return offsets;
+  let modalIndex = 0;
+  let maxYes = -1;
+  sorted.forEach((b, i) => {
+    const yes = parseFloat(b.yesPrice ?? "0");
+    if (yes > maxYes) {
+      maxYes = yes;
+      modalIndex = i;
+    }
+  });
+  return { sorted, modalIndex, modal: sorted[modalIndex]! };
 }
 
 export function isRelevantBucket(
-  isModal: boolean,
   noPrice: number,
   maxNoEntryPrice: number,
   hasOpenPosition: boolean,
 ): boolean {
-  if (hasOpenPosition || isModal) return true;
-  return noPrice <= maxNoEntryPrice + 0.1 || Number.isNaN(noPrice);
+  return (
+    hasOpenPosition || Number.isNaN(noPrice) || noPrice <= maxNoEntryPrice + 0.1
+  );
 }

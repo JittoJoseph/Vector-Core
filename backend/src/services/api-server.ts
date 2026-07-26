@@ -18,11 +18,7 @@ import {
   calculatePerformance,
   type TimePeriod,
 } from "./performance-calculator.js";
-import {
-  parseBucketMinMax,
-  findModalBucket,
-  isRelevantBucket,
-} from "../utils/weather-logic.js";
+import { analyzeLadder, isRelevantBucket } from "../utils/weather-logic.js";
 
 const logger = createModuleLogger("api-server");
 
@@ -250,7 +246,7 @@ export class ApiServer {
               .where(eq(schema.trades.campaignId, campaignId))
           : [];
 
-        const modalBucket = findModalBucket(buckets);
+        const ladder = analyzeLadder(buckets);
         const openPositions = orchestrator.getOpenPositions();
 
         const relevantBuckets = [];
@@ -258,10 +254,10 @@ export class ApiServer {
         let positionCount = 0;
         let trackedCount = 0;
 
-        if (modalBucket) {
-          for (const b of buckets) {
+        if (ladder) {
+          for (const [i, b] of ladder.sorted.entries()) {
             const noPrice = parseFloat(b.noPrice ?? "1");
-            const isModal = b.id === modalBucket.id;
+            const isModal = i === ladder.modalIndex;
             const bucketPositions = openPositions.filter(
               (p) => p.bucketId === b.id,
             );
@@ -271,8 +267,8 @@ export class ApiServer {
             if (hasOpenPosition) positionCount++;
 
             if (
+              isModal ||
               isRelevantBucket(
-                isModal,
                 noPrice,
                 config.strategy.maxNoEntryPrice,
                 hasOpenPosition,
@@ -293,16 +289,11 @@ export class ApiServer {
               });
             }
           }
-          relevantBuckets.sort(
-            (a, b) =>
-              parseBucketMinMax(a.groupItemTitle)[0] -
-              parseBucketMinMax(b.groupItemTitle)[0],
-          );
         }
 
         res.json({
           ...campaign,
-          modalBucketTitle: modalBucket?.groupItemTitle ?? "N/A",
+          modalBucketTitle: ladder?.modal.groupItemTitle ?? "N/A",
           candidateCount,
           trackedCount,
           positionCount,
