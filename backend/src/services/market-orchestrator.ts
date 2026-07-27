@@ -29,7 +29,8 @@ import type { FeeSchedule, GammaEvent, GammaMarket } from "../types/index.js";
 import type { MarketResolvedEvent } from "../interfaces/websocket-types.js";
 import { executionPolicy } from "./execution-policy.js";
 import {
-  analyzeLadder,
+  bucketOffsetsFromModal,
+  findModalBucket,
   isRelevantBucket,
   isSupportedWeatherCampaign,
   WEATHER_TAG_ID,
@@ -575,18 +576,19 @@ export class MarketOrchestrator extends EventEmitter {
       const buckets = allBuckets.filter((b) => b.campaignId === campaign.id);
       if (buckets.length === 0) continue;
 
-      const ladder = analyzeLadder(buckets);
-      if (!ladder) continue;
+      const modalBucket = findModalBucket(buckets);
+      if (!modalBucket) continue;
 
-      requiredTokens.add(ladder.modal.noTokenId);
-      requiredTokens.add(ladder.modal.yesTokenId);
+      const offsets = bucketOffsetsFromModal(buckets, modalBucket.id);
+      requiredTokens.add(modalBucket.noTokenId);
+      requiredTokens.add(modalBucket.yesTokenId);
 
       let candidateCount = 0;
       let trackedCount = 0;
       let positionCount = 0;
 
-      for (let i = ladder.modalIndex + 1; i < ladder.sorted.length; i++) {
-        const bucket = ladder.sorted[i]!;
+      for (const bucket of buckets) {
+        if (bucket.id === modalBucket.id) continue;
         candidateCount++;
 
         const noPrice = parseFloat(bucket.noPrice ?? "1");
@@ -597,6 +599,7 @@ export class MarketOrchestrator extends EventEmitter {
 
         if (
           isRelevantBucket(
+            false,
             noPrice,
             config.strategy.maxNoEntryPrice,
             bucketHasPosition,
@@ -607,7 +610,6 @@ export class MarketOrchestrator extends EventEmitter {
           requiredTokens.add(bucket.yesTokenId);
         }
 
-        if (!ladder.isPeaked) continue;
         if (
           noPrice < config.strategy.minNoEntryPrice ||
           noPrice > config.strategy.maxNoEntryPrice
@@ -646,8 +648,8 @@ export class MarketOrchestrator extends EventEmitter {
           expectedNetProfit,
           expectedReturnPercent: expectedNetProfit / execResult.netCost,
           execResult,
-          modalBucketTitle: ladder.modal.groupItemTitle,
-          posFromModal: i - ladder.modalIndex,
+          modalBucketTitle: modalBucket.groupItemTitle,
+          posFromModal: offsets.get(bucket.id) ?? 0,
         });
       }
 

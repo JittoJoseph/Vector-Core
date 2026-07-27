@@ -18,7 +18,11 @@ import {
   calculatePerformance,
   type TimePeriod,
 } from "./performance-calculator.js";
-import { analyzeLadder, isRelevantBucket } from "../utils/weather-logic.js";
+import {
+  parseBucketMinMax,
+  findModalBucket,
+  isRelevantBucket,
+} from "../utils/weather-logic.js";
 
 const logger = createModuleLogger("api-server");
 
@@ -246,7 +250,7 @@ export class ApiServer {
               .where(eq(schema.trades.campaignId, campaignId))
           : [];
 
-        const ladder = analyzeLadder(buckets);
+        const modalBucket = findModalBucket(buckets);
         const openPositions = orchestrator.getOpenPositions();
 
         const relevantBuckets = [];
@@ -254,21 +258,21 @@ export class ApiServer {
         let positionCount = 0;
         let trackedCount = 0;
 
-        if (ladder) {
-          for (const [i, b] of ladder.sorted.entries()) {
+        if (modalBucket) {
+          for (const b of buckets) {
             const noPrice = parseFloat(b.noPrice ?? "1");
-            const isModal = i === ladder.modalIndex;
+            const isModal = b.id === modalBucket.id;
             const bucketPositions = openPositions.filter(
               (p) => p.bucketId === b.id,
             );
             const hasOpenPosition = bucketPositions.length > 0;
 
-            if (i > ladder.modalIndex) candidateCount++;
+            if (!isModal) candidateCount++;
             if (hasOpenPosition) positionCount++;
 
             if (
-              isModal ||
               isRelevantBucket(
+                isModal,
                 noPrice,
                 config.strategy.maxNoEntryPrice,
                 hasOpenPosition,
@@ -280,7 +284,6 @@ export class ApiServer {
                 slug: b.slug,
                 groupItemTitle: b.groupItemTitle,
                 noPrice: b.noPrice,
-                posFromModal: i - ladder.modalIndex,
                 hasOpenPosition,
                 positions: bucketPositions.map((p) => ({
                   id: p.tradeId,
@@ -290,13 +293,16 @@ export class ApiServer {
               });
             }
           }
+          relevantBuckets.sort(
+            (a, b) =>
+              parseBucketMinMax(a.groupItemTitle)[0] -
+              parseBucketMinMax(b.groupItemTitle)[0],
+          );
         }
 
         res.json({
           ...campaign,
-          modalBucketTitle: ladder?.modal.groupItemTitle ?? "N/A",
-          modalConviction: ladder?.conviction ?? null,
-          isPeaked: ladder?.isPeaked ?? false,
+          modalBucketTitle: modalBucket?.groupItemTitle ?? "N/A",
           candidateCount,
           trackedCount,
           positionCount,
