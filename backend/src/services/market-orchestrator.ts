@@ -33,6 +33,7 @@ import {
   findModalBucket,
   isRelevantBucket,
   isSupportedWeatherCampaign,
+  nextBelowBand,
   WEATHER_TAG_ID,
 } from "../utils/weather-logic.js";
 
@@ -52,6 +53,7 @@ interface TrackedBucket {
   lastPrices: Record<string, { bid: number; ask: number; mid: number }>;
   resolved: boolean;
   acceptingOrders: boolean;
+  belowBand: boolean;
 }
 
 interface OpenPosition {
@@ -508,6 +510,7 @@ export class MarketOrchestrator extends EventEmitter {
       lastPrices: {},
       resolved: false,
       acceptingOrders: market.acceptingOrders ?? true,
+      belowBand: false,
     });
     this.tokenToBucket.set(noTokenId, market.id);
     if (market.conditionId)
@@ -588,10 +591,19 @@ export class MarketOrchestrator extends EventEmitter {
       let positionCount = 0;
 
       for (const bucket of buckets) {
+        const noPrice = parseFloat(bucket.noPrice ?? "1");
+        const state = this.trackedBuckets.get(bucket.id);
+        if (state)
+          state.belowBand = nextBelowBand(
+            state.belowBand,
+            noPrice,
+            config.strategy.minNoEntryPrice,
+            config.strategy.maxNoEntryPrice,
+          );
+
         if (bucket.id === modalBucket.id) continue;
         candidateCount++;
 
-        const noPrice = parseFloat(bucket.noPrice ?? "1");
         const bucketHasPosition = [...this.openPositions.values()].some(
           (p) => p.bucketId === bucket.id,
         );
@@ -616,9 +628,8 @@ export class MarketOrchestrator extends EventEmitter {
         )
           continue;
         if (bucketHasPosition) continue;
-
-        const state = this.trackedBuckets.get(bucket.id);
-        if (state && (state.resolved || !state.acceptingOrders)) continue;
+        if (!state || !state.belowBand) continue;
+        if (state.resolved || !state.acceptingOrders) continue;
 
         const { data: book } = await this.client.getOrderbook(bucket.noTokenId);
         const top = getTopOfBook(book);
@@ -634,7 +645,7 @@ export class MarketOrchestrator extends EventEmitter {
           book,
           TRADE_BUDGET,
           config.strategy.maxNoEntryPrice,
-          state?.feeSchedule ?? null,
+          state.feeSchedule,
         );
         if (execResult.totalShares <= 0 || execResult.belowMinimumOrderSize)
           continue;
@@ -732,6 +743,9 @@ export class MarketOrchestrator extends EventEmitter {
       posFromModal: cand.posFromModal,
     });
     if (!trade) return;
+
+    const state = this.trackedBuckets.get(cand.bucket.id);
+    if (state) state.belowBand = false;
 
     this.openPositions.set(trade.id, {
       tradeId: trade.id,

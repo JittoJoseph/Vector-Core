@@ -79,6 +79,17 @@ export function bucketOffsetsFromModal<
   return offsets;
 }
 
+export function nextBelowBand(
+  prev: boolean,
+  noPrice: number,
+  minNoEntryPrice: number,
+  maxNoEntryPrice: number,
+): boolean {
+  if (noPrice < minNoEntryPrice) return true;
+  if (noPrice > maxNoEntryPrice) return false;
+  return prev;
+}
+
 export function isRelevantBucket(
   isModal: boolean,
   noPrice: number,
