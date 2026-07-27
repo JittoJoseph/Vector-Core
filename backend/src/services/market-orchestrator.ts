@@ -261,21 +261,26 @@ export class MarketOrchestrator extends EventEmitter {
     return Array.from(this.openPositions.values());
   }
 
-  private getPositionMid(pos: OpenPosition): number | null {
-    const price = this.trackedBuckets.get(pos.bucketId)?.lastPrices[
-      pos.tokenId
-    ];
-    return price ? price.mid : null;
+  private positionPnl(pos: OpenPosition): {
+    mid: number | null;
+    pnl: number | null;
+  } {
+    const mid =
+      this.trackedBuckets.get(pos.bucketId)?.lastPrices[pos.tokenId]?.mid ??
+      null;
+    return {
+      mid,
+      pnl:
+        mid === null
+          ? null
+          : (mid - pos.entryPrice) * pos.entryShares - pos.fees,
+    };
   }
 
   getOpenPositionsPnl(): Record<string, PositionPnl> {
     const result: Record<string, PositionPnl> = {};
     for (const pos of this.openPositions.values()) {
-      const mid = this.getPositionMid(pos);
-      const pnl =
-        mid !== null
-          ? (mid - pos.entryPrice) * pos.entryShares - pos.fees
-          : null;
+      const { mid, pnl } = this.positionPnl(pos);
       result[pos.tradeId] = {
         mid,
         pnl,
@@ -290,17 +295,13 @@ export class MarketOrchestrator extends EventEmitter {
   }
 
   getPortfolioSnapshot(): PortfolioSnapshot {
-    const config = getConfig();
-    const initialCapital = config.portfolio.startingCapital;
+    const initialCapital = getConfig().portfolio.startingCapital;
 
     let openPositionsValue = 0;
     let unrealizedPnl = 0;
     for (const pos of this.openPositions.values()) {
       openPositionsValue += pos.actualCost;
-      const mid = this.getPositionMid(pos);
-      if (mid !== null) {
-        unrealizedPnl += (mid - pos.entryPrice) * pos.entryShares - pos.fees;
-      }
+      unrealizedPnl += this.positionPnl(pos).pnl ?? 0;
     }
 
     const netPnl = this.realizedPnl + unrealizedPnl;
@@ -542,7 +543,9 @@ export class MarketOrchestrator extends EventEmitter {
 
     const candidates: Candidate[] = [];
     const requiredTokens = new Set<string>();
+    const heldBuckets = new Set<string>();
     for (const p of this.openPositions.values()) {
+      heldBuckets.add(p.bucketId);
       const b = this.trackedBuckets.get(p.bucketId);
       if (b) {
         requiredTokens.add(b.noTokenId);
@@ -604,9 +607,7 @@ export class MarketOrchestrator extends EventEmitter {
         if (bucket.id === modalBucket.id) continue;
         candidateCount++;
 
-        const bucketHasPosition = [...this.openPositions.values()].some(
-          (p) => p.bucketId === bucket.id,
-        );
+        const bucketHasPosition = heldBuckets.has(bucket.id);
         if (bucketHasPosition) positionCount++;
 
         if (
@@ -631,7 +632,7 @@ export class MarketOrchestrator extends EventEmitter {
         if (!state || !state.belowBand) continue;
         if (state.resolved || !state.acceptingOrders) continue;
 
-        const { data: book } = await this.client.getOrderbook(bucket.noTokenId);
+        const book = await this.client.getOrderbook(bucket.noTokenId);
         const top = getTopOfBook(book);
         if (
           top.bestAsk == null ||
@@ -831,7 +832,7 @@ export class MarketOrchestrator extends EventEmitter {
         { tradeId: pos.tradeId, bucketId: pos.bucketId },
         "Executing stop-loss",
       );
-      const { data: book } = await this.client.getOrderbook(pos.tokenId);
+      const book = await this.client.getOrderbook(pos.tokenId);
 
       const exit = simulateTakerSell(book, pos.entryShares, feeSchedule);
       if (exit.totalShares <= 0) {

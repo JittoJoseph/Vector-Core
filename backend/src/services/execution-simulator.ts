@@ -4,23 +4,13 @@ import { type FeeSchedule, type Orderbook } from "../types/index.js";
 
 const logger = createModuleLogger("execution-simulator");
 
-export interface FillDetail {
-  price: number;
-  shares: number;
-  cost: number;
-  feeForLevel: number;
-}
-
 export interface ExecutionResult {
   averagePrice: number;
   totalShares: number;
-  totalCost: number;
   fees: number;
   netCost: number;
   isPartialFill: boolean;
   belowMinimumOrderSize: boolean;
-  minOrderSize: number;
-  fillDetails: FillDetail[];
 }
 
 export function calculateFeePerShare(
@@ -29,8 +19,7 @@ export function calculateFeePerShare(
 ): number {
   const feeRate = feeSchedule?.rate ?? 0;
   if (!Number.isFinite(feeRate) || feeRate <= 0) return 0;
-  const fee = feeRate * price * (1 - price);
-  return Math.round(fee * 10000) / 10000;
+  return Math.round(feeRate * price * (1 - price) * 10000) / 10000;
 }
 
 export function getTopOfBook(orderbook: Orderbook): {
@@ -38,20 +27,47 @@ export function getTopOfBook(orderbook: Orderbook): {
   bestAsk: number | null;
   spread: number | null;
 } {
-  const bestBid =
-    [...orderbook.bids]
-      .map((b) => parseFloat(b.price))
-      .filter(Number.isFinite)
-      .sort((a, b) => b - a)[0] ?? null;
-  const bestAsk =
-    [...orderbook.asks]
-      .map((a) => parseFloat(a.price))
-      .filter(Number.isFinite)
-      .sort((a, b) => a - b)[0] ?? null;
+  let bestBid: number | null = null;
+  let bestAsk: number | null = null;
+  for (const b of orderbook.bids) {
+    const p = parseFloat(b.price);
+    if (Number.isFinite(p) && (bestBid === null || p > bestBid)) bestBid = p;
+  }
+  for (const a of orderbook.asks) {
+    const p = parseFloat(a.price);
+    if (Number.isFinite(p) && (bestAsk === null || p < bestAsk)) bestAsk = p;
+  }
   return {
     bestBid,
     bestAsk,
-    spread: bestBid != null && bestAsk != null ? bestAsk - bestBid : null,
+    spread: bestBid !== null && bestAsk !== null ? bestAsk - bestBid : null,
+  };
+}
+
+function settle(
+  label: string,
+  orderbook: Orderbook,
+  shares: Decimal,
+  gross: Decimal,
+  feesDec: Decimal,
+  remaining: Decimal,
+  feeSign: 1 | -1,
+): ExecutionResult {
+  const totalShares = shares.toNumber();
+  const fees = Math.round(feesDec.toNumber() * 10000) / 10000;
+  const minOrderSize = parseFloat(orderbook.min_order_size ?? "5") || 5;
+  const averagePrice = shares.gt(0) ? gross.div(shares).toNumber() : 0;
+
+  if (totalShares > 0)
+    logger.debug({ averagePrice, totalShares, fees }, label);
+
+  return {
+    averagePrice,
+    totalShares,
+    fees,
+    netCost: gross.toNumber() + feeSign * fees,
+    isPartialFill: remaining.gt(0) && totalShares > 0,
+    belowMinimumOrderSize: totalShares > 0 && totalShares < minOrderSize,
   };
 }
 
@@ -64,14 +80,13 @@ export function simulateLimitBuy(
   const asks = [...orderbook.asks].sort(
     (a, b) => parseFloat(a.price) - parseFloat(b.price),
   );
-  const fillDetails: FillDetail[] = [];
-  let remainingUsd = new Decimal(usdAmount);
+  let remaining = new Decimal(usdAmount);
   let totalShares = new Decimal(0);
-  let totalCost = new Decimal(0);
+  let gross = new Decimal(0);
   let totalFees = new Decimal(0);
 
   for (const level of asks) {
-    if (remainingUsd.lte(0)) break;
+    if (remaining.lte(0)) break;
     const price = parseFloat(level.price);
     const size = parseFloat(level.size);
     if (!Number.isFinite(price) || !Number.isFinite(size)) continue;
@@ -79,55 +94,27 @@ export function simulateLimitBuy(
 
     const feePerShare = calculateFeePerShare(price, feeSchedule);
     const costPerShare = new Decimal(price).plus(feePerShare);
-    const sharesToFill = Math.min(remainingUsd.div(costPerShare).toNumber(), size);
-    if (sharesToFill <= 0) continue;
+    const fill = Math.min(remaining.div(costPerShare).toNumber(), size);
+    if (fill <= 0) continue;
 
-    const shares = new Decimal(sharesToFill);
+    const shares = new Decimal(fill);
     const cost = shares.mul(price);
     const fees = shares.mul(feePerShare);
     totalShares = totalShares.plus(shares);
-    totalCost = totalCost.plus(cost);
+    gross = gross.plus(cost);
     totalFees = totalFees.plus(fees);
-    remainingUsd = remainingUsd.minus(cost).minus(fees);
-    fillDetails.push({
-      price,
-      shares: sharesToFill,
-      cost: cost.toNumber(),
-      feeForLevel: fees.toNumber(),
-    });
+    remaining = remaining.minus(cost).minus(fees);
   }
 
-  const avgPrice = totalShares.gt(0)
-    ? totalCost.div(totalShares).toNumber()
-    : 0;
-  const roundedFees = Math.round(totalFees.toNumber() * 10000) / 10000;
-  const minOrderSize = parseFloat(orderbook.min_order_size ?? "5") || 5;
-  const belowMinimumOrderSize =
-    totalShares.gt(0) && totalShares.lt(minOrderSize);
-
-  if (totalShares.gt(0)) {
-    logger.debug(
-      {
-        avgPrice,
-        shares: totalShares.toNumber(),
-        fees: roundedFees,
-        levels: fillDetails.length,
-      },
-      "FAK buy simulated",
-    );
-  }
-
-  return {
-    averagePrice: avgPrice,
-    totalShares: totalShares.toNumber(),
-    totalCost: totalCost.toNumber(),
-    fees: roundedFees,
-    netCost: totalCost.toNumber() + roundedFees,
-    isPartialFill: remainingUsd.gt(0) && totalShares.gt(0),
-    belowMinimumOrderSize,
-    minOrderSize,
-    fillDetails,
-  };
+  return settle(
+    "FAK buy simulated",
+    orderbook,
+    totalShares,
+    gross,
+    totalFees,
+    remaining,
+    1,
+  );
 }
 
 export function simulateTakerSell(
@@ -138,71 +125,39 @@ export function simulateTakerSell(
   const bids = [...orderbook.bids].sort(
     (a, b) => parseFloat(b.price) - parseFloat(a.price),
   );
-  const fillDetails: FillDetail[] = [];
-  let remainingShares = new Decimal(sharesAmount);
+  let remaining = new Decimal(sharesAmount);
   let totalShares = new Decimal(0);
-  let totalRevenue = new Decimal(0);
+  let gross = new Decimal(0);
   let totalFees = new Decimal(0);
 
   for (const level of bids) {
-    if (remainingShares.lte(0)) break;
+    if (remaining.lte(0)) break;
     const price = parseFloat(level.price);
     const size = parseFloat(level.size);
     if (!Number.isFinite(price) || !Number.isFinite(size)) continue;
 
-    const sharesToSell = Math.min(remainingShares.toNumber(), size);
-    if (sharesToSell <= 0) continue;
+    const fill = Math.min(remaining.toNumber(), size);
+    if (fill <= 0) continue;
 
     const feePerShare = calculateFeePerShare(price, feeSchedule);
-    const shares = new Decimal(sharesToSell);
-    const revenue = shares.mul(price);
-    const fees = shares.mul(feePerShare);
-
+    const shares = new Decimal(fill);
     totalShares = totalShares.plus(shares);
-    totalRevenue = totalRevenue.plus(revenue);
-    totalFees = totalFees.plus(fees);
-    remainingShares = remainingShares.minus(shares);
-
-    fillDetails.push({
-      price,
-      shares: sharesToSell,
-      cost: revenue.toNumber(),
-      feeForLevel: fees.toNumber(),
-    });
+    gross = gross.plus(shares.mul(price));
+    totalFees = totalFees.plus(shares.mul(feePerShare));
+    remaining = remaining.minus(shares);
   }
 
-  const avgPrice = totalShares.gt(0)
-    ? totalRevenue.div(totalShares).toNumber()
-    : 0;
-  const roundedFees = Math.round(totalFees.toNumber() * 10000) / 10000;
-  const minOrderSize = parseFloat(orderbook.min_order_size ?? "5") || 5;
-  const belowMinimumOrderSize =
-    totalShares.gt(0) && totalShares.lt(minOrderSize);
-
-  if (totalShares.gt(0)) {
-    logger.debug(
-      {
-        avgPrice,
-        shares: totalShares.toNumber(),
-        fees: roundedFees,
-        levels: fillDetails.length,
-      },
-      "FAK sell simulated",
-    );
-  }
-
-  return {
-    averagePrice: avgPrice,
-    totalShares: totalShares.toNumber(),
-    totalCost: totalRevenue.toNumber(),
-    fees: roundedFees,
-    netCost: totalRevenue.toNumber() - roundedFees,
-    isPartialFill: remainingShares.gt(0) && totalShares.gt(0),
-    belowMinimumOrderSize,
-    minOrderSize,
-    fillDetails,
-  };
+  return settle(
+    "FAK sell simulated",
+    orderbook,
+    totalShares,
+    gross,
+    totalFees,
+    remaining,
+    -1,
+  );
 }
+
 export function calculateWinProfit(
   entryPrice: number,
   shares: number,

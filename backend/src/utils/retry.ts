@@ -17,7 +17,7 @@ const defaultOptions: RetryOptions = {
   jitterMs: 500,
 };
 
-export function calculateBackoff(
+function calculateBackoff(
   attempt: number,
   baseDelayMs: number,
   maxDelayMs: number,

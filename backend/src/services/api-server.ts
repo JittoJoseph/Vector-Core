@@ -107,6 +107,20 @@ export class ApiServer {
     };
   }
 
+  private tradesWithDeadline(status: string) {
+    return getDb()
+      .select({
+        trade: schema.trades,
+        campaignEndDate: schema.campaigns.endDate,
+      })
+      .from(schema.trades)
+      .leftJoin(
+        schema.campaigns,
+        eq(schema.trades.campaignId, schema.campaigns.id),
+      )
+      .where(eq(schema.trades.status, status));
+  }
+
   private corsMiddleware(
     req: Request,
     res: Response,
@@ -317,19 +331,9 @@ export class ApiServer {
 
     this.app.get("/api/positions", async (_req, res) => {
       try {
-        const rows = await getDb()
-          .select({
-            trade: schema.trades,
-            campaignEndDate: schema.campaigns.endDate,
-          })
-          .from(schema.trades)
-          .leftJoin(
-            schema.campaigns,
-            eq(schema.trades.campaignId, schema.campaigns.id),
-          )
-          .where(eq(schema.trades.status, "OPEN"))
-          .orderBy(asc(schema.campaigns.endDate));
-
+        const rows = await this.tradesWithDeadline("OPEN").orderBy(
+          asc(schema.campaigns.endDate),
+        );
         res.json(
           rows.map((r) => ({ ...r.trade, campaignEndDate: r.campaignEndDate })),
         );
@@ -344,17 +348,7 @@ export class ApiServer {
         const limit = Math.min(parseInt(req.query.limit as string) || 25, 200);
         const offset = Math.max(parseInt(req.query.offset as string) || 0, 0);
 
-        const rows = await getDb()
-          .select({
-            trade: schema.trades,
-            campaignEndDate: schema.campaigns.endDate,
-          })
-          .from(schema.trades)
-          .leftJoin(
-            schema.campaigns,
-            eq(schema.trades.campaignId, schema.campaigns.id),
-          )
-          .where(eq(schema.trades.status, "SETTLED"))
+        const rows = await this.tradesWithDeadline("SETTLED")
           .orderBy(desc(schema.trades.exitTs))
           .limit(limit)
           .offset(offset);

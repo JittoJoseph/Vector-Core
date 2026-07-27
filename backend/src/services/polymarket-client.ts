@@ -121,20 +121,19 @@ export class PolymarketClient {
     );
   }
 
-  async getOrderbook(tokenId: string): Promise<{ data: Orderbook; raw: unknown }> {
+  async getOrderbook(tokenId: string): Promise<Orderbook> {
     return withRetry(
       async () => {
         const response = await this.clobApi.get("/book", {
           params: { token_id: tokenId },
         });
-        const data = OrderbookSchema.parse(response.data);
-        return { data, raw: response.data };
+        return OrderbookSchema.parse(response.data);
       },
       { maxRetries: 3, retryOn: isRateLimitError },
     );
   }
 
-  static parseJsonArray(value: string | null | undefined): unknown[] {
+  private static parseJsonArray(value: string | null | undefined): unknown[] {
     if (!value) return [];
     try {
       const parsed = JSON.parse(value);

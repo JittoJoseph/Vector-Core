@@ -280,7 +280,7 @@ export function usePerformance(period: "1D" | "1W" | "1M" | "ALL" = "ALL") {
   return { performance, loading, error, refetch: fetchPerformance };
 }
 
-export function useWsConnection() {
+function useWsConnection() {
   const [isConnected, setIsConnected] = useState(false);
   const pongTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 

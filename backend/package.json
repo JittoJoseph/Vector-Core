@@ -11,8 +11,6 @@
     "db:push": "drizzle-kit push",
     "db:migrate": "drizzle-kit up",
     "db:studio": "drizzle-kit studio",
-    "test": "vitest",
-    "test:coverage": "vitest --coverage",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -33,8 +31,7 @@
   },
   "devDependencies": {
     "@types/node": "^24.13.3",
-    "tsx": "^4.23.1",
-    "vitest": "^4.1.10"
+    "tsx": "^4.23.1"
   },
   "engines": {
     "node": ">=20"
