@@ -83,6 +83,7 @@ export const trades = pgTable(
     }),
     modalBucketAtEntry: text("modal_bucket_at_entry"),
     posFromModal: integer("pos_from_modal"),
+    entryQuality: jsonb("entry_quality"),
     minNoPriceDuringPosition: decimal("min_no_price_during_position", {
       precision: 18,
       scale: 8,

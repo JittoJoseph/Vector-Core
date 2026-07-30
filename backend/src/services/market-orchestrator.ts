@@ -29,6 +29,12 @@ import type { FeeSchedule, GammaEvent, GammaMarket } from "../types/index.js";
 import type { MarketResolvedEvent } from "../interfaces/websocket-types.js";
 import { executionPolicy } from "./execution-policy.js";
 import {
+  buildEntryQuality,
+  recordQuote,
+  type EntryQuality,
+  type QuoteSample,
+} from "../utils/market-quality.js";
+import {
   bucketOffsetsFromModal,
   findModalBucket,
   isRelevantBucket,
@@ -54,6 +60,7 @@ interface TrackedBucket {
   resolved: boolean;
   acceptingOrders: boolean;
   belowBand: boolean;
+  quotes: QuoteSample[];
 }
 
 interface OpenPosition {
@@ -96,6 +103,7 @@ interface Candidate {
   execResult: ReturnType<typeof simulateLimitBuy>;
   modalBucketTitle: string;
   posFromModal: number;
+  entryQuality: EntryQuality;
 }
 
 export class MarketOrchestrator extends EventEmitter {
@@ -512,6 +520,7 @@ export class MarketOrchestrator extends EventEmitter {
       resolved: false,
       acceptingOrders: market.acceptingOrders ?? true,
       belowBand: false,
+      quotes: [],
     });
     this.tokenToBucket.set(noTokenId, market.id);
     if (market.conditionId)
@@ -655,6 +664,14 @@ export class MarketOrchestrator extends EventEmitter {
         if (expectedNetProfit < config.strategy.minExpectedNetProfit) continue;
 
         candidates.push({
+          entryQuality: buildEntryQuality(
+            state.quotes,
+            book,
+            top.bestBid ?? top.bestAsk,
+            top.bestAsk,
+            MAX_ENTRY_SPREAD,
+            Date.now(),
+          ),
           bucket,
           campaign,
           expectedNetProfit,
@@ -742,6 +759,7 @@ export class MarketOrchestrator extends EventEmitter {
       expectedNetProfit: cand.expectedNetProfit.toFixed(8),
       modalBucketAtEntry: cand.modalBucketTitle,
       posFromModal: cand.posFromModal,
+      entryQuality: cand.entryQuality,
     });
     if (!trade) return;
 
@@ -785,6 +803,12 @@ export class MarketOrchestrator extends EventEmitter {
       ask: bestAsk,
       mid: (bestBid + bestAsk) / 2,
     };
+    if (tokenId === state.noTokenId && bestBid > 0 && bestAsk > 0)
+      state.quotes = recordQuote(state.quotes, {
+        t: Date.now(),
+        bid: bestBid,
+        ask: bestAsk,
+      });
 
     const config = getConfig();
     const validAsk = !Number.isNaN(bestAsk) && bestAsk > 0 ? bestAsk : null;

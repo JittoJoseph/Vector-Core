@@ -88,6 +88,7 @@ export async function createTrade(data: {
   expectedNetProfit: string;
   modalBucketAtEntry: string;
   posFromModal: number;
+  entryQuality: unknown;
 }) {
   const result = await getDb()
     .insert(schema.trades)
