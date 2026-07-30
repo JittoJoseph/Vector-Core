@@ -1,23 +1,34 @@
 import type { Orderbook } from "../types/index.js";
 
-export const QUOTE_WINDOW_MS = 20 * 60 * 1000;
-export const MAX_QUOTE_SAMPLES = 90;
+export const WINDOW_MINUTES = 20;
 const DEPTH_BAND = 0.05;
 
-export interface QuoteSample {
-  t: number;
-  bid: number;
-  ask: number;
+interface MinuteBucket {
+  minute: number;
+  updates: number;
+  spreadSum: number;
+  spreadSqSum: number;
+  spreadMax: number;
+  tight: number;
+  bidChanges: number;
+  askChanges: number;
+}
+
+export interface QuoteStats {
+  buckets: MinuteBucket[];
+  lastBid: number;
+  lastAsk: number;
+  lastT: number;
 }
 
 export interface EntryQuality {
-  samples: number;
-  windowSec: number;
-  updatesPerMin: number;
+  activeMinutes: number;
+  updates: number;
   staleSec: number;
   spreadMean: number;
+  spreadStd: number;
   spreadMax: number;
-  spreadP90: number;
+  spreadWorstMin: number;
   spreadOkFrac: number;
   bidChanges: number;
   askChanges: number;
@@ -27,17 +38,58 @@ export interface EntryQuality {
   levels: number;
 }
 
+export function createQuoteStats(): QuoteStats {
+  return {
+    buckets: Array.from({ length: WINDOW_MINUTES }, () => ({
+      minute: -1,
+      updates: 0,
+      spreadSum: 0,
+      spreadSqSum: 0,
+      spreadMax: 0,
+      tight: 0,
+      bidChanges: 0,
+      askChanges: 0,
+    })),
+    lastBid: 0,
+    lastAsk: 0,
+    lastT: 0,
+  };
+}
+
 export function recordQuote(
-  quotes: QuoteSample[],
-  sample: QuoteSample,
-): QuoteSample[] {
-  quotes.push(sample);
-  const cutoff = sample.t - QUOTE_WINDOW_MS;
-  const from = quotes.findIndex((q) => q.t >= cutoff);
-  const trimmed = from > 0 ? quotes.slice(from) : quotes;
-  return trimmed.length > MAX_QUOTE_SAMPLES
-    ? trimmed.slice(trimmed.length - MAX_QUOTE_SAMPLES)
-    : trimmed;
+  stats: QuoteStats,
+  bid: number,
+  ask: number,
+  spreadLimit: number,
+  now: number,
+): void {
+  const minute = Math.floor(now / 60000);
+  const b = stats.buckets[minute % WINDOW_MINUTES]!;
+  if (b.minute !== minute) {
+    b.minute = minute;
+    b.updates = 0;
+    b.spreadSum = 0;
+    b.spreadSqSum = 0;
+    b.spreadMax = 0;
+    b.tight = 0;
+    b.bidChanges = 0;
+    b.askChanges = 0;
+  }
+
+  const spread = Math.round((ask - bid) * 10000) / 10000;
+  b.updates++;
+  b.spreadSum += spread;
+  b.spreadSqSum += spread * spread;
+  if (spread > b.spreadMax) b.spreadMax = spread;
+  if (spread <= spreadLimit) b.tight++;
+  if (stats.lastT > 0) {
+    if (bid !== stats.lastBid) b.bidChanges++;
+    if (ask !== stats.lastAsk) b.askChanges++;
+  }
+
+  stats.lastBid = bid;
+  stats.lastAsk = ask;
+  stats.lastT = now;
 }
 
 function depthWithin(
@@ -58,42 +110,55 @@ function depthWithin(
 }
 
 export function buildEntryQuality(
-  quotes: QuoteSample[],
+  stats: QuoteStats,
   book: Orderbook,
   bestBid: number,
   bestAsk: number,
-  spreadLimit: number,
   now: number,
 ): EntryQuality {
-  const win = quotes.filter((q) => q.t >= now - QUOTE_WINDOW_MS);
-  const spreads = win.map((q) => q.ask - q.bid).filter(Number.isFinite);
-  const n = spreads.length;
-  const sorted = [...spreads].sort((a, b) => a - b);
-  const mean = n ? spreads.reduce((s, x) => s + x, 0) / n : 0;
-
+  const currentMinute = Math.floor(now / 60000);
+  let activeMinutes = 0;
+  let updates = 0;
+  let sum = 0;
+  let sqSum = 0;
+  let max = 0;
+  let tight = 0;
   let bidChanges = 0;
   let askChanges = 0;
-  for (let i = 1; i < win.length; i++) {
-    if (win[i]!.bid !== win[i - 1]!.bid) bidChanges++;
-    if (win[i]!.ask !== win[i - 1]!.ask) askChanges++;
+  let worstMin = 0;
+
+  for (const b of stats.buckets) {
+    if (b.minute < 0 || currentMinute - b.minute >= WINDOW_MINUTES) continue;
+    if (b.updates === 0) continue;
+    activeMinutes++;
+    updates += b.updates;
+    sum += b.spreadSum;
+    sqSum += b.spreadSqSum;
+    tight += b.tight;
+    bidChanges += b.bidChanges;
+    askChanges += b.askChanges;
+    if (b.spreadMax > max) max = b.spreadMax;
+    const minuteMean = b.spreadSum / b.updates;
+    if (minuteMean > worstMin) worstMin = minuteMean;
   }
 
-  const spanMs = win.length > 1 ? win[win.length - 1]!.t - win[0]!.t : 0;
+  const mean = updates ? sum / updates : 0;
+  const variance = updates ? Math.max(0, sqSum / updates - mean * mean) : 0;
   const bidDepth = depthWithin(book.bids, bestBid, "bid");
   const askDepth = depthWithin(book.asks, bestAsk, "ask");
-
   const r4 = (x: number) => Math.round(x * 10000) / 10000;
+
   return {
-    samples: n,
-    windowSec: Math.round(spanMs / 1000),
-    updatesPerMin: spanMs > 0 ? r4((win.length / spanMs) * 60000) : 0,
-    staleSec: win.length ? Math.round((now - win[win.length - 1]!.t) / 1000) : -1,
+    activeMinutes,
+    updates,
+    staleSec: stats.lastT
+      ? Math.max(0, Math.round((now - stats.lastT) / 1000))
+      : -1,
     spreadMean: r4(mean),
-    spreadMax: n ? r4(sorted[n - 1]!) : 0,
-    spreadP90: n ? r4(sorted[Math.min(n - 1, Math.floor(n * 0.9))]!) : 0,
-    spreadOkFrac: n
-      ? r4(spreads.filter((s) => s <= spreadLimit).length / n)
-      : 0,
+    spreadStd: r4(Math.sqrt(variance)),
+    spreadMax: r4(max),
+    spreadWorstMin: r4(worstMin),
+    spreadOkFrac: updates ? r4(tight / updates) : 0,
     bidChanges,
     askChanges,
     bidDepth,

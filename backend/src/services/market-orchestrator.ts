@@ -30,9 +30,10 @@ import type { MarketResolvedEvent } from "../interfaces/websocket-types.js";
 import { executionPolicy } from "./execution-policy.js";
 import {
   buildEntryQuality,
+  createQuoteStats,
   recordQuote,
   type EntryQuality,
-  type QuoteSample,
+  type QuoteStats,
 } from "../utils/market-quality.js";
 import {
   bucketOffsetsFromModal,
@@ -60,7 +61,7 @@ interface TrackedBucket {
   resolved: boolean;
   acceptingOrders: boolean;
   belowBand: boolean;
-  quotes: QuoteSample[];
+  quotes: QuoteStats;
 }
 
 interface OpenPosition {
@@ -520,7 +521,7 @@ export class MarketOrchestrator extends EventEmitter {
       resolved: false,
       acceptingOrders: market.acceptingOrders ?? true,
       belowBand: false,
-      quotes: [],
+      quotes: createQuoteStats(),
     });
     this.tokenToBucket.set(noTokenId, market.id);
     if (market.conditionId)
@@ -669,7 +670,6 @@ export class MarketOrchestrator extends EventEmitter {
             book,
             top.bestBid ?? top.bestAsk,
             top.bestAsk,
-            MAX_ENTRY_SPREAD,
             Date.now(),
           ),
           bucket,
@@ -804,11 +804,7 @@ export class MarketOrchestrator extends EventEmitter {
       mid: (bestBid + bestAsk) / 2,
     };
     if (tokenId === state.noTokenId && bestBid > 0 && bestAsk > 0)
-      state.quotes = recordQuote(state.quotes, {
-        t: Date.now(),
-        bid: bestBid,
-        ask: bestAsk,
-      });
+      recordQuote(state.quotes, bestBid, bestAsk, MAX_ENTRY_SPREAD, Date.now());
 
     const config = getConfig();
     const validAsk = !Number.isNaN(bestAsk) && bestAsk > 0 ? bestAsk : null;

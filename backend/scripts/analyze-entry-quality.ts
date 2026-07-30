@@ -4,13 +4,13 @@ import dotenv from "dotenv";
 dotenv.config();
 
 const FEATURES = [
-  "samples",
-  "windowSec",
-  "updatesPerMin",
+  "activeMinutes",
+  "updates",
   "staleSec",
   "spreadMean",
+  "spreadStd",
   "spreadMax",
-  "spreadP90",
+  "spreadWorstMin",
   "spreadOkFrac",
   "bidChanges",
   "askChanges",
