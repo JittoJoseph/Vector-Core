@@ -50,7 +50,7 @@ const MAX_ENTRY_SPREAD = 0.02;
 const MAX_ENTRY_ASK_DEPTH = 100;
 const MIN_ENTRY_IMBALANCE = -0.2;
 const TRADE_BUDGET = 5;
-const STOP_CONFIRM_MS = 10_000;
+const STOP_CONFIRM_MS = 5_000;
 export const ENTRY_WINDOW_HOURS = 12;
 
 interface TrackedBucket {
@@ -834,9 +834,8 @@ export class MarketOrchestrator extends EventEmitter {
 
       if (!config.strategy.stopLossEnabled) continue;
       const stopPrice =
-        Math.round(
-          (pos.entryPrice - config.strategy.stopLossDelta) * 10000,
-        ) / 10000;
+        Math.round((pos.entryPrice - config.strategy.stopLossDelta) * 10000) /
+        10000;
       if (validAsk > stopPrice) {
         pos.stopBreachedAt = null;
         continue;
