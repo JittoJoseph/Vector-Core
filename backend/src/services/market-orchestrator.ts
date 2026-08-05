@@ -47,7 +47,10 @@ import {
 const logger = createModuleLogger("market-orchestrator");
 
 const MAX_ENTRY_SPREAD = 0.02;
+const MAX_ENTRY_ASK_DEPTH = 100;
+const MIN_ENTRY_IMBALANCE = -0.2;
 const TRADE_BUDGET = 5;
+const STOP_CONFIRM_MS = 10_000;
 export const ENTRY_WINDOW_HOURS = 12;
 
 interface TrackedBucket {
@@ -73,7 +76,7 @@ interface OpenPosition {
   fees: number;
   actualCost: number;
   minNoPriceDuringPosition: number | null;
-  stopLossConditionFirstSeen?: number | null;
+  stopBreachedAt?: number | null;
   isExiting?: boolean;
 }
 
@@ -652,6 +655,19 @@ export class MarketOrchestrator extends EventEmitter {
           continue;
         if (top.spread == null || top.spread > MAX_ENTRY_SPREAD) continue;
 
+        const entryQuality = buildEntryQuality(
+          state.quotes,
+          book,
+          top.bestBid ?? top.bestAsk,
+          top.bestAsk,
+          Date.now(),
+        );
+        if (
+          entryQuality.askDepth > MAX_ENTRY_ASK_DEPTH ||
+          entryQuality.imbalance < MIN_ENTRY_IMBALANCE
+        )
+          continue;
+
         const execResult = simulateLimitBuy(
           book,
           TRADE_BUDGET,
@@ -665,13 +681,7 @@ export class MarketOrchestrator extends EventEmitter {
         if (expectedNetProfit < config.strategy.minExpectedNetProfit) continue;
 
         candidates.push({
-          entryQuality: buildEntryQuality(
-            state.quotes,
-            book,
-            top.bestBid ?? top.bestAsk,
-            top.bestAsk,
-            Date.now(),
-          ),
+          entryQuality,
           bucket,
           campaign,
           expectedNetProfit,
@@ -798,13 +808,14 @@ export class MarketOrchestrator extends EventEmitter {
     if (!bucketId) return;
     const state = this.trackedBuckets.get(bucketId);
     if (!state || state.resolved) return;
+    const now = Date.now();
     state.lastPrices[tokenId] = {
       bid: bestBid,
       ask: bestAsk,
       mid: (bestBid + bestAsk) / 2,
     };
     if (tokenId === state.noTokenId && bestBid > 0 && bestAsk > 0)
-      recordQuote(state.quotes, bestBid, bestAsk, MAX_ENTRY_SPREAD, Date.now());
+      recordQuote(state.quotes, bestBid, bestAsk, MAX_ENTRY_SPREAD, now);
 
     const config = getConfig();
     const validAsk = !Number.isNaN(bestAsk) && bestAsk > 0 ? bestAsk : null;
@@ -822,22 +833,22 @@ export class MarketOrchestrator extends EventEmitter {
       }
 
       if (!config.strategy.stopLossEnabled) continue;
-      const stopLossPrice = pos.entryPrice - config.strategy.stopLossDelta;
-      if (validAsk <= stopLossPrice) {
-        const now = Date.now();
-        if (!pos.stopLossConditionFirstSeen) {
-          pos.stopLossConditionFirstSeen = now;
-        } else if (
-          now - pos.stopLossConditionFirstSeen >= 10_000 &&
-          executionPolicy.canExecuteStopLoss()
-        ) {
-          this.executeStopLoss(pos, state.feeSchedule).catch((e) =>
-            logger.error({ err: e }, "Failed to execute stop loss"),
-          );
-        }
-      } else {
-        pos.stopLossConditionFirstSeen = null;
+      const stopPrice =
+        Math.round(
+          (pos.entryPrice - config.strategy.stopLossDelta) * 10000,
+        ) / 10000;
+      if (validAsk > stopPrice) {
+        pos.stopBreachedAt = null;
+        continue;
       }
+      pos.stopBreachedAt ??= now;
+      if (
+        now - pos.stopBreachedAt >= STOP_CONFIRM_MS &&
+        executionPolicy.canExecuteStopLoss()
+      )
+        this.executeStopLoss(pos, state.feeSchedule).catch((e) =>
+          logger.error({ err: e }, "Failed to execute stop loss"),
+        );
     }
   }
 

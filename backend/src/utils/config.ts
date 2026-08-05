@@ -51,7 +51,7 @@ export function loadConfig(): Config {
       riskAutoResumeEnabled: envBool("RISK_AUTO_RESUME_ENABLED", false),
       riskAutoResumeCooldownMs: envNum("RISK_AUTO_RESUME_COOLDOWN_MS", 300_000),
       stopLossEnabled: envBool("STOP_LOSS_ENABLED", true),
-      stopLossDelta: envNum("STOP_LOSS_DELTA", 0.05),
+      stopLossDelta: envNum("STOP_LOSS_DELTA", 0.1),
     },
     admin: {
       password: env("ADMIN_PASSWORD", isTest ? "test-admin" : undefined),
