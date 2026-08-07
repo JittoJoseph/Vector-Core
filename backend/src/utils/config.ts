@@ -42,8 +42,8 @@ export function loadConfig(): Config {
     },
     strategy: {
       scanIntervalMs: envNum("SCAN_INTERVAL_MS", 60_000),
-      minNoEntryPrice: envNum("MIN_NO_ENTRY_PRICE", 0.8),
-      maxNoEntryPrice: envNum("MAX_NO_ENTRY_PRICE", 0.85),
+      minNoEntryPrice: envNum("MIN_NO_ENTRY_PRICE", 0.7),
+      maxNoEntryPrice: envNum("MAX_NO_ENTRY_PRICE", 0.8),
 
       minExpectedNetProfit: envNum("MIN_EXPECTED_NET_PROFIT_USDC", 0.1),
       maxSimultaneousPositions: envNum("MAX_SIMULTANEOUS_POSITIONS", 5),
