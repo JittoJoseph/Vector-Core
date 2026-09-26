@@ -10,33 +10,42 @@ import { createModuleLogger } from "../utils/logger.js";
 import { getConfig } from "../utils/config.js";
 import { getDb } from "../db/client.js";
 import * as schema from "../db/schema.js";
-import {
-  ENTRY_WINDOW_HOURS,
-  getMarketOrchestrator,
-} from "./market-orchestrator.js";
+import { getMarketOrchestrator, STRATEGY } from "./market-orchestrator.js";
 import {
   calculatePerformance,
   type TimePeriod,
 } from "./performance-calculator.js";
-import {
-  parseBucketMinMax,
-  findModalBucket,
-  isRelevantBucket,
-} from "../utils/weather-logic.js";
 
 const logger = createModuleLogger("api-server");
+const BROADCAST_MS = 3000;
+
+type Handler = (req: Request, res: Response) => Promise<unknown> | unknown;
+
+const route =
+  (label: string, handler: Handler) => async (req: Request, res: Response) => {
+    try {
+      const body = await handler(req, res);
+      if (!res.headersSent) res.json(body);
+    } catch (error) {
+      logger.error({ error }, `${label} failed`);
+      if (!res.headersSent) res.status(500).json({ error: `${label} failed` });
+    }
+  };
+
+const intParam = (value: unknown, fallback: number, max: number) =>
+  Math.min(Math.max(parseInt(String(value)) || fallback, 0), max);
 
 export class ApiServer {
-  private app: express.Application;
+  private app = express();
   private server: Server | null = null;
   private wss: WebSocketServer | null = null;
-  private broadcastInterval: ReturnType<typeof setInterval> | null = null;
+  private broadcastTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor() {
-    this.app = express();
+    this.app.disable("x-powered-by");
     this.app.use(express.json());
-    this.app.use(this.corsMiddleware);
-    this.setupRoutes();
+    this.app.use(this.cors);
+    this.routes();
   }
 
   async start(): Promise<void> {
@@ -45,11 +54,8 @@ export class ApiServer {
     this.wss = new WebSocketServer({ server: this.server, path: "/ws" });
     this.wss.on("connection", (ws) => {
       ws.on("message", (raw) => {
-        try {
-          const msg = JSON.parse(raw.toString()) as { type?: string };
-          if (msg.type === "ping")
-            ws.send(JSON.stringify({ type: "pong", ts: Date.now() }));
-        } catch {}
+        if (raw.toString().includes('"ping"'))
+          ws.send(JSON.stringify({ type: "pong", ts: Date.now() }));
       });
     });
 
@@ -60,51 +66,68 @@ export class ApiServer {
     orchestrator.on("tradeResolved", (data) =>
       this.broadcast({ type: "tradeResolved", data }),
     );
-    this.broadcastInterval = setInterval(() => {
-      this.broadcast({
-        type: "systemState",
-        data: { ...this.buildSystemState(), timestamp: Date.now() },
-      });
-    }, 2000);
+    this.broadcastTimer = setInterval(() => {
+      if (this.wss?.clients.size)
+        this.broadcast({
+          type: "systemState",
+          data: { ...this.systemState(), timestamp: Date.now() },
+        });
+    }, BROADCAST_MS);
 
-    return new Promise((resolve) => {
-      this.server!.listen(config.server.port, config.server.host, () => {
-        logger.info(
-          { host: config.server.host, port: config.server.port },
-          "API server started",
-        );
-        resolve();
-      });
-    });
+    await new Promise<void>((resolve) =>
+      this.server!.listen(config.server.port, config.server.host, resolve),
+    );
+    logger.info(
+      { host: config.server.host, port: config.server.port },
+      "API server started",
+    );
   }
 
   stop(): void {
-    if (this.broadcastInterval) clearInterval(this.broadcastInterval);
-    this.broadcastInterval = null;
+    if (this.broadcastTimer) clearInterval(this.broadcastTimer);
     this.wss?.close();
-    this.wss = null;
     this.server?.close();
-    this.server = null;
   }
 
-  private buildSystemState() {
+  private systemState() {
     const orchestrator = getMarketOrchestrator();
     const config = getConfig();
     return {
       orchestrator: orchestrator.getStats(),
       config: {
-        minNoEntryPrice: config.strategy.minNoEntryPrice,
-        maxNoEntryPrice: config.strategy.maxNoEntryPrice,
-        minExpectedNetProfit: config.strategy.minExpectedNetProfit,
         startingCapital: config.portfolio.startingCapital,
-        maxPositions: config.strategy.maxSimultaneousPositions,
-        entryWindowHours: ENTRY_WINDOW_HOURS,
-        stopLossEnabled: config.strategy.stopLossEnabled,
+        tradeBudget: STRATEGY.tradeBudget,
+        minEdge: STRATEGY.edge,
+        maxSpread: STRATEGY.maxSpread,
+        minPrice: STRATEGY.minPrice,
+        maxPrice: STRATEGY.maxPrice,
         stopLossDelta: config.strategy.stopLossDelta,
       },
       portfolio: orchestrator.getPortfolioSnapshot(),
       positionsPnl: orchestrator.getOpenPositionsPnl(),
     };
+  }
+
+  private cors(req: Request, res: Response, next: NextFunction): void {
+    res.header("Access-Control-Allow-Origin", "*");
+    res.header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
+    res.header("Access-Control-Allow-Headers", "Content-Type, Authorization");
+    if (req.method === "OPTIONS") {
+      res.sendStatus(204);
+      return;
+    }
+    next();
+  }
+
+  private admin(req: Request, res: Response, next: NextFunction): void {
+    if (
+      req.headers.authorization?.replace("Bearer ", "") !==
+      getConfig().admin.password
+    ) {
+      res.status(401).json({ error: "Unauthorized" });
+      return;
+    }
+    next();
   }
 
   private tradesWithDeadline(status: string) {
@@ -121,305 +144,148 @@ export class ApiServer {
       .where(eq(schema.trades.status, status));
   }
 
-  private corsMiddleware(
-    req: Request,
-    res: Response,
-    next: NextFunction,
-  ): void {
-    res.header("Access-Control-Allow-Origin", "*");
-    res.header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
-    res.header("Access-Control-Allow-Headers", "Content-Type, Authorization");
-    if (req.method === "OPTIONS") {
-      res.sendStatus(204);
-      return;
-    }
-    next();
-  }
+  private routes(): void {
+    const app = this.app;
+    const orchestrator = getMarketOrchestrator();
+    const admin = this.admin.bind(this);
 
-  private adminAuth(req: Request, res: Response, next: NextFunction): void {
-    const password = req.headers.authorization?.replace("Bearer ", "");
-    if (!password || password !== getConfig().admin.password) {
-      res.status(401).json({ error: "Unauthorized" });
-      return;
-    }
-    next();
-  }
+    app.get("/ping", (_req, res) => res.json("pong"));
+    app.get(
+      "/api/stats",
+      route("Stats", () => this.systemState()),
+    );
 
-  private setupRoutes(): void {
-    this.app.get("/ping", (_req, res) => res.json("pong"));
-    this.app.get("/health", (_req, res) => {
-      res.json({
-        status: "ok",
-        uptime: process.uptime(),
-        ...getMarketOrchestrator().getStats(),
-      });
-    });
-
-    this.app.get(["/api/system/stats", "/api/stats"], (_req, res) => {
-      res.json(this.buildSystemState());
-    });
-
-    this.app.get("/api/campaigns", async (req, res) => {
-      try {
+    app.get(
+      "/api/campaigns",
+      route("Campaigns", async (req) => {
+        if (req.query.status !== "history")
+          return orchestrator.getActiveCampaigns();
         const db = getDb();
-        const orchestrator = getMarketOrchestrator();
-        const limit = Math.min(parseInt(req.query.limit as string) || 50, 200);
-        const status = (req.query.status as string) || "active";
-
-        if (status === "history") {
-          const campaigns = await db
-            .select()
-            .from(schema.campaigns)
-            .where(eq(schema.campaigns.closed, true))
-            .orderBy(
-              desc(schema.campaigns.closedTime),
-              desc(schema.campaigns.updatedAt),
-            )
-            .limit(limit);
-
-          if (campaigns.length === 0) {
-            res.json([]);
-            return;
-          }
-
-          const statsRows = await db
-            .select({
-              campaignId: schema.trades.campaignId,
-              tradeCount: sql<number>`count(*)`,
-              realizedPnl: sql<string>`COALESCE(SUM(${schema.trades.realizedPnl}), 0)`,
-            })
-            .from(schema.trades)
-            .where(
-              inArray(
-                schema.trades.campaignId,
-                campaigns.map((c) => c.id),
-              ),
-            )
-            .groupBy(schema.trades.campaignId);
-          const statsMap = new Map(statsRows.map((r) => [r.campaignId, r]));
-
-          res.json(
-            campaigns.map((c) => {
-              const stats = statsMap.get(c.id);
-              return {
-                ...c,
-                historicalTrades: {
-                  length: Number(stats?.tradeCount ?? 0),
-                  totalPnl: parseFloat(stats?.realizedPnl ?? "0"),
-                },
-              };
-            }),
-          );
-        } else {
-          const campaigns = await db
-            .select()
-            .from(schema.campaigns)
-            .where(eq(schema.campaigns.closed, false))
-            .orderBy(
-              asc(schema.campaigns.endDate),
-              desc(schema.campaigns.updatedAt),
-            )
-            .limit(limit);
-
-          res.json(
-            campaigns.map((c) => ({
-              ...c,
-              ...orchestrator.getActiveCampaignMetrics(c.id),
-            })),
-          );
-        }
-      } catch (error) {
-        logger.error({ error }, "Campaigns list error");
-        res.status(500).json({ error: "Failed to get campaigns" });
-      }
-    });
-
-    this.app.get("/api/campaigns/:id", async (req, res) => {
-      try {
-        const db = getDb();
-        const config = getConfig();
-        const orchestrator = getMarketOrchestrator();
-        const campaignId = req.params.id;
-
-        const [campaign] = await db
+        const campaigns = await db
           .select()
           .from(schema.campaigns)
-          .where(eq(schema.campaigns.id, campaignId));
-        if (!campaign) {
-          res.status(404).json({ error: "Campaign not found" });
-          return;
-        }
+          .where(eq(schema.campaigns.closed, true))
+          .orderBy(desc(schema.campaigns.endDate))
+          .limit(intParam(req.query.limit, 50, 200));
+        if (!campaigns.length) return [];
+        const stats = await db
+          .select({
+            campaignId: schema.trades.campaignId,
+            count: sql<number>`count(*)`,
+            pnl: sql<string>`COALESCE(SUM(${schema.trades.realizedPnl}), 0)`,
+          })
+          .from(schema.trades)
+          .where(
+            inArray(
+              schema.trades.campaignId,
+              campaigns.map((c) => c.id),
+            ),
+          )
+          .groupBy(schema.trades.campaignId);
+        const byId = new Map(stats.map((s) => [s.campaignId, s]));
+        return campaigns.map((c) => ({
+          ...c,
+          tradeCount: Number(byId.get(c.id)?.count ?? 0),
+          totalPnl: parseFloat(byId.get(c.id)?.pnl ?? "0"),
+        }));
+      }),
+    );
 
-        const buckets = !campaign.closed
-          ? await db
-              .select()
-              .from(schema.buckets)
-              .where(eq(schema.buckets.campaignId, campaignId))
-          : [];
+    app.get(
+      "/api/campaigns/:id",
+      route("Campaign detail", async (req, res) => {
+        const id = String(req.params.id);
+        const live = await orchestrator.getCampaignDetail(id);
+        if (live) return live;
+        const [campaign] = await getDb()
+          .select()
+          .from(schema.campaigns)
+          .where(eq(schema.campaigns.id, id));
+        if (!campaign)
+          return res.status(404).json({ error: "Campaign not found" });
+        const trades = await getDb()
+          .select()
+          .from(schema.trades)
+          .where(eq(schema.trades.campaignId, id));
+        return { ...campaign, trades };
+      }),
+    );
 
-        const historicalTrades = campaign.closed
-          ? await db
-              .select()
-              .from(schema.trades)
-              .where(eq(schema.trades.campaignId, campaignId))
-          : [];
+    app.get(
+      "/api/positions",
+      route("Positions", async () =>
+        (
+          await this.tradesWithDeadline("OPEN").orderBy(
+            asc(schema.campaigns.endDate),
+          )
+        ).map((r) => ({
+          ...r.trade,
+          campaignEndDate: r.campaignEndDate,
+        })),
+      ),
+    );
 
-        const modalBucket = findModalBucket(buckets);
-        const openPositions = orchestrator.getOpenPositions();
+    app.get(
+      "/api/trades/history",
+      route("Trade history", async (req) =>
+        (
+          await this.tradesWithDeadline("SETTLED")
+            .orderBy(desc(schema.trades.exitTs))
+            .limit(intParam(req.query.limit, 25, 200))
+            .offset(intParam(req.query.offset, 0, 1_000_000))
+        ).map((r) => ({ ...r.trade, campaignEndDate: r.campaignEndDate })),
+      ),
+    );
 
-        const relevantBuckets = [];
-        let candidateCount = 0;
-        let positionCount = 0;
-        let trackedCount = 0;
+    app.get(
+      "/api/performance",
+      route("Performance", (req) =>
+        calculatePerformance((req.query.period as TimePeriod) || "ALL"),
+      ),
+    );
 
-        if (modalBucket) {
-          for (const b of buckets) {
-            const noPrice = parseFloat(b.noPrice ?? "1");
-            const isModal = b.id === modalBucket.id;
-            const bucketPositions = openPositions.filter(
-              (p) => p.bucketId === b.id,
-            );
-            const hasOpenPosition = bucketPositions.length > 0;
-
-            if (!isModal) candidateCount++;
-            if (hasOpenPosition) positionCount++;
-
-            if (
-              isRelevantBucket(
-                isModal,
-                noPrice,
-                config.strategy.maxNoEntryPrice,
-                hasOpenPosition,
-              )
-            ) {
-              trackedCount++;
-              relevantBuckets.push({
-                id: b.id,
-                slug: b.slug,
-                groupItemTitle: b.groupItemTitle,
-                noPrice: b.noPrice,
-                hasOpenPosition,
-                positions: bucketPositions.map((p) => ({
-                  id: p.tradeId,
-                  entryPrice: p.entryPrice,
-                  entryShares: p.entryShares,
-                })),
-              });
-            }
-          }
-          relevantBuckets.sort(
-            (a, b) =>
-              parseBucketMinMax(a.groupItemTitle)[0] -
-              parseBucketMinMax(b.groupItemTitle)[0],
-          );
-        }
-
-        res.json({
-          ...campaign,
-          modalBucketTitle: modalBucket?.groupItemTitle ?? "N/A",
-          candidateCount,
-          trackedCount,
-          positionCount,
-          relevantBuckets,
-          historicalTrades,
-        });
-      } catch (error) {
-        logger.error({ error }, "Campaign detail error");
-        res.status(500).json({ error: "Failed to get campaign details" });
-      }
-    });
-
-    this.app.get("/api/positions", async (_req, res) => {
-      try {
-        const rows = await this.tradesWithDeadline("OPEN").orderBy(
-          asc(schema.campaigns.endDate),
-        );
-        res.json(
-          rows.map((r) => ({ ...r.trade, campaignEndDate: r.campaignEndDate })),
-        );
-      } catch (error) {
-        logger.error({ error }, "Positions fetch error");
-        res.status(500).json({ error: "Failed to fetch positions" });
-      }
-    });
-
-    this.app.get("/api/trades/history", async (req, res) => {
-      try {
-        const limit = Math.min(parseInt(req.query.limit as string) || 25, 200);
-        const offset = Math.max(parseInt(req.query.offset as string) || 0, 0);
-
-        const rows = await this.tradesWithDeadline("SETTLED")
-          .orderBy(desc(schema.trades.exitTs))
-          .limit(limit)
-          .offset(offset);
-
-        res.json(
-          rows.map((r) => ({ ...r.trade, campaignEndDate: r.campaignEndDate })),
-        );
-      } catch (error) {
-        logger.error({ error }, "Trades error");
-        res.status(500).json({ error: "Failed to get trades" });
-      }
-    });
-
-    this.app.get("/api/performance", async (req, res) => {
-      try {
-        const period = (req.query.period as TimePeriod) || "ALL";
-        res.json(await calculatePerformance(period));
-      } catch (error) {
-        logger.error({ error }, "Performance error");
-        res.status(500).json({ error: "Failed to calculate performance" });
-      }
-    });
-
-    this.app.get("/api/audit", async (req, res) => {
-      try {
-        const limit = Math.min(parseInt(req.query.limit as string) || 50, 200);
-        const rows = await getDb()
+    app.get(
+      "/api/audit",
+      route("Audit", (req) =>
+        getDb()
           .select()
           .from(schema.auditLogs)
           .orderBy(desc(schema.auditLogs.createdAt))
-          .limit(limit);
-        res.json(rows);
-      } catch {
-        res.status(500).json({ error: "Failed to get audit logs" });
-      }
-    });
+          .limit(intParam(req.query.limit, 50, 200)),
+      ),
+    );
 
-    this.app.post(
+    app.post(
       "/api/admin/pause",
-      (req, res, next) => this.adminAuth(req, res, next),
-      (_req, res) => {
-        getMarketOrchestrator().pause();
-        res.json({ success: true, paused: true });
-      },
+      admin,
+      route("Pause", () => {
+        orchestrator.pause();
+        return { success: true, paused: true };
+      }),
     );
-
-    this.app.post(
+    app.post(
       "/api/admin/resume",
-      (req, res, next) => this.adminAuth(req, res, next),
-      async (_req, res) => {
-        await getMarketOrchestrator().resume();
-        res.json({ success: true, paused: false });
-      },
+      admin,
+      route("Resume", () => {
+        orchestrator.resume();
+        return { success: true, paused: false };
+      }),
     );
-
-    this.app.delete(
+    app.delete(
       "/api/admin/wipe",
-      (req, res, next) => this.adminAuth(req, res, next),
-      async (_req, res) => {
-        await getMarketOrchestrator().wipe();
-        res.json({ success: true });
-      },
+      admin,
+      route("Wipe", async () => {
+        await orchestrator.wipe();
+        return { success: true };
+      }),
     );
   }
 
   private broadcast(message: unknown): void {
-    if (!this.wss) return;
+    if (!this.wss?.clients.size) return;
     const data = JSON.stringify(message);
-    for (const client of this.wss.clients) {
+    for (const client of this.wss.clients)
       if (client.readyState === WebSocket.OPEN) client.send(data);
-    }
   }
 }
 

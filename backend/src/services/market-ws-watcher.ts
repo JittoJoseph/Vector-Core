@@ -2,12 +2,13 @@ import { EventEmitter } from "events";
 import WebSocket from "ws";
 import { createModuleLogger } from "../utils/logger.js";
 import { POLY_URLS } from "../types/index.js";
-import type {
-  ClobWsMessage,
-  PriceUpdateEvent,
-  BestBidAskEvent,
-  MarketResolvedEvent,
-} from "../interfaces/websocket-types.js";
+import type { ClobWsMessage } from "../interfaces/websocket-types.js";
+
+export interface QuoteEvent {
+  tokenId: string;
+  bid: number;
+  ask: number;
+}
 
 const logger = createModuleLogger("market-ws-watcher");
 
@@ -35,11 +36,6 @@ export class MarketWebSocketWatcher extends EventEmitter {
     this.running = false;
     this.closeSocket();
     logger.info("Market WebSocket watcher stopped");
-  }
-
-  clear(): void {
-    this.subscribedTokens.clear();
-    this.closeSocket();
   }
 
   subscribe(tokenIds: string[]): void {
@@ -76,10 +72,6 @@ export class MarketWebSocketWatcher extends EventEmitter {
 
   isConnected(): boolean {
     return this.ws?.readyState === WebSocket.OPEN;
-  }
-
-  getSubscribedTokens(): Set<string> {
-    return new Set(this.subscribedTokens);
   }
 
   getStats() {
@@ -132,17 +124,13 @@ export class MarketWebSocketWatcher extends EventEmitter {
         }
         if (text.includes('"event_type":"book"')) return;
         this.handleMessage(JSON.parse(text) as ClobWsMessage);
-      } catch {
-      }
+      } catch {}
     });
 
     ws.on("close", (code: number, reason: Buffer) => {
       if (this.ws !== ws) return;
       this.discardSocket();
-      logger.warn(
-        { code, reason: reason.toString() },
-        "CLOB WebSocket closed",
-      );
+      logger.warn({ code, reason: reason.toString() }, "CLOB WebSocket closed");
       this.scheduleReconnect();
     });
 
@@ -171,7 +159,8 @@ export class MarketWebSocketWatcher extends EventEmitter {
     this.discardSocket();
     if (
       ws &&
-      (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)
+      (ws.readyState === WebSocket.OPEN ||
+        ws.readyState === WebSocket.CONNECTING)
     ) {
       ws.close();
     }
@@ -200,52 +189,19 @@ export class MarketWebSocketWatcher extends EventEmitter {
   }
 
   private handleMessage(msg: ClobWsMessage): void {
-    const ts =
-      typeof msg.timestamp === "string"
-        ? parseInt(msg.timestamp, 10)
-        : (msg.timestamp ?? Date.now());
-
-    switch (msg.event_type) {
-      case "price_change":
-        for (const pc of msg.price_changes ?? []) {
-          this.emit("priceUpdate", {
-            tokenId: pc.asset_id,
-            bestBid: pc.best_bid,
-            bestAsk: pc.best_ask,
-            midpoint: (parseFloat(pc.best_bid) + parseFloat(pc.best_ask)) / 2,
-            timestamp: ts,
-          } satisfies PriceUpdateEvent);
-        }
-        break;
-
-      case "best_bid_ask":
-        if (msg.asset_id && msg.best_bid && msg.best_ask) {
-          this.emit("bestBidAskUpdate", {
-            tokenId: msg.asset_id,
-            bestBid: msg.best_bid,
-            bestAsk: msg.best_ask,
-            spread: msg.spread ?? "0",
-            timestamp: ts,
-          } satisfies BestBidAskEvent);
-        }
-        break;
-
-      case "market_resolved":
-        if (msg.market && msg.winning_asset_id && msg.winning_outcome) {
-          logger.info(
-            { market: msg.market, winner: msg.winning_outcome },
-            "Market resolved via WebSocket",
-          );
-          this.emit("marketResolved", {
-            marketId: msg.id ?? "",
-            conditionId: msg.market,
-            winningAssetId: msg.winning_asset_id,
-            winningOutcome: msg.winning_outcome,
-            timestamp: ts,
-          } satisfies MarketResolvedEvent);
-        }
-        break;
+    if (msg.event_type === "price_change") {
+      for (const pc of msg.price_changes ?? [])
+        this.emitQuote(pc.asset_id, pc.best_bid, pc.best_ask);
+    } else if (msg.event_type === "best_bid_ask" && msg.asset_id) {
+      this.emitQuote(msg.asset_id, msg.best_bid, msg.best_ask);
     }
+  }
+
+  private emitQuote(tokenId: string, bid?: string, ask?: string): void {
+    const b = parseFloat(bid ?? "");
+    const a = parseFloat(ask ?? "");
+    if (Number.isFinite(b) && Number.isFinite(a) && a > 0)
+      this.emit("quote", { tokenId, bid: b, ask: a } satisfies QuoteEvent);
   }
 }
 

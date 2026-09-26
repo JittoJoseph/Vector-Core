@@ -1,6 +1,6 @@
 import Decimal from "decimal.js";
 import { createModuleLogger } from "../utils/logger.js";
-import { type FeeSchedule, type Orderbook } from "../types/index.js";
+import type { Orderbook } from "../types/index.js";
 
 const logger = createModuleLogger("execution-simulator");
 
@@ -13,11 +13,7 @@ export interface ExecutionResult {
   belowMinimumOrderSize: boolean;
 }
 
-export function calculateFeePerShare(
-  price: number,
-  feeSchedule?: FeeSchedule | null,
-): number {
-  const feeRate = feeSchedule?.rate ?? 0;
+export function calculateFeePerShare(price: number, feeRate: number): number {
   if (!Number.isFinite(feeRate) || feeRate <= 0) return 0;
   return Math.round(feeRate * price * (1 - price) * 10000) / 10000;
 }
@@ -58,8 +54,7 @@ function settle(
   const minOrderSize = parseFloat(orderbook.min_order_size ?? "5") || 5;
   const averagePrice = shares.gt(0) ? gross.div(shares).toNumber() : 0;
 
-  if (totalShares > 0)
-    logger.debug({ averagePrice, totalShares, fees }, label);
+  if (totalShares > 0) logger.debug({ averagePrice, totalShares, fees }, label);
 
   return {
     averagePrice,
@@ -75,7 +70,7 @@ export function simulateLimitBuy(
   orderbook: Orderbook,
   usdAmount: number,
   limitPrice: number,
-  feeSchedule?: FeeSchedule | null,
+  feeRate: number,
 ): ExecutionResult {
   const asks = [...orderbook.asks].sort(
     (a, b) => parseFloat(a.price) - parseFloat(b.price),
@@ -92,7 +87,7 @@ export function simulateLimitBuy(
     if (!Number.isFinite(price) || !Number.isFinite(size)) continue;
     if (price > limitPrice) break;
 
-    const feePerShare = calculateFeePerShare(price, feeSchedule);
+    const feePerShare = calculateFeePerShare(price, feeRate);
     const costPerShare = new Decimal(price).plus(feePerShare);
     const fill = Math.min(remaining.div(costPerShare).toNumber(), size);
     if (fill <= 0) continue;
@@ -120,7 +115,7 @@ export function simulateLimitBuy(
 export function simulateTakerSell(
   orderbook: Orderbook,
   sharesAmount: number,
-  feeSchedule?: FeeSchedule | null,
+  feeRate: number,
 ): ExecutionResult {
   const bids = [...orderbook.bids].sort(
     (a, b) => parseFloat(b.price) - parseFloat(a.price),
@@ -139,7 +134,7 @@ export function simulateTakerSell(
     const fill = Math.min(remaining.toNumber(), size);
     if (fill <= 0) continue;
 
-    const feePerShare = calculateFeePerShare(price, feeSchedule);
+    const feePerShare = calculateFeePerShare(price, feeRate);
     const shares = new Decimal(fill);
     totalShares = totalShares.plus(shares);
     gross = gross.plus(shares.mul(price));
@@ -156,20 +151,4 @@ export function simulateTakerSell(
     remaining,
     -1,
   );
-}
-
-export function calculateWinProfit(
-  entryPrice: number,
-  shares: number,
-  fees: number,
-): number {
-  return (1 - entryPrice) * shares - fees;
-}
-
-export function calculateLossAmount(
-  entryPrice: number,
-  shares: number,
-  fees: number,
-): number {
-  return -(entryPrice * shares + fees);
 }

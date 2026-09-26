@@ -1,25 +1,22 @@
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
+import { and, eq, lt, notInArray, sql } from "drizzle-orm";
 import { getConfig } from "../utils/config.js";
 import { createModuleLogger } from "../utils/logger.js";
 import * as schema from "./schema.js";
-import { eq, sql } from "drizzle-orm";
 
 const logger = createModuleLogger("database");
 
-let client: postgres.Sql | null = null;
-let db: ReturnType<typeof drizzle> | null = null;
+let db: ReturnType<typeof drizzle<typeof schema>> | null = null;
 
 export function getDb() {
   if (!db) {
-    const config = getConfig();
-    client = postgres(config.db.url, {
-      max: 5,
+    const client = postgres(getConfig().db.url, {
+      max: 3,
       idle_timeout: 30,
       connect_timeout: 10,
     });
-    db = drizzle(client, { schema, logger: false });
-    logger.info("Drizzle database client initialized");
+    db = drizzle(client, { schema });
   }
   return db;
 }
@@ -33,25 +30,15 @@ export async function logAudit(
   level: "info" | "warn" | "error",
   category: string,
   message: string,
-  metadata?: unknown,
+  metadata?: Record<string, unknown>,
 ) {
   try {
-    await getDb().insert(schema.auditLogs).values({
-      level,
-      category,
-      message,
-      metadata: metadata as any,
-    });
+    await getDb()
+      .insert(schema.auditLogs)
+      .values({ level, category, message, metadata });
   } catch (e) {
     logger.error({ error: e }, "Failed to write audit log");
   }
-}
-
-export async function loadOpenTrades() {
-  return getDb()
-    .select()
-    .from(schema.trades)
-    .where(eq(schema.trades.status, "OPEN"));
 }
 
 export async function sumRealizedPnl(): Promise<number> {
@@ -59,86 +46,78 @@ export async function sumRealizedPnl(): Promise<number> {
     .select({
       total: sql<string>`COALESCE(SUM(${schema.trades.realizedPnl}), 0)`,
     })
-    .from(schema.trades)
-    .where(eq(schema.trades.status, "SETTLED"));
+    .from(schema.trades);
   return parseFloat(row?.total ?? "0");
 }
 
-export async function wipeAllData(): Promise<void> {
+export async function wipeTrades(): Promise<void> {
   const db = getDb();
   await db.delete(schema.trades);
-  await db.delete(schema.buckets);
-  await db.delete(schema.campaigns);
   await db.delete(schema.auditLogs);
 }
 
-export async function createTrade(data: {
-  campaignId: string;
-  campaignSlug: string;
-  campaignTitle: string;
-  bucketId: string;
-  bucketSlug: string | null;
-  bucketGroupTitle: string;
-  tokenId: string;
-  entryTs: Date;
-  entryPrice: string;
-  entryShares: string;
-  actualCost: string;
-  entryFees: string;
-  expectedNetProfit: string;
-  modalBucketAtEntry: string;
-  posFromModal: number;
-  entryQuality: unknown;
-}) {
-  const result = await getDb()
-    .insert(schema.trades)
-    .values({ ...data, status: "OPEN" })
-    .returning();
-  return result[0];
-}
-
-export async function resolveTrade(
+export async function settleTrade(
   id: string,
-  outcome: "WIN" | "LOSS",
-  realizedPnl: string,
-  exitPrice: string,
-  exitReason: "RESOLUTION" | "EARLY_EXIT",
-  minNoPriceDuringPosition?: string | null,
+  fields: {
+    outcome: "WIN" | "LOSS";
+    realizedPnl: number;
+    exitPrice: number;
+    exitReason: "RESOLUTION" | "TAKE_PROFIT" | "STOP_LOSS";
+    minPrice: number | null;
+  },
 ) {
-  const result = await getDb()
+  const [row] = await getDb()
     .update(schema.trades)
     .set({
-      exitOutcome: outcome,
-      exitPrice,
+      exitOutcome: fields.outcome,
+      realizedPnl: fields.realizedPnl.toFixed(8),
+      exitPrice: fields.exitPrice.toFixed(8),
+      exitReason: fields.exitReason,
       exitTs: new Date(),
-      exitReason,
-      realizedPnl,
+      minPriceDuringPosition: fields.minPrice?.toFixed(8) ?? null,
       status: "SETTLED",
-      updatedAt: new Date(),
-      ...(minNoPriceDuringPosition !== undefined
-        ? { minNoPriceDuringPosition }
-        : {}),
     })
     .where(eq(schema.trades.id, id))
     .returning();
-  return result[0];
+  return row;
 }
 
-export async function updateTradePositionSize(
+export async function shrinkTrade(
   id: string,
-  newShares: string,
-  newActualCost: string,
-  newFees: string,
+  shares: number,
+  cost: number,
+  fees: number,
+  realized: number,
 ) {
-  const result = await getDb()
+  await getDb()
     .update(schema.trades)
     .set({
-      entryShares: newShares,
-      actualCost: newActualCost,
-      entryFees: newFees,
-      updatedAt: new Date(),
+      entryShares: shares.toFixed(8),
+      actualCost: cost.toFixed(8),
+      entryFees: fees.toFixed(8),
+      realizedPnl: realized.toFixed(8),
     })
-    .where(eq(schema.trades.id, id))
-    .returning();
-  return result[0];
+    .where(eq(schema.trades.id, id));
+}
+
+export async function pruneHistory(): Promise<void> {
+  const db = getDb();
+  const cutoff = new Date(Date.now() - 30 * 86_400_000);
+  const traded = db
+    .select({ id: schema.trades.campaignId })
+    .from(schema.trades);
+  await db
+    .delete(schema.campaigns)
+    .where(
+      and(
+        eq(schema.campaigns.closed, true),
+        lt(schema.campaigns.endDate, cutoff),
+        notInArray(schema.campaigns.id, traded),
+      ),
+    );
+  await db
+    .delete(schema.auditLogs)
+    .where(
+      lt(schema.auditLogs.createdAt, new Date(Date.now() - 14 * 86_400_000)),
+    );
 }

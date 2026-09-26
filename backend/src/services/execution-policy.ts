@@ -3,10 +3,7 @@ import { createModuleLogger } from "../utils/logger.js";
 const logger = createModuleLogger("execution-policy");
 
 export type PolymarketStatus =
-  | "UNKNOWN"
-  | "UP"
-  | "HASISSUES"
-  | "UNDERMAINTENANCE";
+  "UNKNOWN" | "UP" | "HASISSUES" | "UNDERMAINTENANCE";
 
 let currentStatus: PolymarketStatus = "UP";
 let timer: NodeJS.Timeout | null = null;

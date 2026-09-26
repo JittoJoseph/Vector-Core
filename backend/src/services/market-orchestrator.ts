@@ -4,318 +4,712 @@ import { createModuleLogger } from "../utils/logger.js";
 import { getConfig } from "../utils/config.js";
 import {
   getDb,
-  createTrade,
-  loadOpenTrades,
   logAudit,
-  resolveTrade,
+  pruneHistory,
+  settleTrade,
+  shrinkTrade,
   sumRealizedPnl,
-  updateTradePositionSize,
-  wipeAllData,
+  wipeTrades,
 } from "../db/client.js";
 import * as schema from "../db/schema.js";
-import { getPolymarketClient, PolymarketClient } from "./polymarket-client.js";
+import type { ForecastSummary } from "../db/schema.js";
 import {
-  calculateLossAmount,
-  calculateWinProfit,
+  getPolymarketClient,
+  PolymarketClient,
+  type Quote,
+} from "./polymarket-client.js";
+import {
+  calculateFeePerShare,
   getTopOfBook,
-  simulateTakerSell,
   simulateLimitBuy,
+  simulateTakerSell,
 } from "./execution-simulator.js";
 import {
   getMarketWebSocketWatcher,
-  MarketWebSocketWatcher,
+  type QuoteEvent,
 } from "./market-ws-watcher.js";
-import type { FeeSchedule, GammaEvent, GammaMarket } from "../types/index.js";
-import type { MarketResolvedEvent } from "../interfaces/websocket-types.js";
+import { getWeatherNextFeed, type ForecastRun } from "./weathernext.js";
 import { executionPolicy } from "./execution-policy.js";
-import {
-  buildEntryQuality,
-  createQuoteStats,
-  recordQuote,
-  type EntryQuality,
-  type QuoteStats,
-} from "../utils/market-quality.js";
-import {
-  bucketOffsetsFromModal,
-  findModalBucket,
-  isRelevantBucket,
-  isSupportedWeatherCampaign,
-  nextBelowBand,
-  WEATHER_TAG_ID,
-} from "../utils/weather-logic.js";
+import { CityBias } from "./city-bias.js";
+import { fairValue, winnerTempC } from "../utils/forecast-model.js";
+import { bucketRange, cityOf, isFahrenheit } from "../utils/weather-logic.js";
+import type { GammaEvent } from "../types/index.js";
 
 const logger = createModuleLogger("market-orchestrator");
 
-const MAX_ENTRY_SPREAD = 0.02;
-const MAX_ENTRY_ASK_DEPTH = 100;
-const MIN_ENTRY_IMBALANCE = -0.2;
-const TRADE_BUDGET = 5;
+export const STRATEGY = {
+  edge: 0.2,
+  maxSpread: 0.03,
+  minPrice: 0.03,
+  maxPrice: 0.97,
+  tradeBudget: 5,
+} as const;
 const STOP_CONFIRM_MS = 5_000;
-export const ENTRY_WINDOW_HOURS = 12;
+const DISCOVERY_MS = 30 * 60_000;
+const SETTLEMENT_MS = 20 * 60_000;
+const DAY_MS = 86_400_000;
 
-interface TrackedBucket {
-  bucketId: string;
-  campaignId: string;
-  groupItemTitle: string;
-  noTokenId: string;
-  yesTokenId: string;
-  feeSchedule: FeeSchedule | null;
-  lastPrices: Record<string, { bid: number; ask: number; mid: number }>;
-  resolved: boolean;
-  acceptingOrders: boolean;
-  belowBand: boolean;
-  quotes: QuoteStats;
+type Side = "YES" | "NO";
+
+interface Bucket {
+  id: string;
+  slug: string | null;
+  title: string;
+  range: [number, number];
+  yesToken: string;
+  noToken: string;
+  feeRate: number;
 }
 
-interface OpenPosition {
+interface Campaign {
+  id: string;
+  slug: string;
+  title: string;
+  city: string;
+  fahrenheit: boolean;
+  dayStart: number;
+  endDate: number;
+  buckets: Bucket[];
+  forecast: ForecastSummary | null;
+  probs: number[] | null;
+}
+
+interface Position {
   tradeId: string;
+  campaignId: string;
   bucketId: string;
   tokenId: string;
+  side: Side;
   entryPrice: number;
-  entryShares: number;
+  shares: number;
   fees: number;
-  actualCost: number;
-  minNoPriceDuringPosition: number | null;
-  stopBreachedAt?: number | null;
-  isExiting?: boolean;
-}
-
-export interface PortfolioSnapshot {
-  initialCapital: number;
-  realizedPnl: number;
-  unrealizedPnl: number;
-  netPnl: number;
-  portfolioValue: number;
-  roi: number;
-  cashBalance: number;
-  openPositionsValue: number;
-  openPositions: number;
+  cost: number;
+  realized: number;
+  target: number;
+  minPrice: number | null;
+  bid: number | null;
+  ask: number | null;
+  stopSince: number | null;
+  exiting: boolean;
 }
 
 export interface PositionPnl {
   mid: number | null;
   pnl: number | null;
   pnlPct: number | null;
-  minNoPrice: number | null;
+  minPrice: number | null;
 }
 
-interface Candidate {
-  bucket: typeof schema.buckets.$inferSelect;
-  campaign: typeof schema.campaigns.$inferSelect;
-  expectedNetProfit: number;
-  expectedReturnPercent: number;
-  execResult: ReturnType<typeof simulateLimitBuy>;
-  modalBucketTitle: string;
-  posFromModal: number;
-  entryQuality: EntryQuality;
-}
+const round4 = (x: number) => Math.round(x * 10_000) / 10_000;
 
 export class MarketOrchestrator extends EventEmitter {
   private client = getPolymarketClient();
-  private wsWatcher: MarketWebSocketWatcher = getMarketWebSocketWatcher();
+  private ws = getMarketWebSocketWatcher();
+  private feed = getWeatherNextFeed();
+  private bias = new CityBias();
 
-  private syncTimer: ReturnType<typeof setInterval> | null = null;
-  private evaluateTimer: ReturnType<typeof setInterval> | null = null;
-  private settlementTimer: ReturnType<typeof setInterval> | null = null;
-
-  private trackedBuckets = new Map<string, TrackedBucket>();
-  private tokenToBucket = new Map<string, string>();
-  private conditionIdToBucket = new Map<string, string>();
-  private openPositions = new Map<string, OpenPosition>();
+  private campaigns = new Map<string, Campaign>();
+  private positions = new Map<string, Position>();
+  private tradedBuckets = new Set<string>();
+  private quotes = new Map<string, Quote>();
   private realizedPnl = 0;
+  private lastDiscoveryStart = 0;
+  private lastEvaluation: {
+    at: string;
+    init: string;
+    covered: number;
+    entries: number;
+  } | null = null;
 
+  private timers: ReturnType<typeof setInterval>[] = [];
   private running = false;
   private paused = false;
-  private cycleCount = 0;
-  private isEvaluating = false;
-  private isSyncing = false;
-
-  private pausedByRiskGuard = false;
-  private consecutiveLossCount = 0;
-  private riskAutoResumeTimer: NodeJS.Timeout | null = null;
-  private activeCampaignMetrics = new Map<
-    string,
-    { candidateCount: number; trackedCount: number; positionCount: number }
-  >();
+  private busy: Promise<unknown> = Promise.resolve();
 
   async start(): Promise<void> {
     if (this.running) return;
     this.running = true;
+    await this.bias.load();
     await this.loadState();
-    this.wireEvents();
-    this.wsWatcher.start();
     executionPolicy.start();
-    await this.syncCampaigns();
-    await this.evaluateOpportunities();
-    this.startTimers();
-    logger.info("Market orchestrator started");
+    await this.serial(() => this.discover());
+    await this.serial(() => this.settle());
+    this.ws.on("quote", (q: QuoteEvent) => this.onQuote(q));
+    this.ws.subscribe([...this.positions.values()].map((p) => p.tokenId));
+    this.ws.start();
+    this.feed.on("run", (run: ForecastRun) =>
+      this.serial(() => this.onRun(run)),
+    );
+    this.feed.start();
+    this.timers = [
+      setInterval(() => this.serial(() => this.discover()), DISCOVERY_MS),
+      setInterval(() => this.serial(() => this.settle()), SETTLEMENT_MS),
+    ];
+    logger.info(
+      { campaigns: this.campaigns.size, positions: this.positions.size },
+      "Orchestrator started",
+    );
   }
 
   stop(): void {
     this.running = false;
-    this.clearTimers();
-    if (this.riskAutoResumeTimer) clearTimeout(this.riskAutoResumeTimer);
-    this.wsWatcher.stop();
+    this.timers.forEach(clearInterval);
+    this.timers = [];
+    this.feed.stop();
+    this.ws.stop();
     executionPolicy.stop();
-    logger.info("Market orchestrator stopped");
   }
 
   pause(): void {
     this.paused = true;
-    this.clearTimers();
-    this.wsWatcher.stop();
   }
 
-  async resume(): Promise<void> {
-    if (!this.paused) return;
+  resume(): void {
     this.paused = false;
-    this.pausedByRiskGuard = false;
-    this.consecutiveLossCount = 0;
-    this.wsWatcher.start();
-    await this.loadState();
-    await this.syncCampaigns();
-    await this.evaluateOpportunities();
-    this.startTimers();
   }
 
   async wipe(): Promise<void> {
-    this.pause();
-    await wipeAllData();
-    this.trackedBuckets.clear();
-    this.tokenToBucket.clear();
-    this.conditionIdToBucket.clear();
-    this.openPositions.clear();
-    this.wsWatcher.clear();
-    this.realizedPnl = 0;
-    this.cycleCount = 0;
-    this.consecutiveLossCount = 0;
-    this.pausedByRiskGuard = false;
+    await this.serial(async () => {
+      await wipeTrades();
+      this.ws.unsubscribe([...this.positions.values()].map((p) => p.tokenId));
+      this.positions.clear();
+      this.tradedBuckets.clear();
+      this.realizedPnl = 0;
+    });
   }
 
-  isPaused(): boolean {
-    return this.paused;
-  }
-
-  private startTimers(): void {
-    const config = getConfig();
-    if (!this.syncTimer)
-      this.syncTimer = setInterval(() => {
-        this.syncCampaigns().catch((error) =>
-          logger.error({ error }, "Campaign sync failed"),
-        );
-      }, 60_000);
-    if (!this.evaluateTimer)
-      this.evaluateTimer = setInterval(() => {
-        this.evaluateOpportunities().catch((error) =>
-          logger.error({ error }, "Opportunity evaluation failed"),
-        );
-      }, config.strategy.scanIntervalMs);
-    if (!this.settlementTimer)
-      this.settlementTimer = setInterval(() => {
-        this.pollOpenPositionSettlements().catch((error) =>
-          logger.error({ error }, "Settlement polling failed"),
-        );
-      }, 60_000);
-  }
-
-  private clearTimers(): void {
-    if (this.syncTimer) clearInterval(this.syncTimer);
-    if (this.evaluateTimer) clearInterval(this.evaluateTimer);
-    if (this.settlementTimer) clearInterval(this.settlementTimer);
-    this.syncTimer = null;
-    this.evaluateTimer = null;
-    this.settlementTimer = null;
+  private serial<T>(task: () => Promise<T>): Promise<T | undefined> {
+    const next = this.busy.then(task).catch((err) => {
+      logger.error({ err }, "Orchestrator task failed");
+      return undefined;
+    });
+    this.busy = next;
+    return next;
   }
 
   private async loadState(): Promise<void> {
+    const db = getDb();
     this.realizedPnl = await sumRealizedPnl();
-    const openTrades = await loadOpenTrades();
-    const refreshed = new Map<string, OpenPosition>();
-    for (const trade of openTrades) {
-      const existing = this.openPositions.get(trade.id);
-      refreshed.set(
-        trade.id,
-        existing ?? {
-          tradeId: trade.id,
-          bucketId: trade.bucketId ?? "",
-          tokenId: trade.tokenId ?? "",
-          entryPrice: parseFloat(trade.entryPrice),
-          entryShares: parseFloat(trade.entryShares),
-          fees: parseFloat(trade.entryFees),
-          actualCost: parseFloat(trade.actualCost),
-          minNoPriceDuringPosition:
-            trade.minNoPriceDuringPosition !== null
-              ? parseFloat(trade.minNoPriceDuringPosition)
-              : null,
-        },
+    const open = await db
+      .select()
+      .from(schema.campaigns)
+      .where(eq(schema.campaigns.closed, false));
+    const openIds = open.map((c) => c.id);
+    const trades = openIds.length
+      ? await db
+          .select()
+          .from(schema.trades)
+          .where(inArray(schema.trades.campaignId, openIds))
+      : [];
+    for (const t of trades) {
+      this.tradedBuckets.add(t.bucketId);
+      if (t.status !== "OPEN") continue;
+      this.positions.set(t.id, {
+        tradeId: t.id,
+        campaignId: t.campaignId,
+        bucketId: t.bucketId,
+        tokenId: t.tokenId,
+        side: t.side as Side,
+        entryPrice: parseFloat(t.entryPrice),
+        shares: parseFloat(t.entryShares),
+        fees: parseFloat(t.entryFees),
+        cost: parseFloat(t.actualCost),
+        realized: parseFloat(t.realizedPnl ?? "0"),
+        target: parseFloat(t.target),
+        minPrice: t.minPriceDuringPosition
+          ? parseFloat(t.minPriceDuringPosition)
+          : null,
+        bid: null,
+        ask: null,
+        stopSince: null,
+        exiting: false,
+      });
+    }
+    for (const c of open) {
+      this.campaigns.set(c.id, {
+        id: c.id,
+        slug: c.slug,
+        title: c.title,
+        city: cityOf(c.title) ?? "",
+        fahrenheit: false,
+        dayStart: c.endDate.getTime() - DAY_MS,
+        endDate: c.endDate.getTime(),
+        buckets: [],
+        forecast: c.forecast ?? null,
+        probs: null,
+      });
+    }
+  }
+
+  private toCampaign(event: GammaEvent): Campaign | null {
+    const city = cityOf(event.title);
+    if (!city || !event.negRisk || !event.markets?.length) return null;
+    const gameStart = event.markets.find((m) => m.gameStartTime)?.gameStartTime;
+    if (!gameStart) return null;
+    const dayStart = Date.parse(
+      gameStart.replace(" ", "T").replace(/\+00$/, "Z"),
+    );
+    if (!Number.isFinite(dayStart)) return null;
+    const buckets: Bucket[] = [];
+    for (const m of event.markets) {
+      const tokens = PolymarketClient.tokenIds(m);
+      if (!tokens || !m.groupItemTitle) continue;
+      buckets.push({
+        id: m.id,
+        slug: m.slug ?? null,
+        title: m.groupItemTitle,
+        range: bucketRange(m.groupItemTitle),
+        yesToken: tokens[0],
+        noToken: tokens[1],
+        feeRate: m.feeSchedule?.rate ?? 0,
+      });
+    }
+    buckets.sort((a, b) => a.range[0] - b.range[0]);
+    return {
+      id: String(event.id),
+      slug: event.slug ?? String(event.id),
+      title: event.title!,
+      city,
+      fahrenheit: buckets.some((b) => isFahrenheit(b.title)),
+      dayStart,
+      endDate: dayStart + DAY_MS,
+      buckets,
+      forecast: null,
+      probs: null,
+    };
+  }
+
+  private async discover(): Promise<void> {
+    const since = this.lastDiscoveryStart
+      ? new Date(this.lastDiscoveryStart + 1000)
+      : new Date(Date.now() - 4 * DAY_MS);
+    const events = await this.client.listWeatherEventsSince(since);
+    const fresh: Campaign[] = [];
+    for (const event of events) {
+      const started = Date.parse(event.startDate ?? "");
+      if (Number.isFinite(started))
+        this.lastDiscoveryStart = Math.max(this.lastDiscoveryStart, started);
+      if (event.closed) continue;
+      const campaign = this.toCampaign(event);
+      if (!campaign || campaign.endDate <= Date.now()) continue;
+      const known = this.campaigns.get(campaign.id);
+      if (known) {
+        known.buckets = campaign.buckets;
+        known.fahrenheit = campaign.fahrenheit;
+        continue;
+      }
+      this.campaigns.set(campaign.id, campaign);
+      fresh.push(campaign);
+    }
+    if (fresh.length)
+      await getDb()
+        .insert(schema.campaigns)
+        .values(
+          fresh.map((c) => ({
+            id: c.id,
+            slug: c.slug,
+            title: c.title,
+            endDate: new Date(c.endDate),
+          })),
+        )
+        .onConflictDoNothing();
+    logger.info(
+      {
+        scanned: events.length,
+        added: fresh.length,
+        open: this.campaigns.size,
+      },
+      "Discovery complete",
+    );
+  }
+
+  private async settle(): Promise<void> {
+    const now = Date.now();
+    for (const campaign of [...this.campaigns.values()]) {
+      if (campaign.endDate > now && campaign.buckets.length) continue;
+      const event = await this.client.getEvent(campaign.id);
+      if (!campaign.buckets.length) {
+        const rebuilt = this.toCampaign(event);
+        if (rebuilt) {
+          campaign.buckets = rebuilt.buckets;
+          campaign.fahrenheit = rebuilt.fahrenheit;
+        }
+      }
+      if (event.closed) await this.resolveCampaign(campaign, event);
+    }
+    await pruneHistory();
+  }
+
+  private async resolveCampaign(
+    campaign: Campaign,
+    event: GammaEvent,
+  ): Promise<void> {
+    const payouts = new Map<string, [number, number]>();
+    for (const m of event.markets ?? []) {
+      const prices = PolymarketClient.outcomePrices(m);
+      if (prices) payouts.set(m.id, prices);
+    }
+    const held = [...this.positions.values()].filter(
+      (p) => p.campaignId === campaign.id,
+    );
+    if (!payouts.size || held.some((p) => !payouts.has(p.bucketId))) return;
+    for (const pos of held) {
+      const [yes, no] = payouts.get(pos.bucketId)!;
+      const payout = pos.side === "YES" ? yes : no;
+      await this.closePosition(
+        pos,
+        payout,
+        payout * pos.shares - pos.cost,
+        "RESOLUTION",
       );
     }
-    this.openPositions = refreshed;
+    const winner = campaign.buckets.find(
+      (b) => (payouts.get(b.id)?.[0] ?? 0) >= 0.99,
+    );
+    const actualC = winner
+      ? winnerTempC(winner.range, campaign.fahrenheit)
+      : null;
+    if (actualC !== null && campaign.forecast)
+      await this.bias.record(campaign.city, actualC - campaign.forecast.fmaxC);
+    await getDb()
+      .update(schema.campaigns)
+      .set({
+        closed: true,
+        closedTime: event.closedTime ? new Date(event.closedTime) : new Date(),
+      })
+      .where(eq(schema.campaigns.id, campaign.id));
+    this.campaigns.delete(campaign.id);
+    for (const b of campaign.buckets) this.tradedBuckets.delete(b.id);
+    for (const b of campaign.buckets) this.quotes.delete(b.yesToken);
+    logger.info(
+      { campaign: campaign.title, winner: winner?.title },
+      "Campaign resolved",
+    );
   }
 
-  getStats() {
-    return {
-      running: this.running,
-      paused: this.paused,
-      activeBuckets: this.trackedBuckets.size,
-      openPositions: this.openPositions.size,
-      cycleCount: this.cycleCount,
-      ws: this.wsWatcher.getStats(),
-      risk: {
-        consecutiveLossCount: this.consecutiveLossCount,
-        pausedByRiskGuard: this.pausedByRiskGuard,
+  private async onRun(run: ForecastRun): Promise<void> {
+    const now = Date.now();
+    const scored: { campaign: Campaign; probs: number[] }[] = [];
+    for (const campaign of this.campaigns.values()) {
+      const temps = run.series.get(campaign.city);
+      if (!temps || !campaign.buckets.length || campaign.endDate <= now)
+        continue;
+      if (campaign.forecast && Date.parse(campaign.forecast.init) > run.init)
+        continue;
+      const fv = fairValue({
+        temps,
+        init: run.init,
+        dayStart: campaign.dayStart,
+        now,
+        biasC: this.bias.get(campaign.city),
+        fahrenheit: campaign.fahrenheit,
+        ranges: campaign.buckets.map((b) => b.range),
+      });
+      if (!fv) continue;
+      campaign.probs = fv.probs;
+      campaign.forecast = {
+        init: new Date(run.init).toISOString(),
+        publishedAt: new Date(run.publishedAt).toISOString(),
+        fmaxC: round4(fv.fmaxC),
+        mu: round4(fv.mu),
+        sigma: round4(fv.sigma),
+      };
+      scored.push({ campaign, probs: fv.probs });
+    }
+    await Promise.all(
+      scored.map(({ campaign }) =>
+        getDb()
+          .update(schema.campaigns)
+          .set({ forecast: campaign.forecast })
+          .where(eq(schema.campaigns.id, campaign.id)),
+      ),
+    );
+
+    const tokens = scored.flatMap(({ campaign }) =>
+      campaign.buckets.map((b) => b.yesToken),
+    );
+    if (tokens.length)
+      for (const [token, quote] of await this.client.getQuotes(tokens))
+        this.quotes.set(token, quote);
+
+    let entries = 0;
+    if (!this.paused && executionPolicy.canOpenNewPositions()) {
+      for (const { campaign, probs } of scored) {
+        for (const [i, bucket] of campaign.buckets.entries()) {
+          if (this.tradedBuckets.has(bucket.id)) continue;
+          const q = this.quotes.get(bucket.yesToken);
+          const side = q && this.pickSide(probs[i]!, q, bucket.feeRate);
+          if (!side) continue;
+          if (await this.enter(campaign, bucket, side, probs[i]!, run, q))
+            entries++;
+        }
+      }
+    }
+    this.lastEvaluation = {
+      at: new Date().toISOString(),
+      init: new Date(run.init).toISOString(),
+      covered: scored.length,
+      entries,
+    };
+    await logAudit(
+      "info",
+      "FORECAST_RUN",
+      `WeatherNext run evaluated: ${scored.length} ladders, ${entries} entries`,
+      {
+        init: this.lastEvaluation.init,
       },
-      polymarketStatus: executionPolicy.getStatus(),
-    };
+    );
   }
 
-  getOpenPositions(): OpenPosition[] {
-    return Array.from(this.openPositions.values());
+  private pickSide(p: number, q: Quote, feeRate: number): Side | null {
+    const mid = (q.bid + q.ask) / 2;
+    if (q.ask - q.bid > STRATEGY.maxSpread + 1e-9) return null;
+    if (mid < STRATEGY.minPrice || mid > STRATEGY.maxPrice) return null;
+    const fee = (x: number) => calculateFeePerShare(x, feeRate);
+    if (p - q.ask - fee(q.ask) >= STRATEGY.edge) return "YES";
+    const noAsk = 1 - q.bid;
+    if (1 - p - noAsk - fee(noAsk) >= STRATEGY.edge) return "NO";
+    return null;
   }
 
-  private positionPnl(pos: OpenPosition): {
-    mid: number | null;
-    pnl: number | null;
-  } {
+  private async enter(
+    campaign: Campaign,
+    bucket: Bucket,
+    side: Side,
+    pYes: number,
+    run: ForecastRun,
+    quote: Quote,
+  ): Promise<boolean> {
+    const tokenId = side === "YES" ? bucket.yesToken : bucket.noToken;
+    const target = side === "YES" ? pYes : 1 - pYes;
+    const book = await this.client.getOrderbook(tokenId);
+    const top = getTopOfBook(book);
+    if (top.bestBid === null || top.bestAsk === null) return false;
+    if (top.bestAsk - top.bestBid > STRATEGY.maxSpread + 1e-9) return false;
+    const cap = target - STRATEGY.edge;
+    let limit = -1;
+    for (const level of book.asks) {
+      const price = parseFloat(level.price);
+      if (
+        price + calculateFeePerShare(price, bucket.feeRate) <= cap &&
+        price > limit
+      )
+        limit = price;
+    }
+    if (limit <= 0) return false;
+    const fill = simulateLimitBuy(
+      book,
+      STRATEGY.tradeBudget,
+      limit,
+      bucket.feeRate,
+    );
+    if (fill.totalShares <= 0 || fill.belowMinimumOrderSize) return false;
+
+    const now = Date.now();
+    const [trade] = await getDb()
+      .insert(schema.trades)
+      .values({
+        campaignId: campaign.id,
+        campaignSlug: campaign.slug,
+        campaignTitle: campaign.title,
+        bucketId: bucket.id,
+        bucketSlug: bucket.slug,
+        bucketGroupTitle: bucket.title,
+        tokenId,
+        side,
+        entryTs: new Date(now),
+        entryPrice: fill.averagePrice.toFixed(8),
+        entryShares: fill.totalShares.toFixed(8),
+        actualCost: fill.netCost.toFixed(8),
+        entryFees: fill.fees.toFixed(8),
+        target: target.toFixed(8),
+        signal: {
+          init: new Date(run.init).toISOString(),
+          leadH: round4((campaign.dayStart - now) / 3_600_000),
+          pModel: round4(target),
+          quote: side === "YES" ? quote.ask : round4(1 - quote.bid),
+          edge: round4(
+            target - fill.averagePrice - fill.fees / fill.totalShares,
+          ),
+        },
+      })
+      .onConflictDoNothing()
+      .returning();
+    this.tradedBuckets.add(bucket.id);
+    if (!trade) return false;
+
+    this.positions.set(trade.id, {
+      tradeId: trade.id,
+      campaignId: campaign.id,
+      bucketId: bucket.id,
+      tokenId,
+      side,
+      entryPrice: fill.averagePrice,
+      shares: fill.totalShares,
+      fees: fill.fees,
+      cost: fill.netCost,
+      realized: 0,
+      target,
+      minPrice: null,
+      bid: top.bestBid,
+      ask: top.bestAsk,
+      stopSince: null,
+      exiting: false,
+    });
+    this.ws.subscribe([tokenId]);
+    await logAudit(
+      "info",
+      "TRADE_OPENED",
+      `${side} ${bucket.title} · ${campaign.title}`,
+      {
+        tradeId: trade.id,
+        price: fill.averagePrice,
+      },
+    );
+    this.emit("tradeOpened", { trade });
+    return true;
+  }
+
+  private onQuote({ tokenId, bid, ask }: QuoteEvent): void {
+    const now = Date.now();
+    for (const pos of this.positions.values()) {
+      if (pos.tokenId !== tokenId || pos.exiting) continue;
+      pos.bid = bid;
+      pos.ask = ask;
+      const campaign = this.campaigns.get(pos.campaignId);
+      if (!campaign || now >= campaign.endDate) continue;
+      if (pos.minPrice === null || bid < pos.minPrice) pos.minPrice = bid;
+
+      if (bid >= pos.target) {
+        this.exit(pos, "TAKE_PROFIT");
+        continue;
+      }
+      const delta = getConfig().strategy.stopLossDelta;
+      if (delta <= 0) continue;
+      if (ask > round4(pos.entryPrice - delta)) {
+        pos.stopSince = null;
+        continue;
+      }
+      pos.stopSince ??= now;
+      if (
+        now - pos.stopSince >= STOP_CONFIRM_MS &&
+        executionPolicy.canExecuteStopLoss()
+      )
+        this.exit(pos, "STOP_LOSS");
+    }
+  }
+
+  private exit(pos: Position, reason: "TAKE_PROFIT" | "STOP_LOSS"): void {
+    pos.exiting = true;
+    this.sell(pos, reason)
+      .catch((err) =>
+        logger.error({ err, tradeId: pos.tradeId }, "Exit failed"),
+      )
+      .finally(() => {
+        pos.exiting = false;
+      });
+  }
+
+  private async sell(
+    pos: Position,
+    reason: "TAKE_PROFIT" | "STOP_LOSS",
+  ): Promise<void> {
+    const book = await this.client.getOrderbook(pos.tokenId);
+    if (!this.positions.has(pos.tradeId)) return;
+    const sale = simulateTakerSell(book, pos.shares, this.feeRateOf(pos));
+    if (sale.totalShares <= 0) return;
+    const soldCost = pos.cost * (sale.totalShares / pos.shares);
+    const pnl = sale.netCost - soldCost;
+    if (!sale.isPartialFill) {
+      await this.closePosition(pos, sale.averagePrice, pnl, reason);
+      return;
+    }
+    const keep = 1 - sale.totalShares / pos.shares;
+    this.realizedPnl += pnl;
+    pos.realized += pnl;
+    pos.shares -= sale.totalShares;
+    pos.cost *= keep;
+    pos.fees *= keep;
+    await shrinkTrade(
+      pos.tradeId,
+      pos.shares,
+      pos.cost,
+      pos.fees,
+      pos.realized,
+    );
+  }
+
+  private feeRateOf(pos: Position): number {
+    return (
+      this.campaigns
+        .get(pos.campaignId)
+        ?.buckets.find((b) => b.id === pos.bucketId)?.feeRate ?? 0
+    );
+  }
+
+  private async closePosition(
+    pos: Position,
+    exitPrice: number,
+    pnl: number,
+    reason: "RESOLUTION" | "TAKE_PROFIT" | "STOP_LOSS",
+  ): Promise<void> {
+    this.positions.delete(pos.tradeId);
+    this.ws.unsubscribe([pos.tokenId]);
+    this.realizedPnl += pnl;
+    const total = pos.realized + pnl;
+    const trade = await settleTrade(pos.tradeId, {
+      outcome: total > 0 ? "WIN" : "LOSS",
+      realizedPnl: total,
+      exitPrice,
+      exitReason: reason,
+      minPrice: pos.minPrice,
+    });
+    await logAudit(
+      "info",
+      "TRADE_CLOSED",
+      `${reason} ${total >= 0 ? "+" : ""}${total.toFixed(4)}`,
+      {
+        tradeId: pos.tradeId,
+        pnl: total,
+        outcome: total > 0 ? "WIN" : "LOSS",
+      },
+    );
+    this.emit("tradeResolved", {
+      tradeId: pos.tradeId,
+      isWin: total > 0,
+      pnl: total,
+      trade,
+    });
+  }
+
+  private positionPnl(pos: Position) {
     const mid =
-      this.trackedBuckets.get(pos.bucketId)?.lastPrices[pos.tokenId]?.mid ??
-      null;
-    return {
-      mid,
-      pnl:
-        mid === null
-          ? null
-          : (mid - pos.entryPrice) * pos.entryShares - pos.fees,
-    };
+      pos.bid !== null && pos.ask !== null ? (pos.bid + pos.ask) / 2 : null;
+    return { mid, pnl: mid === null ? null : mid * pos.shares - pos.cost };
   }
 
   getOpenPositionsPnl(): Record<string, PositionPnl> {
-    const result: Record<string, PositionPnl> = {};
-    for (const pos of this.openPositions.values()) {
+    const out: Record<string, PositionPnl> = {};
+    for (const pos of this.positions.values()) {
       const { mid, pnl } = this.positionPnl(pos);
-      result[pos.tradeId] = {
+      out[pos.tradeId] = {
         mid,
         pnl,
-        pnlPct:
-          pnl !== null && pos.actualCost > 0
-            ? (pnl / pos.actualCost) * 100
-            : null,
-        minNoPrice: pos.minNoPriceDuringPosition,
+        pnlPct: pnl !== null && pos.cost > 0 ? (pnl / pos.cost) * 100 : null,
+        minPrice: pos.minPrice,
       };
     }
-    return result;
+    return out;
   }
 
-  getPortfolioSnapshot(): PortfolioSnapshot {
+  getPortfolioSnapshot() {
     const initialCapital = getConfig().portfolio.startingCapital;
-
     let openPositionsValue = 0;
     let unrealizedPnl = 0;
-    for (const pos of this.openPositions.values()) {
-      openPositionsValue += pos.actualCost;
+    for (const pos of this.positions.values()) {
+      openPositionsValue += pos.cost;
       unrealizedPnl += this.positionPnl(pos).pnl ?? 0;
     }
-
     const netPnl = this.realizedPnl + unrealizedPnl;
     return {
       initialCapital,
@@ -323,706 +717,99 @@ export class MarketOrchestrator extends EventEmitter {
       unrealizedPnl,
       netPnl,
       portfolioValue: initialCapital + netPnl,
-      roi: initialCapital > 0 ? (netPnl / initialCapital) * 100 : 0,
+      roi: (netPnl / initialCapital) * 100,
       cashBalance: initialCapital + this.realizedPnl - openPositionsValue,
       openPositionsValue,
-      openPositions: this.openPositions.size,
+      openPositions: this.positions.size,
     };
   }
 
-  getActiveCampaignMetrics(campaignId: string) {
-    return (
-      this.activeCampaignMetrics.get(campaignId) || {
-        candidateCount: 0,
-        trackedCount: 0,
-        positionCount: 0,
-      }
-    );
-  }
-
-  private wireEvents(): void {
-    this.wsWatcher.on("priceUpdate", (ev) =>
-      this.onTokenPriceUpdate(
-        ev.tokenId,
-        parseFloat(ev.bestBid),
-        parseFloat(ev.bestAsk),
-      ),
-    );
-    this.wsWatcher.on("bestBidAskUpdate", (ev) =>
-      this.onTokenPriceUpdate(
-        ev.tokenId,
-        parseFloat(ev.bestBid),
-        parseFloat(ev.bestAsk),
-      ),
-    );
-    this.wsWatcher.on("marketResolved", (ev: MarketResolvedEvent) =>
-      this.onMarketResolved(ev).catch((error) =>
-        logger.error({ error }, "Market resolution handling failed"),
-      ),
-    );
-  }
-
-  async syncCampaigns(): Promise<void> {
-    if (this.paused || this.isSyncing) return;
-    this.isSyncing = true;
-    try {
-      const events: GammaEvent[] = [];
-      let cursor: string | undefined;
-      do {
-        const page = await this.client.listEventsKeyset({
-          limit: 100,
-          active: true,
-          closed: false,
-          tag_id: WEATHER_TAG_ID,
-          after_cursor: cursor,
-        });
-        events.push(...page.events);
-        cursor = page.nextCursor ?? undefined;
-      } while (cursor && events.length < 1000);
-
-      const openApiEventIds = new Set(events.map((e) => String(e.id)));
-
-      for (const event of events) {
-        if (this.paused) break;
-        if (!event.negRisk) continue;
-        await this.persistCampaign(event);
-      }
-
-      const db = getDb();
-      const openDbCampaigns = await db
-        .select()
-        .from(schema.campaigns)
-        .where(eq(schema.campaigns.closed, false));
-      for (const c of openDbCampaigns) {
-        if (this.paused) break;
-        if (!isSupportedWeatherCampaign(c.title)) {
-          await db
-            .update(schema.campaigns)
-            .set({ closed: true, updatedAt: new Date() })
-            .where(eq(schema.campaigns.id, c.id));
-          continue;
-        }
-        if (!openApiEventIds.has(c.id)) {
-          try {
-            const fullEvent = await this.client.getEventById(c.id);
-            if (fullEvent) await this.persistCampaign(fullEvent);
-          } catch (err) {
-            logger.error(
-              { err, campaignId: c.id },
-              "Failed to refresh dropped campaign",
-            );
-          }
-        }
-      }
-    } finally {
-      this.isSyncing = false;
-    }
-  }
-
-  private async persistCampaign(event: GammaEvent): Promise<void> {
-    if (!isSupportedWeatherCampaign(event.title)) return;
-
-    const db = getDb();
-    const eventId = String(event.id);
-    const isClosed = event.closed ?? false;
-
-    if (!event.markets || event.markets.length === 0) {
-      const fullEvent = await this.client.getEventBySlug(event.slug ?? eventId);
-      if (fullEvent?.markets) {
-        event.markets = fullEvent.markets;
-      }
-    }
-
-    const gameStart = event.markets?.find(
-      (m) => m.gameStartTime,
-    )?.gameStartTime;
-    const endDate = gameStart
-      ? new Date(new Date(gameStart).getTime() + 24 * 60 * 60 * 1000)
-      : event.endDate
-        ? new Date(event.endDate)
-        : null;
-    const closedTime = event.closedTime ? new Date(event.closedTime) : null;
-
-    await db
-      .insert(schema.campaigns)
-      .values({
-        id: eventId,
-        slug: event.slug ?? eventId,
-        title: event.title ?? eventId,
-        seriesSlug: (event as any).seriesSlug ?? null,
-        startDate: event.startDate ? new Date(event.startDate) : null,
-        endDate,
-        closedTime,
-        closed: isClosed,
-        lastFetchedAt: new Date(),
-        updatedAt: new Date(),
-      })
-      .onConflictDoUpdate({
-        target: schema.campaigns.id,
-        set: {
-          title: event.title ?? eventId,
-          endDate,
-          closedTime,
-          closed: isClosed,
-          lastFetchedAt: new Date(),
-          updatedAt: new Date(),
-        },
-      });
-
-    for (const market of event.markets ?? []) {
-      if (!market.groupItemTitle) continue;
-      const clobTokenIds = PolymarketClient.parseClobTokenIds(market);
-      if (clobTokenIds.length < 2) continue;
-
-      const prices = PolymarketClient.parseOutcomePrices(market);
-      const bucketValues = {
-        slug: market.slug ?? null,
-        yesPrice: prices[0]?.toString() ?? null,
-        noPrice: prices[1]?.toString() ?? null,
-        spread: market.spread?.toString() ?? null,
-        liquidityNum: (market.liquidityNum ?? 0).toString(),
-        volume24h: (market.volumeNum ?? 0).toString(),
-        lastFetchedAt: new Date(),
-        updatedAt: new Date(),
-      };
-
-      await db
-        .insert(schema.buckets)
-        .values({
-          id: market.id,
-          campaignId: eventId,
-          conditionId: market.conditionId ?? null,
-          groupItemTitle: market.groupItemTitle,
-          yesTokenId: clobTokenIds[0]!,
-          noTokenId: clobTokenIds[1]!,
-          ...bucketValues,
-        })
-        .onConflictDoUpdate({
-          target: schema.buckets.id,
-          set: bucketValues,
-        });
-
-      this.trackBucket(market, eventId, clobTokenIds[1]!, clobTokenIds[0]!);
-    }
-  }
-
-  private trackBucket(
-    market: GammaMarket,
-    campaignId: string,
-    noTokenId: string,
-    yesTokenId: string,
-  ): void {
-    if (this.trackedBuckets.has(market.id)) return;
-    this.trackedBuckets.set(market.id, {
-      bucketId: market.id,
-      campaignId,
-      groupItemTitle: market.groupItemTitle ?? "",
-      noTokenId,
-      yesTokenId,
-      feeSchedule: (market.feeSchedule as FeeSchedule | null) ?? null,
-      lastPrices: {},
-      resolved: false,
-      acceptingOrders: market.acceptingOrders ?? true,
-      belowBand: false,
-      quotes: createQuoteStats(),
-    });
-    this.tokenToBucket.set(noTokenId, market.id);
-    if (market.conditionId)
-      this.conditionIdToBucket.set(market.conditionId, market.id);
-  }
-
-  async evaluateOpportunities(): Promise<void> {
-    if (this.paused || this.isEvaluating) return;
-    this.isEvaluating = true;
-    this.cycleCount++;
-
-    try {
-      await this.loadState();
-      const { candidates, requiredTokens } =
-        await this.findCandidateOpportunities();
-      this.updateWsSubscriptions(requiredTokens);
-      await this.executeCandidates(candidates);
-    } finally {
-      this.isEvaluating = false;
-    }
-  }
-
-  private async findCandidateOpportunities(): Promise<{
-    candidates: Candidate[];
-    requiredTokens: Set<string>;
-  }> {
-    const config = getConfig();
-    const db = getDb();
-
-    const candidates: Candidate[] = [];
-    const requiredTokens = new Set<string>();
-    const heldBuckets = new Set<string>();
-    for (const p of this.openPositions.values()) {
-      heldBuckets.add(p.bucketId);
-      const b = this.trackedBuckets.get(p.bucketId);
-      if (b) {
-        requiredTokens.add(b.noTokenId);
-        requiredTokens.add(b.yesTokenId);
-      }
-    }
-
-    this.activeCampaignMetrics.clear();
-
-    const now = Date.now();
-    const windowMs = ENTRY_WINDOW_HOURS * 60 * 60 * 1000;
-    const openCampaigns = await db
-      .select()
-      .from(schema.campaigns)
-      .where(eq(schema.campaigns.closed, false));
-    const eligible = openCampaigns.filter((c) => {
-      if (!c.endDate) return false;
-      const remaining = c.endDate.getTime() - now;
-      return remaining > 0 && remaining <= windowMs;
-    });
-    if (eligible.length === 0) return { candidates, requiredTokens };
-
-    const allBuckets = await db
-      .select()
-      .from(schema.buckets)
-      .where(
-        inArray(
-          schema.buckets.campaignId,
-          eligible.map((c) => c.id),
-        ),
-      );
-
-    for (const campaign of eligible) {
-      const buckets = allBuckets.filter((b) => b.campaignId === campaign.id);
-      if (buckets.length === 0) continue;
-
-      const modalBucket = findModalBucket(buckets);
-      if (!modalBucket) continue;
-
-      const offsets = bucketOffsetsFromModal(buckets, modalBucket.id);
-      requiredTokens.add(modalBucket.noTokenId);
-      requiredTokens.add(modalBucket.yesTokenId);
-
-      let candidateCount = 0;
-      let trackedCount = 0;
-      let positionCount = 0;
-
-      for (const bucket of buckets) {
-        const noPrice = parseFloat(bucket.noPrice ?? "1");
-        const state = this.trackedBuckets.get(bucket.id);
-        if (state)
-          state.belowBand = nextBelowBand(
-            state.belowBand,
-            noPrice,
-            config.strategy.minNoEntryPrice,
-            config.strategy.maxNoEntryPrice,
-          );
-
-        if (bucket.id === modalBucket.id) continue;
-        candidateCount++;
-
-        const bucketHasPosition = heldBuckets.has(bucket.id);
-        if (bucketHasPosition) positionCount++;
-
-        if (
-          isRelevantBucket(
-            false,
-            noPrice,
-            config.strategy.maxNoEntryPrice,
-            bucketHasPosition,
-          )
-        ) {
-          trackedCount++;
-          requiredTokens.add(bucket.noTokenId);
-          requiredTokens.add(bucket.yesTokenId);
-        }
-
-        if (
-          noPrice < config.strategy.minNoEntryPrice ||
-          noPrice > config.strategy.maxNoEntryPrice
-        )
-          continue;
-        if (bucketHasPosition) continue;
-        if (!state || !state.belowBand) continue;
-        if (state.resolved || !state.acceptingOrders) continue;
-
-        const book = await this.client.getOrderbook(bucket.noTokenId);
-        const top = getTopOfBook(book);
-        if (
-          top.bestAsk == null ||
-          top.bestAsk < config.strategy.minNoEntryPrice ||
-          top.bestAsk > config.strategy.maxNoEntryPrice
-        )
-          continue;
-        if (top.spread == null || top.spread > MAX_ENTRY_SPREAD) continue;
-
-        const entryQuality = buildEntryQuality(
-          state.quotes,
-          book,
-          top.bestBid ?? top.bestAsk,
-          top.bestAsk,
-          Date.now(),
-        );
-        if (
-          entryQuality.askDepth > MAX_ENTRY_ASK_DEPTH ||
-          entryQuality.imbalance < MIN_ENTRY_IMBALANCE
-        )
-          continue;
-
-        const execResult = simulateLimitBuy(
-          book,
-          TRADE_BUDGET,
-          config.strategy.maxNoEntryPrice,
-          state.feeSchedule,
-        );
-        if (execResult.totalShares <= 0 || execResult.belowMinimumOrderSize)
-          continue;
-
-        const expectedNetProfit = execResult.totalShares - execResult.netCost;
-        if (expectedNetProfit < config.strategy.minExpectedNetProfit) continue;
-
-        candidates.push({
-          entryQuality,
-          bucket,
-          campaign,
-          expectedNetProfit,
-          expectedReturnPercent: expectedNetProfit / execResult.netCost,
-          execResult,
-          modalBucketTitle: modalBucket.groupItemTitle,
-          posFromModal: offsets.get(bucket.id) ?? 0,
-        });
-      }
-
-      this.activeCampaignMetrics.set(campaign.id, {
-        candidateCount,
-        trackedCount,
-        positionCount,
-      });
-    }
-
-    return { candidates, requiredTokens };
-  }
-
-  private updateWsSubscriptions(requiredTokens: Set<string>): void {
-    const currentlySubscribed = this.wsWatcher.getSubscribedTokens();
-    const toSubscribe = [...requiredTokens].filter(
-      (t) => !currentlySubscribed.has(t),
-    );
-    const toUnsubscribe = [...currentlySubscribed].filter(
-      (t) => !requiredTokens.has(t),
-    );
-    if (toSubscribe.length > 0) this.wsWatcher.subscribe(toSubscribe);
-    if (toUnsubscribe.length > 0) this.wsWatcher.unsubscribe(toUnsubscribe);
-  }
-
-  private async executeCandidates(candidates: Candidate[]): Promise<void> {
-    const config = getConfig();
-
-    candidates.sort((a, b) => {
-      if (b.expectedReturnPercent !== a.expectedReturnPercent)
-        return b.expectedReturnPercent - a.expectedReturnPercent;
-      return (
-        parseFloat(b.bucket.volume24h ?? "0") -
-        parseFloat(a.bucket.volume24h ?? "0")
-      );
-    });
-
-    for (const cand of candidates) {
-      if (
-        this.openPositions.size >= config.strategy.maxSimultaneousPositions &&
-        !config.portfolio.allowNegativeBalance
-      )
-        break;
-
-      try {
-        await this.executeMarketEntry(cand);
-      } catch (err) {
-        logger.error(
-          { err, bucketId: cand.bucket.id },
-          "Failed to execute entry",
-        );
-      }
-    }
-  }
-
-  private async executeMarketEntry(cand: Candidate): Promise<void> {
-    if (!executionPolicy.canOpenNewPositions()) {
-      logger.info(
-        "Skipping market entry: Polymarket status restricts new positions",
-      );
-      return;
-    }
-
-    const execResult = cand.execResult;
-    const trade = await createTrade({
-      campaignId: cand.campaign.id,
-      campaignSlug: cand.campaign.slug,
-      campaignTitle: cand.campaign.title,
-      bucketId: cand.bucket.id,
-      bucketSlug: cand.bucket.slug,
-      bucketGroupTitle: cand.bucket.groupItemTitle,
-      tokenId: cand.bucket.noTokenId,
-      entryTs: new Date(),
-      entryPrice: execResult.averagePrice.toFixed(8),
-      entryShares: execResult.totalShares.toFixed(8),
-      actualCost: execResult.netCost.toFixed(8),
-      entryFees: execResult.fees.toFixed(8),
-      expectedNetProfit: cand.expectedNetProfit.toFixed(8),
-      modalBucketAtEntry: cand.modalBucketTitle,
-      posFromModal: cand.posFromModal,
-      entryQuality: cand.entryQuality,
-    });
-    if (!trade) return;
-
-    const state = this.trackedBuckets.get(cand.bucket.id);
-    if (state) state.belowBand = false;
-
-    this.openPositions.set(trade.id, {
-      tradeId: trade.id,
-      bucketId: cand.bucket.id,
-      tokenId: cand.bucket.noTokenId,
-      entryPrice: execResult.averagePrice,
-      entryShares: execResult.totalShares,
-      fees: execResult.fees,
-      actualCost: execResult.netCost,
-      minNoPriceDuringPosition: null,
-    });
-    await logAudit(
-      "info",
-      "TRADE_OPENED",
-      `Opened simulated NO trade for ${cand.bucket.groupItemTitle}`,
-      { tradeId: trade.id },
-    );
-    logger.info(
-      { tradeId: trade.id, bucketId: cand.bucket.id },
-      "Entry executed",
-    );
-    this.emit("tradeOpened", { trade });
-  }
-
-  private onTokenPriceUpdate(
-    tokenId: string,
-    bestBid: number,
-    bestAsk: number,
-  ): void {
-    const bucketId = this.tokenToBucket.get(tokenId);
-    if (!bucketId) return;
-    const state = this.trackedBuckets.get(bucketId);
-    if (!state || state.resolved) return;
-    const now = Date.now();
-    state.lastPrices[tokenId] = {
-      bid: bestBid,
-      ask: bestAsk,
-      mid: (bestBid + bestAsk) / 2,
+  getStats() {
+    return {
+      running: this.running,
+      paused: this.paused,
+      campaigns: this.campaigns.size,
+      openPositions: this.positions.size,
+      ws: this.ws.getStats(),
+      weathernext: {
+        ...this.feed.getStats(),
+        lastEvaluation: this.lastEvaluation,
+      },
+      polymarketStatus: executionPolicy.getStatus(),
     };
-    if (tokenId === state.noTokenId && bestBid > 0 && bestAsk > 0)
-      recordQuote(state.quotes, bestBid, bestAsk, MAX_ENTRY_SPREAD, now);
-
-    const config = getConfig();
-    const validAsk = !Number.isNaN(bestAsk) && bestAsk > 0 ? bestAsk : null;
-    if (validAsk === null) return;
-
-    for (const pos of this.openPositions.values()) {
-      if (pos.tokenId !== tokenId || pos.bucketId !== bucketId) continue;
-
-      if (
-        state.acceptingOrders &&
-        (pos.minNoPriceDuringPosition === null ||
-          validAsk < pos.minNoPriceDuringPosition)
-      ) {
-        pos.minNoPriceDuringPosition = validAsk;
-      }
-
-      if (!config.strategy.stopLossEnabled) continue;
-      const stopPrice =
-        Math.round((pos.entryPrice - config.strategy.stopLossDelta) * 10000) /
-        10000;
-      if (validAsk > stopPrice) {
-        pos.stopBreachedAt = null;
-        continue;
-      }
-      pos.stopBreachedAt ??= now;
-      if (
-        now - pos.stopBreachedAt >= STOP_CONFIRM_MS &&
-        executionPolicy.canExecuteStopLoss()
-      )
-        this.executeStopLoss(pos, state.feeSchedule).catch((e) =>
-          logger.error({ err: e }, "Failed to execute stop loss"),
-        );
-    }
   }
 
-  private async executeStopLoss(
-    pos: OpenPosition,
-    feeSchedule: FeeSchedule | null,
-  ): Promise<void> {
-    if (pos.isExiting) return;
-    pos.isExiting = true;
-    try {
-      logger.warn(
-        { tradeId: pos.tradeId, bucketId: pos.bucketId },
-        "Executing stop-loss",
-      );
-      const book = await this.client.getOrderbook(pos.tokenId);
-
-      const exit = simulateTakerSell(book, pos.entryShares, feeSchedule);
-      if (exit.totalShares <= 0) {
-        logger.warn(
-          { tradeId: pos.tradeId },
-          "Stop-loss failed: no bids available",
-        );
-        pos.isExiting = false;
-        return;
-      }
-
-      if (exit.isPartialFill) {
-        const ratioRemaining = 1 - exit.totalShares / pos.entryShares;
-        pos.entryShares -= exit.totalShares;
-        pos.actualCost *= ratioRemaining;
-        pos.fees *= ratioRemaining;
-        logger.warn(
-          { tradeId: pos.tradeId, remainingShares: pos.entryShares },
-          "Stop-loss partial fill",
-        );
-        await updateTradePositionSize(
-          pos.tradeId,
-          pos.entryShares.toFixed(8),
-          pos.actualCost.toFixed(8),
-          pos.fees.toFixed(8),
-        );
-        pos.isExiting = false;
-      } else {
-        const realizedPnl = exit.netCost - pos.actualCost;
-        this.realizedPnl += realizedPnl;
-        logger.info(
-          { tradeId: pos.tradeId, avgPrice: exit.averagePrice, realizedPnl },
-          "Stop-loss fully executed",
-        );
-        await resolveTrade(
-          pos.tradeId,
-          "LOSS",
-          realizedPnl.toFixed(8),
-          exit.averagePrice.toFixed(8),
-          "EARLY_EXIT",
-          pos.minNoPriceDuringPosition?.toFixed(8),
-        );
-        this.openPositions.delete(pos.tradeId);
-        this.emit("tradeResolved", { bucketId: pos.bucketId });
-      }
-    } catch (e) {
-      pos.isExiting = false;
-      throw e;
-    }
+  private campaignView(c: Campaign) {
+    let modelTop: { title: string; p: number } | null = null;
+    let marketTop: { title: string; mid: number } | null = null;
+    let bestEdge: number | null = null;
+    c.buckets.forEach((b, i) => {
+      const p = c.probs?.[i];
+      if (p !== undefined && (!modelTop || p > modelTop.p))
+        modelTop = { title: b.title, p };
+      const q = this.quotes.get(b.yesToken);
+      if (!q) return;
+      const mid = (q.bid + q.ask) / 2;
+      if (!marketTop || mid > marketTop.mid)
+        marketTop = { title: b.title, mid };
+      if (p === undefined) return;
+      const edge = Math.max(p - q.ask, q.bid - p);
+      if (bestEdge === null || edge > bestEdge) bestEdge = edge;
+    });
+    return {
+      id: c.id,
+      slug: c.slug,
+      title: c.title,
+      city: c.city,
+      unit: c.fahrenheit ? "F" : "C",
+      endDate: new Date(c.endDate).toISOString(),
+      forecast: c.forecast,
+      modelTop,
+      marketTop,
+      bestEdge,
+      positionCount: [...this.positions.values()].filter(
+        (p) => p.campaignId === c.id,
+      ).length,
+    };
   }
 
-  private async onMarketResolved(ev: MarketResolvedEvent): Promise<void> {
-    const bucketId = this.conditionIdToBucket.get(ev.conditionId);
-    if (!bucketId) return;
-    await this.resolvePositionsForBucket(bucketId, ev.winningAssetId);
+  getActiveCampaigns() {
+    return [...this.campaigns.values()]
+      .sort((a, b) => a.endDate - b.endDate)
+      .map((c) => this.campaignView(c));
   }
 
-  private async pollOpenPositionSettlements(): Promise<void> {
-    const bucketIds = new Set(
-      [...this.openPositions.values()].map((p) => p.bucketId),
-    );
-    for (const bucketId of bucketIds) {
-      const market = await this.client.getMarketById(bucketId);
-      if (!market) continue;
-
-      const state = this.trackedBuckets.get(bucketId);
-      if (state && market.acceptingOrders === false) {
-        state.acceptingOrders = false;
-      }
-
-      if (!market.closed) continue;
-      const tokens = PolymarketClient.parseClobTokenIds(market);
-      const prices = PolymarketClient.parseOutcomePrices(market);
-      const winnerIndex = prices.findIndex((p) => p >= 0.99);
-      if (winnerIndex < 0 || !tokens[winnerIndex]) continue;
-      await this.resolvePositionsForBucket(bucketId, tokens[winnerIndex]!);
-    }
-  }
-
-  private async resolvePositionsForBucket(
-    bucketId: string,
-    winningTokenId: string,
-  ): Promise<void> {
-    const positions = [...this.openPositions.values()].filter(
-      (p) => p.bucketId === bucketId,
-    );
-    const state = this.trackedBuckets.get(bucketId);
-    if (state) state.resolved = true;
-
-    try {
-      const db = getDb();
-      const [bucket] = await db
-        .select()
-        .from(schema.buckets)
-        .where(eq(schema.buckets.id, bucketId));
-      if (bucket) {
-        const isYesWinner = bucket.yesTokenId === winningTokenId;
-        await db
-          .update(schema.buckets)
-          .set({
-            yesPrice: isYesWinner ? "1" : "0",
-            noPrice: isYesWinner ? "0" : "1",
-            updatedAt: new Date(),
-          })
-          .where(eq(schema.buckets.id, bucketId));
-      }
-    } catch (err) {
-      logger.error({ err, bucketId }, "Failed to persist bucket resolution");
-    }
-
-    for (const pos of positions) {
-      const isWin = pos.tokenId === winningTokenId;
-      const pnl = isWin
-        ? calculateWinProfit(pos.entryPrice, pos.entryShares, pos.fees)
-        : calculateLossAmount(pos.entryPrice, pos.entryShares, pos.fees);
-      this.realizedPnl += pnl;
-      const trade = await resolveTrade(
-        pos.tradeId,
-        isWin ? "WIN" : "LOSS",
-        pnl.toFixed(8),
-        isWin ? "1" : "0",
-        "RESOLUTION",
-        pos.minNoPriceDuringPosition?.toFixed(8),
-      );
-      this.openPositions.delete(pos.tradeId);
-      this.updateConsecutiveLossState(isWin);
-      await logAudit(
-        "info",
-        "TRADE_RESOLVED",
-        `Trade ${pos.tradeId} resolved ${isWin ? "WIN" : "LOSS"}`,
-        { bucketId, pnl },
-      );
-      this.emit("tradeResolved", { tradeId: pos.tradeId, isWin, pnl, trade });
-    }
-  }
-
-  private updateConsecutiveLossState(isWin: boolean): void {
-    const config = getConfig();
-    if (config.strategy.consecutiveLossPauseLimit <= 0) return;
-    if (isWin) {
-      this.consecutiveLossCount = 0;
-      return;
-    }
-    this.consecutiveLossCount++;
-    if (
-      this.consecutiveLossCount < config.strategy.consecutiveLossPauseLimit ||
-      this.paused
-    )
-      return;
-    this.pausedByRiskGuard = true;
-    this.pause();
-    if (config.strategy.riskAutoResumeEnabled) {
-      this.riskAutoResumeTimer = setTimeout(
-        () =>
-          this.resume().catch((error) =>
-            logger.error({ error }, "Risk auto-resume failed"),
-          ),
-        config.strategy.riskAutoResumeCooldownMs,
-      );
-    }
+  async getCampaignDetail(id: string) {
+    const c = this.campaigns.get(id);
+    if (!c) return null;
+    const quotes = c.buckets.length
+      ? await this.client.getQuotes(c.buckets.map((b) => b.yesToken))
+      : new Map();
+    return {
+      ...this.campaignView(c),
+      buckets: c.buckets.map((b, i) => {
+        const q = quotes.get(b.yesToken) ?? null;
+        const p = c.probs?.[i] ?? null;
+        return {
+          id: b.id,
+          slug: b.slug,
+          title: b.title,
+          bid: q?.bid ?? null,
+          ask: q?.ask ?? null,
+          model: p,
+          edge: p !== null && q ? round4(Math.max(p - q.ask, q.bid - p)) : null,
+          positions: [...this.positions.values()]
+            .filter((pos) => pos.bucketId === b.id)
+            .map((pos) => ({
+              id: pos.tradeId,
+              side: pos.side,
+              entryPrice: pos.entryPrice,
+              shares: pos.shares,
+              target: pos.target,
+            })),
+        };
+      }),
+    };
   }
 }
 

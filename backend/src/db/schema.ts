@@ -5,11 +5,26 @@ import {
   timestamp,
   jsonb,
   decimal,
-  integer,
+  real,
   index,
   uniqueIndex,
 } from "drizzle-orm/pg-core";
-import { sql } from "drizzle-orm";
+
+export interface ForecastSummary {
+  init: string;
+  publishedAt: string;
+  fmaxC: number;
+  mu: number;
+  sigma: number;
+}
+
+export interface TradeSignal {
+  init: string;
+  leadH: number;
+  pModel: number;
+  quote: number;
+  edge: number;
+}
 
 export const campaigns = pgTable(
   "campaigns",
@@ -17,45 +32,22 @@ export const campaigns = pgTable(
     id: text("id").primaryKey(),
     slug: text("slug").notNull(),
     title: text("title").notNull(),
-    seriesSlug: text("series_slug"),
-    startDate: timestamp("start_date"),
-    endDate: timestamp("end_date"),
-    closedTime: timestamp("closed_time"),
+    endDate: timestamp("end_date").notNull(),
     closed: boolean("closed").default(false).notNull(),
-    lastFetchedAt: timestamp("last_fetched_at").defaultNow().notNull(),
+    closedTime: timestamp("closed_time"),
+    forecast: jsonb("forecast").$type<ForecastSummary>(),
     createdAt: timestamp("created_at").defaultNow().notNull(),
-    updatedAt: timestamp("updated_at").defaultNow().notNull(),
   },
   (table) => ({
-    slugIdx: uniqueIndex("c_slug_idx").on(table.slug),
-    updatedAtIdx: index("c_updated_at_idx").on(table.updatedAt),
+    closedIdx: index("c_closed_idx").on(table.closed),
   }),
 );
 
-export const buckets = pgTable(
-  "buckets",
-  {
-    id: text("id").primaryKey(),
-    campaignId: text("campaign_id").notNull(),
-    conditionId: text("condition_id"),
-    slug: text("slug"),
-    groupItemTitle: text("group_item_title").notNull(),
-    yesTokenId: text("yes_token_id").notNull(),
-    noTokenId: text("no_token_id").notNull(),
-    yesPrice: decimal("yes_price", { precision: 18, scale: 8 }),
-    noPrice: decimal("no_price", { precision: 18, scale: 8 }),
-    spread: decimal("spread", { precision: 18, scale: 8 }),
-    liquidityNum: decimal("liquidity_num", { precision: 18, scale: 8 }),
-    volume24h: decimal("volume_24h", { precision: 18, scale: 8 }),
-    lastFetchedAt: timestamp("last_fetched_at").defaultNow().notNull(),
-    createdAt: timestamp("created_at").defaultNow().notNull(),
-    updatedAt: timestamp("updated_at").defaultNow().notNull(),
-  },
-  (table) => ({
-    campaignIdx: index("b_campaign_idx").on(table.campaignId),
-    noTokenIdx: index("b_no_token_idx").on(table.noTokenId),
-  }),
-);
+export const cityBias = pgTable("city_bias", {
+  city: text("city").primaryKey(),
+  weight: real("weight").notNull(),
+  sum: real("sum").notNull(),
+});
 
 export const trades = pgTable(
   "trades",
@@ -63,13 +55,14 @@ export const trades = pgTable(
     id: text("id")
       .primaryKey()
       .$defaultFn(() => crypto.randomUUID()),
-    campaignId: text("campaign_id"),
-    campaignSlug: text("campaign_slug"),
-    campaignTitle: text("campaign_title"),
-    bucketId: text("bucket_id"),
+    campaignId: text("campaign_id").notNull(),
+    campaignSlug: text("campaign_slug").notNull(),
+    campaignTitle: text("campaign_title").notNull(),
+    bucketId: text("bucket_id").notNull(),
     bucketSlug: text("bucket_slug"),
-    bucketGroupTitle: text("bucket_group_title"),
-    tokenId: text("token_id"),
+    bucketGroupTitle: text("bucket_group_title").notNull(),
+    tokenId: text("token_id").notNull(),
+    side: text("side").notNull(),
     entryTs: timestamp("entry_ts").notNull(),
     entryPrice: decimal("entry_price", { precision: 18, scale: 8 }).notNull(),
     entryShares: decimal("entry_shares", { precision: 18, scale: 8 }).notNull(),
@@ -77,14 +70,9 @@ export const trades = pgTable(
     entryFees: decimal("entry_fees", { precision: 18, scale: 8 })
       .default("0")
       .notNull(),
-    expectedNetProfit: decimal("expected_net_profit", {
-      precision: 18,
-      scale: 8,
-    }),
-    modalBucketAtEntry: text("modal_bucket_at_entry"),
-    posFromModal: integer("pos_from_modal"),
-    entryQuality: jsonb("entry_quality"),
-    minNoPriceDuringPosition: decimal("min_no_price_during_position", {
+    target: decimal("target", { precision: 18, scale: 8 }).notNull(),
+    signal: jsonb("signal").$type<TradeSignal>().notNull(),
+    minPriceDuringPosition: decimal("min_price_during_position", {
       precision: 18,
       scale: 8,
     }),
@@ -94,16 +82,12 @@ export const trades = pgTable(
     exitReason: text("exit_reason"),
     realizedPnl: decimal("realized_pnl", { precision: 18, scale: 8 }),
     status: text("status").default("OPEN").notNull(),
-    createdAt: timestamp("created_at").defaultNow().notNull(),
-    updatedAt: timestamp("updated_at").defaultNow().notNull(),
   },
   (table) => ({
-    bucketIdIdx: index("t_bucket_id_idx").on(table.bucketId),
+    campaignIdx: index("t_campaign_idx").on(table.campaignId),
     statusIdx: index("t_status_idx").on(table.status),
-    entryTsIdx: index("t_entry_ts_idx").on(table.entryTs),
-    uqOpenTradePerToken: uniqueIndex("uq_open_trade_per_bucket_token")
-      .on(table.bucketId, table.tokenId)
-      .where(sql`status = 'OPEN'`),
+    exitTsIdx: index("t_exit_ts_idx").on(table.exitTs),
+    uqBucket: uniqueIndex("uq_trade_bucket").on(table.bucketId),
   }),
 );
 
