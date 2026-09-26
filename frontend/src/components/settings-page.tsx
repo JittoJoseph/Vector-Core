@@ -357,33 +357,33 @@ export function SettingsPage() {
                       value={`$${stats.config.startingCapital}`}
                     />
                     <ConfigItem
-                      label="Max Open Positions"
-                      value={stats.config.maxPositions?.toString() ?? "N/A"}
+                      label="Trade Size"
+                      value={`$${stats.config.tradeBudget}`}
                     />
                     <ConfigItem
-                      label="Min NO Entry Price"
-                      value={`${(stats.config.minNoEntryPrice * 100).toFixed(1)}¢`}
+                      label="Min Edge (after fees)"
+                      value={`${(stats.config.minEdge * 100).toFixed(0)}¢`}
                     />
                     <ConfigItem
-                      label="Max NO Entry Price"
-                      value={`${(stats.config.maxNoEntryPrice * 100).toFixed(1)}¢`}
-                    />
-
-                    <ConfigItem
-                      label="Min Expected Net Profit"
-                      value={`$${stats.config.minExpectedNetProfit}`}
+                      label="Max Spread"
+                      value={`${(stats.config.maxSpread * 100).toFixed(0)}¢`}
                     />
                     <ConfigItem
-                      label="Hours to End"
-                      value={`${stats.config.entryWindowHours}h`}
+                      label="Price Range"
+                      value={`${(stats.config.minPrice * 100).toFixed(0)}¢ — ${(stats.config.maxPrice * 100).toFixed(0)}¢`}
                     />
+                    <ConfigItem label="Take Profit" value="Bid ≥ model prob" />
                     <ConfigItem
                       label="Stop Loss Delta"
                       value={
-                        stats.config.stopLossEnabled
-                          ? `${(stats.config.stopLossDelta * 100).toFixed(1)}¢`
+                        stats.config.stopLossDelta > 0
+                          ? `${(stats.config.stopLossDelta * 100).toFixed(0)}¢`
                           : "Disabled"
                       }
+                    />
+                    <ConfigItem
+                      label="Forecast Source"
+                      value="WeatherNext 3 (Earth Engine)"
                     />
                   </div>
                 ) : (

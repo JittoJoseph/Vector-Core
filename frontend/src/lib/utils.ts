@@ -65,3 +65,34 @@ export function groupExpirations(openTrades: Trade[]) {
 
   return { closestExpiration, closestTrades, expirationBuckets };
 }
+
+export function formatDurationMs(diffMs: number): string {
+  const secs = Math.max(0, Math.floor(diffMs / 1000));
+  if (secs < 60) return `${secs}s`;
+  const mins = Math.floor(secs / 60);
+  if (mins < 60) return `${mins}m ${secs % 60}s`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ${mins % 60}m`;
+  return `${Math.floor(hrs / 24)}d ${hrs % 24}h`;
+}
+
+export function formatDuration(start: string, end: string): string {
+  return formatDurationMs(new Date(end).getTime() - new Date(start).getTime());
+}
+
+export function timeAgo(iso: string | number | null | undefined): string {
+  if (iso == null) return "—";
+  const diff = Date.now() - new Date(iso).getTime();
+  if (diff < 60_000) return `${Math.max(0, Math.floor(diff / 1000))}s ago`;
+  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`;
+  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`;
+  return `${Math.floor(diff / 86_400_000)}d ago`;
+}
+
+export function cents(price: number | null | undefined, digits = 0): string {
+  return price == null ? "—" : `${(price * 100).toFixed(digits)}¢`;
+}
+
+export function utcHour(iso: string | null | undefined): string {
+  return iso ? `${iso.slice(5, 10)} ${iso.slice(11, 13)}Z` : "—";
+}

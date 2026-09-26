@@ -5,20 +5,24 @@ import { Header } from "./header";
 import { TradesTable, MarketCountdown } from "./trades-table";
 import { TradeDetailPopup } from "./trade-detail-popup";
 import { ActivityPanel } from "./activity-panel";
-import { CampaignsTable } from "./campaigns-table";
+import { ActiveCampaignsTable, HistoryCampaignsTable } from "./campaigns-table";
 import { Tabs, TabsContent } from "@/components/ui/tabs";
 import {
+  cents,
   pnlColor,
   formatPnl,
   groupExpirations,
   shortCampaignTitle,
+  timeAgo,
+  utcHour,
 } from "@/lib/utils";
 import NumberFlow from "@number-flow/react";
 import {
   usePositions,
   useTradeHistory,
   useSystemStats,
-  useCampaigns,
+  useActiveCampaigns,
+  useHistoryCampaigns,
   usePerformance,
   useActivityLog,
 } from "@/lib/hooks";
@@ -71,15 +75,15 @@ export function DashboardPage() {
     refetch: refetchTrades,
   } = useTradeHistory(activeTab === "history");
   const {
-    campaigns: activeCampaigns,
+    items: activeCampaigns,
     loading: activeLoading,
     refetch: refetchActive,
-  } = useCampaigns("active", activeTab === "campaigns");
+  } = useActiveCampaigns(activeTab === "campaigns");
   const {
-    campaigns: historyCampaigns,
+    items: historyCampaigns,
     loading: historyLoading,
     refetch: refetchHistory,
-  } = useCampaigns("history", activeTab === "campaign_history");
+  } = useHistoryCampaigns(activeTab === "campaign_history");
   const { activities, loading: activitiesLoading } = useActivityLog(
     activeTab === "diagnostics",
   );
@@ -123,6 +127,8 @@ export function DashboardPage() {
 
   const winRate = parseFloat(performance?.winRate || "0");
   const isPaused = stats?.orchestrator?.paused ?? false;
+  const wn = stats?.orchestrator?.weathernext;
+  const config = stats?.config;
 
   const { closestExpiration, closestTrades, expirationBuckets } =
     groupExpirations(openTrades);
@@ -307,6 +313,28 @@ export function DashboardPage() {
 
                 <div className="flex items-center justify-between bg-card/30 border border-border/20 rounded px-3 py-1.5">
                   <span className="text-[10px] text-muted-foreground/80 uppercase tracking-widest font-bold">
+                    WeatherNext
+                  </span>
+                  <span
+                    className={`text-[10px] font-bold tracking-widest uppercase ${
+                      wn?.lastError
+                        ? "text-red-400"
+                        : wn?.lastInit
+                          ? "text-emerald-400"
+                          : "text-muted-foreground"
+                    }`}
+                    title={wn?.lastError ?? undefined}
+                  >
+                    {wn?.lastError
+                      ? "ERROR"
+                      : wn?.lastInit
+                        ? utcHour(wn.lastInit)
+                        : "WAITING"}
+                  </span>
+                </div>
+
+                <div className="flex items-center justify-between bg-card/30 border border-border/20 rounded px-3 py-1.5">
+                  <span className="text-[10px] text-muted-foreground/80 uppercase tracking-widest font-bold">
                     Polymarket
                   </span>
                   <span
@@ -329,18 +357,18 @@ export function DashboardPage() {
               <div className="grid grid-cols-2 gap-x-4 gap-y-2">
                 <div>
                   <div className="text-[9px] text-muted-foreground/60 uppercase tracking-widest mb-0.5 font-bold">
-                    Watched Markets
+                    Open Ladders
                   </div>
                   <div className="text-xs font-mono font-bold text-foreground">
-                    {stats?.orchestrator?.activeBuckets || 0}
+                    {stats?.orchestrator?.campaigns || 0}
                   </div>
                 </div>
                 <div>
                   <div className="text-[9px] text-muted-foreground/60 uppercase tracking-widest mb-0.5 font-bold">
-                    Loops
+                    Runs Processed
                   </div>
                   <div className="text-[10px] font-bold tracking-widest uppercase text-foreground">
-                    {stats?.orchestrator?.cycleCount || 0}
+                    {wn?.runsProcessed || 0}
                   </div>
                 </div>
               </div>
@@ -440,8 +468,7 @@ export function DashboardPage() {
                 value="campaigns"
                 className="mt-0 flex-1 p-0 flex flex-col h-full"
               >
-                <CampaignsTable
-                  status="active"
+                <ActiveCampaignsTable
                   campaigns={activeCampaigns}
                   loading={activeLoading}
                   positionsPnl={positionsPnl}
@@ -452,8 +479,7 @@ export function DashboardPage() {
                 value="campaign_history"
                 className="mt-0 flex-1 p-0 flex flex-col h-full"
               >
-                <CampaignsTable
-                  status="history"
+                <HistoryCampaignsTable
                   campaigns={historyCampaigns}
                   loading={historyLoading}
                 />
@@ -467,23 +493,50 @@ export function DashboardPage() {
                         <Activity size={12} /> System Telemetry
                       </div>
                       <div className="grid grid-cols-2 gap-3">
-                        <div className="border border-border/20 rounded p-3 bg-muted/5">
-                          <div className="text-[9px] text-muted-foreground uppercase tracking-widest mb-1">
-                            Scanner Loops
+                        {(
+                          [
+                            ["Last Run", utcHour(wn?.lastInit)],
+                            ["Published", timeAgo(wn?.lastPublishedAt)],
+                            [
+                              "Fetch Time",
+                              wn?.lastFetchMs
+                                ? `${(wn.lastFetchMs / 1000).toFixed(1)}s`
+                                : "—",
+                            ],
+                            ["Runs Processed", String(wn?.runsProcessed ?? 0)],
+                            [
+                              "Ladders Priced",
+                              String(wn?.lastEvaluation?.covered ?? 0),
+                            ],
+                            [
+                              "Entries Last Run",
+                              String(wn?.lastEvaluation?.entries ?? 0),
+                            ],
+                            ["Last Poll", timeAgo(wn?.lastPollAt)],
+                            [
+                              "WS Messages",
+                              String(
+                                stats?.orchestrator?.ws?.messageCount ?? 0,
+                              ),
+                            ],
+                          ] as const
+                        ).map(([label, value]) => (
+                          <div
+                            key={label}
+                            className="border border-border/20 rounded p-3 bg-muted/5"
+                          >
+                            <div className="text-[9px] text-muted-foreground uppercase tracking-widest mb-1">
+                              {label}
+                            </div>
+                            <div className="text-lg font-bold">{value}</div>
                           </div>
-                          <div className="text-lg font-bold">
-                            {stats?.orchestrator?.cycleCount || 0}
-                          </div>
-                        </div>
-                        <div className="border border-border/20 rounded p-3 bg-muted/5">
-                          <div className="text-[9px] text-muted-foreground uppercase tracking-widest mb-1">
-                            WS Messages
-                          </div>
-                          <div className="text-lg font-bold">
-                            {stats?.orchestrator?.ws?.messageCount || 0}
-                          </div>
-                        </div>
+                        ))}
                       </div>
+                      {wn?.lastError && (
+                        <div className="mt-3 text-[10px] text-red-400 break-all">
+                          {wn.lastError}
+                        </div>
+                      )}
                     </div>
                   </div>
                   <div className="flex flex-col">
@@ -629,51 +682,33 @@ export function DashboardPage() {
                 Active Parameters
               </div>
               <div className="flex flex-col gap-4">
-                <div className="flex justify-between items-end">
-                  <span className="text-[10px] text-muted-foreground uppercase tracking-widest">
-                    NO Price Range
-                  </span>
-                  <span className="text-[11px] font-mono text-foreground tabular-nums">
-                    {Math.round((stats?.config.minNoEntryPrice || 0) * 100)}¢ —{" "}
-                    {Math.round((stats?.config.maxNoEntryPrice || 0) * 100)}¢
-                  </span>
-                </div>
-
-                <div className="flex justify-between items-end">
-                  <span className="text-[10px] text-muted-foreground uppercase tracking-widest">
-                    Expected Profit Min
-                  </span>
-                  <span className="text-[11px] font-mono text-emerald-400 tabular-nums">
-                    ${stats?.config.minExpectedNetProfit || 0}
-                  </span>
-                </div>
-
-                <div className="flex justify-between items-end">
-                  <span className="text-[10px] text-muted-foreground uppercase tracking-widest">
-                    Hours To End
-                  </span>
-                  <span className="text-[11px] font-mono text-foreground tabular-nums">
-                    {stats?.config.entryWindowHours ?? 0}h
-                  </span>
-                </div>
-
-                <div className="flex justify-between items-end">
-                  <span className="text-[10px] text-muted-foreground uppercase tracking-widest">
-                    Stop Loss Enabled
-                  </span>
-                  <span className="text-[11px] font-mono text-foreground tabular-nums">
-                    {stats?.config.stopLossEnabled ? "Enabled" : "Disabled"}
-                  </span>
-                </div>
-
-                <div className="flex justify-between items-end">
-                  <span className="text-[10px] text-muted-foreground uppercase tracking-widest">
-                    Stop Loss Delta
-                  </span>
-                  <span className="text-[11px] font-mono text-foreground tabular-nums">
-                    {Math.round((stats?.config.stopLossDelta || 0) * 100)}¢
-                  </span>
-                </div>
+                {(
+                  [
+                    ["Min Edge (after fees)", cents(config?.minEdge)],
+                    ["Max Spread", cents(config?.maxSpread)],
+                    [
+                      "Price Range",
+                      `${cents(config?.minPrice)} — ${cents(config?.maxPrice)}`,
+                    ],
+                    ["Trade Size", `$${config?.tradeBudget ?? 0}`],
+                    ["Take Profit", "Bid ≥ model prob"],
+                    [
+                      "Stop Loss",
+                      config?.stopLossDelta
+                        ? `−${cents(config.stopLossDelta)}`
+                        : "Disabled",
+                    ],
+                  ] as const
+                ).map(([label, value]) => (
+                  <div key={label} className="flex justify-between items-end">
+                    <span className="text-[10px] text-muted-foreground uppercase tracking-widest">
+                      {label}
+                    </span>
+                    <span className="text-[11px] font-mono text-foreground tabular-nums">
+                      {value}
+                    </span>
+                  </div>
+                ))}
               </div>
             </div>
           </div>

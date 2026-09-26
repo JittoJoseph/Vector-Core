@@ -2,71 +2,46 @@ import React, { useState } from "react";
 import { ChevronRight } from "lucide-react";
 import { CampaignDetailPopup } from "./campaign-detail-popup";
 import { MarketCountdown } from "./trades-table";
-import type { Campaign, PositionPnl } from "@/lib/types";
+import type { ActiveCampaign, HistoryCampaign, PositionPnl } from "@/lib/types";
+import { cents, pnlColor } from "@/lib/utils";
 
-export function CampaignsTable({
-  status = "active",
-  campaigns,
+const TH =
+  "py-2.5 px-4 font-medium text-muted-foreground tracking-wider text-[10px]";
+
+function Shell({
   loading,
+  empty,
+  children,
+  selectedId,
+  onClose,
   positionsPnl,
 }: {
-  status?: "active" | "history";
-  campaigns: Campaign[];
   loading: boolean;
+  empty: boolean;
+  children: React.ReactNode;
+  selectedId: string | null;
+  onClose: () => void;
   positionsPnl?: Record<string, PositionPnl>;
 }) {
-  const [selectedCampaign, setSelectedCampaign] = useState<Campaign | null>(
-    null,
-  );
-
-  if (loading) {
+  if (loading)
     return (
       <div className="p-12 text-center text-muted-foreground animate-pulse font-mono text-xs tracking-widest uppercase">
         Loading campaigns...
       </div>
     );
-  }
-
-  if (campaigns.length === 0) {
+  if (empty)
     return (
       <div className="p-12 text-center text-muted-foreground font-mono text-xs">
-        No {status === "active" ? "active" : "historical"} campaigns discovered.
+        No campaigns.
       </div>
     );
-  }
-
-  const sections =
-    status === "active"
-      ? [
-          {
-            title: "ACTIVE",
-            rows: campaigns.filter((c) => (c.trackedCount ?? 0) > 0),
-          },
-          {
-            title: "IDLE",
-            rows: campaigns.filter((c) => (c.trackedCount ?? 0) === 0),
-          },
-        ]
-      : [{ title: "CAMPAIGN HISTORY", rows: campaigns }];
-
   return (
     <div className="flex flex-col h-full bg-card/50 relative">
-      <div className="flex-1 overflow-auto">
-        {sections.map((section) => (
-          <div key={section.title}>
-            <SectionHeader title={section.title} count={section.rows.length} />
-            <CampaignTable
-              status={status}
-              campaigns={section.rows}
-              onSelect={setSelectedCampaign}
-            />
-          </div>
-        ))}
-      </div>
-      {selectedCampaign && (
+      <div className="flex-1 overflow-auto">{children}</div>
+      {selectedId && (
         <CampaignDetailPopup
-          campaign={selectedCampaign}
-          onClose={() => setSelectedCampaign(null)}
+          campaignId={selectedId}
+          onClose={onClose}
           positionsPnl={positionsPnl}
         />
       )}
@@ -85,68 +60,140 @@ function SectionHeader({ title, count }: { title: string; count: number }) {
   );
 }
 
-function CampaignTable({
-  status,
+export function ActiveCampaignsTable({
   campaigns,
-  onSelect,
+  loading,
+  positionsPnl,
 }: {
-  status: "active" | "history";
-  campaigns: Campaign[];
-  onSelect: (campaign: Campaign) => void;
+  campaigns: ActiveCampaign[];
+  loading: boolean;
+  positionsPnl?: Record<string, PositionPnl>;
 }) {
+  const [selected, setSelected] = useState<string | null>(null);
+  const sections = [
+    { title: "FORECAST LIVE", rows: campaigns.filter((c) => c.forecast) },
+    { title: "AWAITING FORECAST", rows: campaigns.filter((c) => !c.forecast) },
+  ];
+
   return (
-    <table className="w-full text-xs font-mono">
-      <thead>
-        <tr className="border-b border-border/30 sticky top-0 bg-card z-10 shadow-sm">
-          <th className="text-left py-2.5 px-4 font-medium text-muted-foreground tracking-wider text-[10px] w-8"></th>
-          <th className="text-left py-2.5 px-4 font-medium text-muted-foreground tracking-wider text-[10px]">
-            CAMPAIGN
-          </th>
-          <th className="text-right py-2.5 px-4 font-medium text-muted-foreground tracking-wider text-[10px]">
-            {status === "active" ? "TIME LEFT" : "SERIES"}
-          </th>
-          {status === "active" ? (
-            <>
-              <th
-                className="text-right py-2.5 px-4 font-medium text-muted-foreground tracking-wider text-[10px]"
-                title="Actionable Candidate Buckets"
-              >
-                CANDIDATES
-              </th>
-              <th
-                className="text-right py-2.5 px-4 font-medium text-muted-foreground tracking-wider text-[10px]"
-                title="Currently Tracked by WS"
-              >
-                TRACKED
-              </th>
-              <th className="text-right py-2.5 px-4 font-medium text-muted-foreground tracking-wider text-[10px]">
-                POSITIONS
-              </th>
-            </>
-          ) : (
-            <>
-              <th className="text-right py-2.5 px-4 font-medium text-muted-foreground tracking-wider text-[10px]">
-                TRADES
-              </th>
-              <th className="text-right py-2.5 px-4 font-medium text-muted-foreground tracking-wider text-[10px]">
-                TOTAL PNL
-              </th>
-            </>
-          )}
-        </tr>
-      </thead>
-      <tbody className="divide-y divide-border/10">
-        {campaigns.map((c) => {
-          const historical =
-            !Array.isArray(c.historicalTrades) && c.historicalTrades
-              ? c.historicalTrades
-              : null;
-          const pnl = historical?.totalPnl ?? 0;
-          return (
+    <Shell
+      loading={loading}
+      empty={campaigns.length === 0}
+      selectedId={selected}
+      onClose={() => setSelected(null)}
+      positionsPnl={positionsPnl}
+    >
+      {sections.map((section) => (
+        <div key={section.title}>
+          <SectionHeader title={section.title} count={section.rows.length} />
+          <table className="w-full text-xs font-mono">
+            <thead>
+              <tr className="border-b border-border/30 sticky top-0 bg-card z-10 shadow-sm">
+                <th className={`${TH} text-left w-8`}></th>
+                <th className={`${TH} text-left`}>CAMPAIGN</th>
+                <th className={`${TH} text-right`}>TIME LEFT</th>
+                <th
+                  className={`${TH} text-right`}
+                  title="WeatherNext 3 forecast daily max (bias-corrected)"
+                >
+                  WN3 MAX
+                </th>
+                <th className={`${TH} text-right`}>MODEL TOP</th>
+                <th className={`${TH} text-right`}>MARKET TOP</th>
+                <th
+                  className={`${TH} text-right`}
+                  title="Largest model-vs-quote gap"
+                >
+                  EDGE
+                </th>
+                <th className={`${TH} text-right`}>POS</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border/10">
+              {section.rows.map((c) => (
+                <tr
+                  key={c.id}
+                  className="hover:bg-muted/15 cursor-pointer transition-colors"
+                  onClick={() => setSelected(c.id)}
+                >
+                  <td className="py-3 px-4 text-muted-foreground">
+                    <ChevronRight size={14} />
+                  </td>
+                  <td className="py-3 px-4 min-w-[260px]">
+                    <span className="font-medium text-foreground truncate max-w-[380px] block">
+                      {c.title}
+                    </span>
+                  </td>
+                  <td className="py-3 px-4 text-right tabular-nums font-medium">
+                    <MarketCountdown endDate={c.endDate} />
+                  </td>
+                  <td className="py-3 px-4 text-right tabular-nums text-sky-400">
+                    {c.forecast ? `${c.forecast.mu.toFixed(1)}°${c.unit}` : "—"}
+                  </td>
+                  <td className="py-3 px-4 text-right tabular-nums">
+                    {c.modelTop
+                      ? `${c.modelTop.title} ${cents(c.modelTop.p)}`
+                      : "—"}
+                  </td>
+                  <td className="py-3 px-4 text-right tabular-nums text-muted-foreground">
+                    {c.marketTop
+                      ? `${c.marketTop.title} ${cents(c.marketTop.mid)}`
+                      : "—"}
+                  </td>
+                  <td
+                    className={`py-3 px-4 text-right tabular-nums font-bold ${
+                      c.bestEdge != null && c.bestEdge >= 0.2
+                        ? "text-emerald-400"
+                        : "text-muted-foreground"
+                    }`}
+                  >
+                    {c.bestEdge != null ? cents(c.bestEdge) : "—"}
+                  </td>
+                  <td className="py-3 px-4 text-right tabular-nums font-medium">
+                    {c.positionCount}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ))}
+    </Shell>
+  );
+}
+
+export function HistoryCampaignsTable({
+  campaigns,
+  loading,
+}: {
+  campaigns: HistoryCampaign[];
+  loading: boolean;
+}) {
+  const [selected, setSelected] = useState<string | null>(null);
+  return (
+    <Shell
+      loading={loading}
+      empty={campaigns.length === 0}
+      selectedId={selected}
+      onClose={() => setSelected(null)}
+    >
+      <SectionHeader title="CAMPAIGN HISTORY" count={campaigns.length} />
+      <table className="w-full text-xs font-mono">
+        <thead>
+          <tr className="border-b border-border/30 sticky top-0 bg-card z-10 shadow-sm">
+            <th className={`${TH} text-left w-8`}></th>
+            <th className={`${TH} text-left`}>CAMPAIGN</th>
+            <th className={`${TH} text-right`}>RESOLVED</th>
+            <th className={`${TH} text-right`}>TRADES</th>
+            <th className={`${TH} text-right`}>TOTAL PNL</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-border/10">
+          {campaigns.map((c) => (
             <tr
               key={c.id}
               className="hover:bg-muted/15 cursor-pointer transition-colors"
-              onClick={() => onSelect(c)}
+              onClick={() => setSelected(c.id)}
             >
               <td className="py-3 px-4 text-muted-foreground">
                 <ChevronRight size={14} />
@@ -156,62 +203,27 @@ function CampaignTable({
                   {c.title}
                 </span>
               </td>
-              <td className="py-3 px-4 text-right">
-                {status === "active" ? (
-                  c.endDate ? (
-                    <span className="tabular-nums font-medium text-foreground">
-                      <MarketCountdown endDate={c.endDate} />
-                    </span>
-                  ) : (
-                    <span className="text-muted-foreground">—</span>
-                  )
-                ) : c.seriesSlug ? (
-                  <span className="inline-flex items-center text-[9px] font-bold tracking-wider px-2 py-0.5 rounded border border-purple-500/25 bg-purple-500/5 text-purple-400">
-                    {c.seriesSlug}
-                  </span>
-                ) : (
-                  <span className="text-muted-foreground">—</span>
-                )}
+              <td className="py-3 px-4 text-right tabular-nums text-muted-foreground">
+                {new Date(c.closedTime ?? c.endDate).toLocaleString(undefined, {
+                  month: "short",
+                  day: "numeric",
+                  hour: "2-digit",
+                  minute: "2-digit",
+                })}
               </td>
-              {status === "active" ? (
-                <>
-                  <td className="py-3 px-4 text-right">
-                    <span className="tabular-nums font-medium text-emerald-400">
-                      {c.candidateCount ?? 0}
-                    </span>
-                  </td>
-                  <td className="py-3 px-4 text-right">
-                    <span className="tabular-nums font-medium text-blue-400">
-                      {c.trackedCount ?? 0}
-                    </span>
-                  </td>
-                  <td className="py-3 px-4 text-right">
-                    <span className="tabular-nums font-medium">
-                      {c.positionCount ?? 0}
-                    </span>
-                  </td>
-                </>
-              ) : (
-                <>
-                  <td className="py-3 px-4 text-right">
-                    <span className="tabular-nums font-medium">
-                      {historical?.length ?? 0}
-                    </span>
-                  </td>
-                  <td className="py-3 px-4 text-right">
-                    <span
-                      className={`tabular-nums font-bold ${pnl > 0 ? "text-emerald-400" : pnl < 0 ? "text-red-400" : ""}`}
-                    >
-                      {pnl > 0 ? "+" : ""}
-                      {pnl.toFixed(4)}
-                    </span>
-                  </td>
-                </>
-              )}
+              <td className="py-3 px-4 text-right tabular-nums font-medium">
+                {c.tradeCount}
+              </td>
+              <td
+                className={`py-3 px-4 text-right tabular-nums font-bold ${c.tradeCount ? pnlColor(c.totalPnl) : ""}`}
+              >
+                {c.totalPnl > 0 ? "+" : ""}
+                {c.totalPnl.toFixed(4)}
+              </td>
             </tr>
-          );
-        })}
-      </tbody>
-    </table>
+          ))}
+        </tbody>
+      </table>
+    </Shell>
   );
 }

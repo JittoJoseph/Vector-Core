@@ -6,7 +6,9 @@ import { formatPnl } from "./utils";
 import type {
   Trade,
   SystemStats,
-  Campaign,
+  ActiveCampaign,
+  HistoryCampaign,
+  CampaignDetail,
   PerformanceMetrics,
   AuditLog,
   ActivityEntry,
@@ -191,37 +193,37 @@ export function useSystemStats() {
   return { stats, loading, error, refetch: fetchStats };
 }
 
-export function useCampaigns(
-  status: "active" | "history" = "active",
-  enabled: boolean = true,
-) {
-  const [campaigns, setCampaigns] = useState<Campaign[]>([]);
+function useLazyList<T>(enabled: boolean, load: () => Promise<T[]>) {
+  const [items, setItems] = useState<T[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<Error | null>(null);
 
-  const fetchCampaigns = useCallback(async () => {
+  const refetch = useCallback(async () => {
     try {
       setLoading(true);
-      const response = await getApiClient().getCampaigns({
-        limit: 100,
-        status,
-      });
-      setCampaigns(response);
-      setError(null);
-    } catch (err) {
-      setError(err as Error);
+      setItems(await load());
+    } catch {
     } finally {
       setLoading(false);
     }
-  }, [status]);
+  }, [load]);
 
-  useFetchOnce(enabled, fetchCampaigns, [fetchCampaigns]);
+  useFetchOnce(enabled, refetch, [refetch]);
+  return { items, loading, refetch };
+}
 
-  return { campaigns, loading, error, refetch: fetchCampaigns };
+const loadActive = () => getApiClient().getActiveCampaigns();
+const loadHistory = () => getApiClient().getHistoryCampaigns();
+
+export function useActiveCampaigns(enabled: boolean) {
+  return useLazyList<ActiveCampaign>(enabled, loadActive);
+}
+
+export function useHistoryCampaigns(enabled: boolean) {
+  return useLazyList<HistoryCampaign>(enabled, loadHistory);
 }
 
 export function useCampaignDetails(id: string | null) {
-  const [details, setDetails] = useState<Campaign | null>(null);
+  const [details, setDetails] = useState<CampaignDetail | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
 
@@ -327,29 +329,25 @@ export function useSystemStatus() {
 }
 
 function auditLogToActivity(log: AuditLog): ActivityEntry {
-  const cat = log.category?.toUpperCase() ?? "";
-  let kind: ActivityEntry["kind"] = "INFO";
-  if (cat.includes("TRADE_RESOLVED")) kind = "TRADE_WIN";
-  else if (cat.includes("TRADE_OPENED")) kind = "TRADE_OPENED";
-  else if (cat.includes("LOSS")) kind = "TRADE_LOSS";
-  else if (cat.includes("MARKET")) kind = "MARKET_RESOLVED";
-  else if (log.level === "warn") kind = "WARN";
-  else if (log.level === "error") kind = "ERROR";
-
-  if (kind === "TRADE_WIN" && log.metadata) {
-    const outcome = (log.metadata as any)?.outcome as string | undefined;
-    if (outcome === "LOSS") kind = "TRADE_LOSS";
-  }
-
+  const outcome = log.metadata?.outcome;
   const pnl =
-    log.metadata && typeof (log.metadata as any).pnl === "number"
-      ? (log.metadata as any).pnl
-      : undefined;
-
+    typeof log.metadata?.pnl === "number" ? log.metadata.pnl : undefined;
+  const kind: ActivityEntry["kind"] =
+    log.category === "TRADE_OPENED"
+      ? "TRADE_OPENED"
+      : log.category === "TRADE_CLOSED"
+        ? outcome === "WIN"
+          ? "TRADE_WIN"
+          : "TRADE_LOSS"
+        : log.level === "warn"
+          ? "WARN"
+          : log.level === "error"
+            ? "ERROR"
+            : "INFO";
   return {
     id: log.id,
     kind,
-    title: log.category ?? "EVENT",
+    title: log.category,
     detail: log.message,
     ts: new Date(log.createdAt).getTime(),
     pnl,
@@ -384,31 +382,29 @@ export function useActivityLog(enabled: boolean = true) {
     ws.connect();
 
     const unsubOpened = ws.on("tradeOpened", (msg: WsMessage) => {
-      const trade = (msg.data as any)?.trade as Trade | undefined;
+      const trade = (msg.data as { trade?: Trade } | undefined)?.trade;
       if (!trade) return;
       const id = `opened-${trade.id}`;
       if (seenIds.current.has(id)) return;
       seenIds.current.add(id);
 
-      const price = trade.entryPrice
-        ? `@${(parseFloat(trade.entryPrice) * 100).toFixed(1)}¢`
-        : "";
       const entry: ActivityEntry = {
         id,
         kind: "TRADE_OPENED",
-        title: "TRADE OPENED",
-        detail: `${trade.bucketGroupTitle ?? "?"} ${price} — $${parseFloat(trade.actualCost).toFixed(2)}`,
+        title: "TRADE_OPENED",
+        detail: `${trade.side} ${trade.bucketGroupTitle} @${(parseFloat(trade.entryPrice) * 100).toFixed(1)}¢ · ${trade.campaignTitle}`,
         ts: Date.now(),
-        trade,
       };
       setActivities((prev) => [entry, ...prev].slice(0, MAX_ACTIVITY_ENTRIES));
     });
 
     const unsubResolved = ws.on("tradeResolved", (msg: WsMessage) => {
-      const d = msg.data as any;
-      const trade = d?.trade as Trade | undefined;
-      const isWin = d?.isWin as boolean | undefined;
-      const pnl = typeof d?.pnl === "number" ? (d.pnl as number) : undefined;
+      const d = msg.data as
+        | { trade?: Trade; isWin?: boolean; pnl?: number }
+        | undefined;
+      const trade = d?.trade;
+      const isWin = d?.isWin;
+      const pnl = typeof d?.pnl === "number" ? d.pnl : undefined;
 
       const id = `resolved-${trade?.id ?? Date.now()}`;
       if (seenIds.current.has(id)) return;
@@ -417,10 +413,9 @@ export function useActivityLog(enabled: boolean = true) {
       const entry: ActivityEntry = {
         id,
         kind: isWin ? "TRADE_WIN" : "TRADE_LOSS",
-        title: isWin ? "TRADE WIN ✅" : "TRADE LOSS ❌",
-        detail: `${trade?.bucketGroupTitle ?? "?"}${pnl !== undefined ? ` PnL: ${formatPnl(pnl)}` : ""}`,
+        title: "TRADE_CLOSED",
+        detail: `${trade?.exitReason ?? ""} ${trade?.side ?? ""} ${trade?.bucketGroupTitle ?? "?"}${pnl !== undefined ? ` · ${formatPnl(pnl)}` : ""}`,
         ts: Date.now(),
-        trade,
         pnl,
       };
       setActivities((prev) => [entry, ...prev].slice(0, MAX_ACTIVITY_ENTRIES));

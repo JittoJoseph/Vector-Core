@@ -2,7 +2,12 @@
 
 import { useEffect, useState } from "react";
 import type { Trade, PositionPnl } from "@/lib/types";
-import { polymarketMarketUrl, pnlColor, shortCampaignTitle } from "@/lib/utils";
+import {
+  formatDuration,
+  polymarketMarketUrl,
+  pnlColor,
+  shortCampaignTitle,
+} from "@/lib/utils";
 import NumberFlow from "@number-flow/react";
 import { ExternalLink, Clock } from "lucide-react";
 
@@ -53,14 +58,14 @@ export function TradesTable({
 
   const headers =
     type === "OPEN"
-      ? ["MARKET", "COST BASIS", "PRICE DRIFT", "PNL / ROI", "TIME LEFT"]
+      ? ["MARKET", "COST BASIS", "ENTRY → LIVE → TP", "PNL / ROI", "TIME LEFT"]
       : [
           "MARKET",
           "RESOLUTION DATE",
           "HELD DURATION",
           "COST BASIS",
           "PRICE DRIFT",
-          "OUTCOME",
+          "EXIT",
           "REALIZED PNL",
         ];
 
@@ -84,9 +89,6 @@ export function TradesTable({
             const entryCents = Math.round(parseFloat(trade.entryPrice) * 100);
             const shares = parseFloat(trade.entryShares);
             const actualCost = parseFloat(trade.actualCost);
-            const expectedProfit = parseFloat(trade.expectedNetProfit || "0");
-            const expectedProfitPct =
-              actualCost > 0 ? (expectedProfit / actualCost) * 100 : null;
             const polyUrl = polymarketMarketUrl({
               eventSlug: trade.campaignSlug,
               marketSlug: trade.bucketSlug,
@@ -112,7 +114,12 @@ export function TradesTable({
                     />
                   </a>
                   <span className="text-[11px] font-medium text-muted-foreground/80">
-                    {trade.bucketGroupTitle || "N/A"}
+                    <span
+                      className={`mr-1.5 font-bold ${trade.side === "YES" ? "text-emerald-400" : "text-rose-400"}`}
+                    >
+                      {trade.side}
+                    </span>
+                    {trade.bucketGroupTitle}
                   </span>
                 </div>
               </td>
@@ -161,6 +168,10 @@ export function TradesTable({
                       ) : (
                         <span className="text-muted-foreground/40">—</span>
                       )}
+                      <span className="text-muted-foreground/40">→</span>
+                      <span className="text-sky-400">
+                        {Math.round(parseFloat(trade.target) * 100)}¢
+                      </span>
                     </div>
                   </td>
 
@@ -193,12 +204,6 @@ export function TradesTable({
                         </div>
                       ) : (
                         <span className="text-muted-foreground/40">—</span>
-                      )}
-                      {expectedProfitPct !== null && expectedProfit > 0 && (
-                        <span className="text-[10px] text-muted-foreground/50 tabular-nums">
-                          Exp: {expectedProfitPct >= 0 ? "+" : ""}
-                          {expectedProfitPct.toFixed(1)}%
-                        </span>
                       )}
                     </div>
                   </td>
@@ -302,7 +307,13 @@ export function TradesTable({
                           : "bg-muted text-muted-foreground border border-border/30"
                     }`}
                   >
-                    {trade.exitOutcome || "SETTLED"}
+                    {trade.exitReason === "RESOLUTION"
+                      ? trade.exitOutcome
+                      : trade.exitReason === "TAKE_PROFIT"
+                        ? "TP"
+                        : trade.exitReason === "STOP_LOSS"
+                          ? "STOP"
+                          : trade.exitOutcome}
                   </span>
                 </td>
 
@@ -356,21 +367,6 @@ export function TradesTable({
       )}
     </div>
   );
-}
-
-function formatDuration(start: string, end: string): string {
-  return formatDurationMs(new Date(end).getTime() - new Date(start).getTime());
-}
-
-function formatDurationMs(diffMs: number): string {
-  const secs = Math.max(0, Math.floor(diffMs / 1000));
-  if (secs < 60) return `${secs}s`;
-  const mins = Math.floor(secs / 60);
-  if (mins < 60) return `${mins}m ${secs % 60}s`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ${mins % 60}m`;
-  const days = Math.floor(hrs / 24);
-  return `${days}d ${hrs % 24}h`;
 }
 
 export function MarketCountdown({

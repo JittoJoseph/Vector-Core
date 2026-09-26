@@ -1,67 +1,98 @@
-export interface Campaign {
+export interface ForecastSummary {
+  init: string;
+  publishedAt: string;
+  fmaxC: number;
+  mu: number;
+  sigma: number;
+}
+
+export interface ActiveCampaign {
   id: string;
   slug: string;
   title: string;
-  seriesSlug: string | null;
-  startDate: string | null;
-  endDate: string | null;
-  closedTime: string | null;
-  closed: boolean;
-  lastFetchedAt: string;
-  createdAt: string;
-  updatedAt: string;
+  city: string;
+  unit: "C" | "F";
+  endDate: string;
+  forecast: ForecastSummary | null;
+  modelTop: { title: string; p: number } | null;
+  marketTop: { title: string; mid: number } | null;
+  bestEdge: number | null;
+  positionCount: number;
+}
 
-  modalBucketTitle?: string;
-  candidateCount?: number;
-  trackedCount?: number;
-  positionCount?: number;
-  relevantBuckets?: CampaignBucket[];
-  historicalTrades?: Trade[] | { length: number; totalPnl: number };
+export interface HistoryCampaign {
+  id: string;
+  slug: string;
+  title: string;
+  endDate: string;
+  closed: boolean;
+  closedTime: string | null;
+  forecast: ForecastSummary | null;
+  tradeCount: number;
+  totalPnl: number;
 }
 
 export interface CampaignBucket {
   id: string;
   slug: string | null;
-  groupItemTitle: string;
-  noPrice: string | null;
-  hasOpenPosition: boolean;
-  positions: { id: string; entryPrice: number; entryShares: number }[];
+  title: string;
+  bid: number | null;
+  ask: number | null;
+  model: number | null;
+  edge: number | null;
+  positions: {
+    id: string;
+    side: "YES" | "NO";
+    entryPrice: number;
+    shares: number;
+    target: number;
+  }[];
+}
+
+export type CampaignDetail =
+  | (ActiveCampaign & { buckets: CampaignBucket[] })
+  | (Omit<HistoryCampaign, "tradeCount" | "totalPnl"> & { trades: Trade[] });
+
+export interface TradeSignal {
+  init: string;
+  leadH: number;
+  pModel: number;
+  quote: number;
+  edge: number;
 }
 
 export interface Trade {
   id: string;
-  campaignId: string | null;
-  campaignSlug: string | null;
-  campaignTitle: string | null;
-  bucketId: string | null;
+  campaignId: string;
+  campaignSlug: string;
+  campaignTitle: string;
+  bucketId: string;
   bucketSlug: string | null;
-  bucketGroupTitle: string | null;
+  bucketGroupTitle: string;
   campaignEndDate: string | null;
-  tokenId: string | null;
+  tokenId: string;
+  side: "YES" | "NO";
   entryTs: string;
   entryPrice: string;
   entryShares: string;
   actualCost: string;
   entryFees: string;
-  expectedNetProfit: string | null;
-  modalBucketAtEntry: string | null;
-  posFromModal: number | null;
-  minNoPriceDuringPosition: string | null;
+  target: string;
+  signal: TradeSignal;
+  minPriceDuringPosition: string | null;
   exitPrice: string | null;
   exitTs: string | null;
   exitOutcome: string | null;
   exitReason: string | null;
   realizedPnl: string | null;
   status: string;
-  createdAt: string;
-  updatedAt: string;
 }
 
 export interface PositionPnl {
   mid: number | null;
   pnl: number | null;
   pnlPct: number | null;
-  minNoPrice: number | null;
+  minPrice: number | null;
 }
 
 export interface PortfolioSnapshot {
@@ -76,37 +107,47 @@ export interface PortfolioSnapshot {
   openPositions: number;
 }
 
+export interface WeatherNextStats {
+  lastInit: string | null;
+  lastPublishedAt: string | null;
+  lastFetchMs: number;
+  runsProcessed: number;
+  lastPollAt: string | null;
+  lastError: string | null;
+  lastEvaluation: {
+    at: string;
+    init: string;
+    covered: number;
+    entries: number;
+  } | null;
+}
+
 export interface SystemStats {
   orchestrator: {
     running: boolean;
     paused: boolean;
-    activeBuckets: number;
+    campaigns: number;
     openPositions: number;
-    cycleCount: number;
     ws: {
       connected: boolean;
       subscribedTokens: number;
       messageCount: number;
       reconnectAttempts: number;
     };
-    risk?: {
-      consecutiveLossCount: number;
-      pausedByRiskGuard: boolean;
-    };
-    polymarketStatus?: "UNKNOWN" | "UP" | "HASISSUES" | "UNDERMAINTENANCE";
+    weathernext: WeatherNextStats;
+    polymarketStatus: "UNKNOWN" | "UP" | "HASISSUES" | "UNDERMAINTENANCE";
   };
   config: {
-    minNoEntryPrice: number;
-    maxNoEntryPrice: number;
-    minExpectedNetProfit: number;
     startingCapital: number;
-    maxPositions: number;
-    entryWindowHours: number;
-    stopLossEnabled: boolean;
+    tradeBudget: number;
+    minEdge: number;
+    maxSpread: number;
+    minPrice: number;
+    maxPrice: number;
     stopLossDelta: number;
   };
-  portfolio?: PortfolioSnapshot;
-  positionsPnl?: Record<string, PositionPnl>;
+  portfolio: PortfolioSnapshot;
+  positionsPnl: Record<string, PositionPnl>;
 }
 
 export interface PerformanceMetrics {
@@ -133,19 +174,10 @@ export interface AuditLog {
 
 export interface ActivityEntry {
   id: string;
-  kind:
-    | "TRADE_OPENED"
-    | "TRADE_WIN"
-    | "TRADE_LOSS"
-    | "MARKET_RESOLVED"
-    | "SYSTEM"
-    | "INFO"
-    | "WARN"
-    | "ERROR";
+  kind: "TRADE_OPENED" | "TRADE_WIN" | "TRADE_LOSS" | "INFO" | "WARN" | "ERROR";
   title: string;
   detail: string;
   ts: number;
-  trade?: Trade;
   pnl?: number;
 }
 

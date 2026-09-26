@@ -1,7 +1,7 @@
 "use client";
 
 import type { ActivityEntry } from "@/lib/types";
-import { formatPnl } from "@/lib/utils";
+import { formatPnl, timeAgo } from "@/lib/utils";
 
 const KIND_META: Record<
   ActivityEntry["kind"],
@@ -22,16 +22,6 @@ const KIND_META: Record<
     badge: "bg-red-500/10 text-red-400 border-red-500/20",
     label: "LOSS",
   },
-  MARKET_RESOLVED: {
-    dot: "bg-purple-400",
-    badge: "bg-purple-500/10 text-purple-400 border-purple-500/20",
-    label: "RESOLVED",
-  },
-  SYSTEM: {
-    dot: "bg-muted-foreground/40",
-    badge: "bg-muted/40 text-muted-foreground border-border/30",
-    label: "SYSTEM",
-  },
   INFO: {
     dot: "bg-muted-foreground/40",
     badge: "bg-muted/40 text-muted-foreground border-border/30",
@@ -48,14 +38,6 @@ const KIND_META: Record<
     label: "ERROR",
   },
 };
-
-function timeAgo(ms: number): string {
-  const diff = Date.now() - ms;
-  if (diff < 60_000) return `${Math.floor(diff / 1000)}s ago`;
-  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`;
-  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`;
-  return new Date(ms).toLocaleDateString();
-}
 
 interface ActivityPanelProps {
   activities: ActivityEntry[];

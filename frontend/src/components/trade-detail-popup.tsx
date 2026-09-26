@@ -2,7 +2,15 @@
 
 import { useEffect, useState } from "react";
 import type { Trade, PositionPnl } from "@/lib/types";
-import { formatPnl, pnlColor, polymarketMarketUrl } from "@/lib/utils";
+import {
+  cents,
+  formatDuration,
+  formatDurationMs,
+  formatPnl,
+  pnlColor,
+  polymarketMarketUrl,
+  utcHour,
+} from "@/lib/utils";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { ExternalLink, X } from "lucide-react";
 import NumberFlow from "@number-flow/react";
@@ -23,42 +31,25 @@ export function TradeDetailPopup({
   if (!trade) return null;
 
   const isClosed = trade.status === "SETTLED";
-  const entryPrice = parseFloat(trade.entryPrice);
-  const entryFees = parseFloat(trade.entryFees || "0");
   const pnl = parseFloat(trade.realizedPnl || "0");
   const exitPrice = trade.exitPrice ? parseFloat(trade.exitPrice) : null;
-  const expectedProfit = parseFloat(trade.expectedNetProfit || "0");
-  const shares = parseFloat(trade.entryShares);
   const actualCost = parseFloat(trade.actualCost);
-
-  const outcome = trade.exitOutcome;
-  const isWin = outcome === "WIN";
-
-  const polyUrl = polymarketMarketUrl({
-    eventSlug: trade.campaignSlug,
-    marketSlug: trade.bucketSlug,
-  });
-
+  const isWin = trade.exitOutcome === "WIN";
   const returnPct = actualCost > 0 ? (pnl / actualCost) * 100 : 0;
-  const expectedProfitPct =
-    actualCost > 0 ? (expectedProfit / actualCost) * 100 : null;
+  const unrealizedPnl = !isClosed ? (positionPnl?.pnl ?? null) : null;
+  const unrealizedPnlPct = !isClosed ? (positionPnl?.pnlPct ?? null) : null;
+  const minPrice =
+    (!isClosed ? positionPnl?.minPrice : null) ??
+    (trade.minPriceDuringPosition
+      ? parseFloat(trade.minPriceDuringPosition)
+      : null);
+  const signal = trade.signal;
 
   const statusBadgeCls = !isClosed
     ? "text-blue-400 border-blue-400/25 bg-blue-400/5"
     : isWin
       ? "text-emerald-400 border-emerald-500/25 bg-emerald-500/5"
       : "text-red-400 border-red-500/25 bg-red-500/5";
-
-  const unrealizedPnl = !isClosed ? (positionPnl?.pnl ?? null) : null;
-  const unrealizedPnlPct = !isClosed ? (positionPnl?.pnlPct ?? null) : null;
-  const minNoPrice = !isClosed
-    ? (positionPnl?.minNoPrice ??
-      (trade.minNoPriceDuringPosition
-        ? parseFloat(trade.minNoPriceDuringPosition)
-        : null))
-    : trade.minNoPriceDuringPosition
-      ? parseFloat(trade.minNoPriceDuringPosition)
-      : null;
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
@@ -69,22 +60,22 @@ export function TradeDetailPopup({
               <span
                 className={`inline-flex items-center text-[10px] font-semibold tracking-[0.15em] px-2 py-0.5 rounded border ${statusBadgeCls}`}
               >
-                {isClosed ? (outcome ?? "SETTLED") : "OPEN"}
+                {isClosed ? (trade.exitOutcome ?? "SETTLED") : "OPEN"}
               </span>
-              <Chip>BUY NO</Chip>
+              <Chip>BUY {trade.side}</Chip>
             </div>
-
             <div className="flex items-center gap-0.5 shrink-0 -mr-1 -mt-0.5">
-              {trade.bucketId && (
-                <a
-                  href={polyUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center gap-1 px-2 py-1.5 rounded text-[10px] font-mono text-muted-foreground/35 hover:text-blue-400 hover:bg-blue-500/5 transition-colors"
-                >
-                  polymarket <ExternalLink size={10} strokeWidth={1.75} />
-                </a>
-              )}
+              <a
+                href={polymarketMarketUrl({
+                  eventSlug: trade.campaignSlug,
+                  marketSlug: trade.bucketSlug,
+                })}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-1 px-2 py-1.5 rounded text-[10px] font-mono text-muted-foreground/35 hover:text-blue-400 hover:bg-blue-500/5 transition-colors"
+              >
+                polymarket <ExternalLink size={10} strokeWidth={1.75} />
+              </a>
               <button
                 onClick={onClose}
                 className="p-1.5 rounded text-muted-foreground/30 hover:text-foreground hover:bg-muted/40 transition-colors"
@@ -93,87 +84,41 @@ export function TradeDetailPopup({
               </button>
             </div>
           </div>
-
-          {trade.campaignTitle ? (
-            <DialogTitle className="mt-3 text-[13px] font-sans font-medium text-foreground/80 leading-relaxed">
-              {trade.campaignTitle}
-            </DialogTitle>
-          ) : (
-            <DialogTitle className="sr-only">Trade Detail</DialogTitle>
-          )}
-          {trade.bucketGroupTitle && (
-            <div className="mt-2 mb-1 flex flex-wrap items-center gap-x-4 gap-y-2">
-              <div className="flex items-center gap-2">
-                <span className="text-[10px] uppercase tracking-widest text-muted-foreground/60 font-bold">
-                  TEMP BUCKET:
-                </span>
-                <span className="text-[11px] font-semibold text-foreground/90 bg-muted/20 px-2 py-0.5 rounded border border-border/10">
-                  {trade.bucketGroupTitle}
-                </span>
-              </div>
-              {trade.modalBucketAtEntry && (
-                <div className="flex items-center gap-2">
-                  <span className="text-[10px] uppercase tracking-widest text-muted-foreground/60 font-bold">
-                    MODAL AT ENTRY:
-                  </span>
-                  <span className="text-[11px] font-semibold text-foreground/90 bg-muted/20 px-2 py-0.5 rounded border border-border/10">
-                    {trade.modalBucketAtEntry}
-                  </span>
-                </div>
-              )}
-              {trade.posFromModal != null && (
-                <div className="flex items-center gap-2">
-                  <span className="text-[10px] uppercase tracking-widest text-muted-foreground/60 font-bold">
-                    POS FROM MODAL:
-                  </span>
-                  <span className="text-[11px] font-semibold text-foreground/90 bg-muted/20 px-2 py-0.5 rounded border border-border/10 tabular-nums">
-                    {trade.posFromModal > 0 ? "+" : ""}
-                    {trade.posFromModal}
-                  </span>
-                </div>
-              )}
-            </div>
-          )}
+          <DialogTitle className="mt-3 text-[13px] font-sans font-medium text-foreground/80 leading-relaxed">
+            {trade.campaignTitle}
+          </DialogTitle>
+          <div className="mt-2 mb-1 flex items-center gap-2">
+            <span className="text-[10px] uppercase tracking-widest text-muted-foreground/60 font-bold">
+              TEMP BUCKET:
+            </span>
+            <span className="text-[11px] font-semibold text-foreground/90 bg-muted/20 px-2 py-0.5 rounded border border-border/10">
+              {trade.bucketGroupTitle}
+            </span>
+          </div>
         </div>
 
         <div className="overflow-y-auto flex-1 overscroll-contain">
           <Section title="POSITION FINANCIALS">
             <Row2>
               <Cell label="COST BASIS" value={`$${actualCost.toFixed(2)}`} />
-              <Cell label="SHARES" value={shares.toFixed(2)} />
+              <Cell
+                label="SHARES"
+                value={parseFloat(trade.entryShares).toFixed(2)}
+              />
               <Cell
                 label="ENTRY PRICE"
-                value={`${(entryPrice * 100).toFixed(1)}¢`}
+                value={cents(parseFloat(trade.entryPrice), 1)}
               />
-              <Cell label="ENTRY FEES" value={`$${entryFees.toFixed(4)}`} />
               <Cell
-                label={isClosed ? "EXIT PRICE" : "EXPECTED PNL"}
+                label="ENTRY FEES"
+                value={`$${parseFloat(trade.entryFees || "0").toFixed(4)}`}
+              />
+              <Cell
+                label={isClosed ? "EXIT PRICE" : "TAKE PROFIT AT"}
                 value={
-                  isClosed ? (
-                    exitPrice !== null ? (
-                      `${(exitPrice * 100).toFixed(1)}¢`
-                    ) : (
-                      "—"
-                    )
-                  ) : expectedProfit !== 0 ? (
-                    <div className="flex items-center gap-1.5">
-                      <span
-                        className={`font-bold tabular-nums tracking-tight ${pnlColor(expectedProfit)}`}
-                      >
-                        {expectedProfit.toFixed(4)}
-                      </span>
-                      {expectedProfitPct !== null && (
-                        <span
-                          className={`text-[10px] tracking-tight tabular-nums font-bold ${pnlColor(expectedProfitPct, true)}`}
-                        >
-                          ({expectedProfitPct >= 0 ? "+" : ""}
-                          {expectedProfitPct.toFixed(1)}%)
-                        </span>
-                      )}
-                    </div>
-                  ) : (
-                    "—"
-                  )
+                  isClosed
+                    ? cents(exitPrice, 1)
+                    : cents(parseFloat(trade.target), 1)
                 }
               />
               <Cell
@@ -214,38 +159,40 @@ export function TradeDetailPopup({
                   )
                 }
               />
-              {minNoPrice !== null && (
-                <Cell
-                  label="MIN PRICE (DURING POS)"
-                  value={`${(minNoPrice * 100).toFixed(1)}¢`}
-                />
+              {minPrice !== null && (
+                <Cell label="MIN BID (DURING POS)" value={cents(minPrice, 1)} />
               )}
             </Row2>
           </Section>
 
-          {isClosed && outcome && (
+          <Section title="WEATHERNEXT SIGNAL">
+            <Row2>
+              <Cell label="MODEL PROB" value={cents(signal.pModel, 1)} />
+              <Cell label="QUOTE AT SIGNAL" value={cents(signal.quote, 1)} />
+              <Cell label="EDGE AFTER FEES" value={cents(signal.edge, 1)} />
+              <Cell
+                label="HOURS TO DAY START"
+                value={`${signal.leadH.toFixed(1)}h`}
+              />
+              <Cell label="RUN" value={utcHour(signal.init)} />
+            </Row2>
+          </Section>
+
+          {isClosed && (
             <div className="flex items-center gap-2 px-4 py-3 border-b border-border/15 bg-card/10">
               <span className="text-[10px] font-mono tracking-[0.2em] text-muted-foreground/35 uppercase">
                 RESULT
               </span>
               <span className="text-muted-foreground/20">/</span>
-              <span className="text-zinc-400 text-[11px] font-mono tracking-wider">
-                SETTLED
-              </span>
-              <span className="text-muted-foreground/20">·</span>
               <span
                 className={`text-[12px] font-mono font-bold tracking-wider ${isWin ? "text-emerald-400" : "text-red-400"}`}
               >
-                {outcome}
+                {trade.exitOutcome}
               </span>
-              {trade.exitReason && (
-                <>
-                  <span className="text-muted-foreground/20">·</span>
-                  <span className="text-[11px] font-mono tracking-wider text-muted-foreground/70">
-                    {trade.exitReason}
-                  </span>
-                </>
-              )}
+              <span className="text-muted-foreground/20">·</span>
+              <span className="text-[11px] font-mono tracking-wider text-muted-foreground/70">
+                {trade.exitReason}
+              </span>
             </div>
           )}
 
@@ -282,12 +229,10 @@ export function TradeDetailPopup({
 
 function LiveHoldDuration({ entryTs }: { entryTs: string }) {
   const [now, setNow] = useState(() => Date.now());
-
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
   }, []);
-
   return <span>{formatDurationMs(now - new Date(entryTs).getTime())}</span>;
 }
 
@@ -348,19 +293,4 @@ function formatTs(iso: string): string {
     second: "2-digit",
     hour12: false,
   });
-}
-
-function formatDuration(start: string, end: string): string {
-  return formatDurationMs(new Date(end).getTime() - new Date(start).getTime());
-}
-
-function formatDurationMs(diffMs: number): string {
-  const secs = Math.max(0, Math.floor(diffMs / 1000));
-  if (secs < 60) return `${secs}s`;
-  const mins = Math.floor(secs / 60);
-  if (mins < 60) return `${mins}m ${secs % 60}s`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ${mins % 60}m`;
-  const days = Math.floor(hrs / 24);
-  return `${days}d ${hrs % 24}h`;
 }

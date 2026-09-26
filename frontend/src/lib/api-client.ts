@@ -1,16 +1,23 @@
 import type {
   Trade,
   SystemStats,
-  Campaign,
+  ActiveCampaign,
+  HistoryCampaign,
+  CampaignDetail,
   PerformanceMetrics,
   AuditLog,
   WsMessage,
 } from "./types";
 
-const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_BASE_URL || "https://vector-core.onrender.com";
-const WS_BASE_URL =
-  process.env.NEXT_PUBLIC_WS_BASE_URL || "wss://vector-core.onrender.com";
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "";
+
+function wsBaseUrl(): string {
+  if (process.env.NEXT_PUBLIC_WS_BASE_URL)
+    return process.env.NEXT_PUBLIC_WS_BASE_URL;
+  if (API_BASE_URL) return API_BASE_URL.replace(/^http/, "ws");
+  const { protocol, host } = window.location;
+  return `${protocol === "https:" ? "wss:" : "ws:"}//${host}`;
+}
 
 async function fetchWithRetry<T>(
   url: string,
@@ -53,22 +60,21 @@ export class ApiClient {
     this.baseUrl = baseUrl;
   }
 
-  async ping(): Promise<{ pong: boolean; ts: number }> {
+  async ping(): Promise<string> {
     return fetchWithRetry(`${this.baseUrl}/ping`);
   }
 
-  async getCampaigns(params?: {
-    limit?: number;
-    status?: string;
-  }): Promise<Campaign[]> {
-    const searchParams = new URLSearchParams();
-    if (params?.limit) searchParams.set("limit", String(params.limit));
-    if (params?.status) searchParams.set("status", params.status);
-    const qs = searchParams.toString();
-    return fetchWithRetry(`${this.baseUrl}/api/campaigns${qs ? `?${qs}` : ""}`);
+  async getActiveCampaigns(): Promise<ActiveCampaign[]> {
+    return fetchWithRetry(`${this.baseUrl}/api/campaigns`);
   }
 
-  async getCampaignDetails(id: string): Promise<Campaign> {
+  async getHistoryCampaigns(limit = 100): Promise<HistoryCampaign[]> {
+    return fetchWithRetry(
+      `${this.baseUrl}/api/campaigns?status=history&limit=${limit}`,
+    );
+  }
+
+  async getCampaignDetails(id: string): Promise<CampaignDetail> {
     return fetchWithRetry(`${this.baseUrl}/api/campaigns/${id}`);
   }
 
@@ -77,7 +83,7 @@ export class ApiClient {
   }
 
   async getSystemStats(): Promise<SystemStats> {
-    return fetchWithRetry(`${this.baseUrl}/api/system/stats`);
+    return fetchWithRetry(`${this.baseUrl}/api/stats`);
   }
 
   async getTradeHistory(params?: {
@@ -138,88 +144,44 @@ export class WsClient {
   private ws: WebSocket | null = null;
   private wsUrl: string;
   private reconnectAttempts = 0;
-  private maxReconnectAttempts = 5;
-  private reconnectDelay = 1000;
   private listeners: Map<string, Set<(data: WsMessage) => void>> = new Map();
-  private isConnecting = false;
 
-  constructor(wsUrl: string = WS_BASE_URL) {
+  constructor(wsUrl: string = wsBaseUrl()) {
     this.wsUrl = `${wsUrl}/ws`;
   }
 
   connect(): void {
-    if (this.ws?.readyState === WebSocket.OPEN || this.isConnecting) return;
-    this.isConnecting = true;
-
-    try {
-      this.ws = new WebSocket(this.wsUrl);
-
-      this.ws.onopen = () => {
-        this.reconnectAttempts = 0;
-        this.isConnecting = false;
-        this.sendPing();
-      };
-
-      this.ws.onmessage = (event) => {
-        try {
-          const message: WsMessage = JSON.parse(event.data);
-          this.emit(message.type, message);
-          this.emit("*", message);
-        } catch {
-        }
-      };
-
-      this.ws.onclose = () => {
-        this.isConnecting = false;
-        this.attemptReconnect();
-      };
-
-      this.ws.onerror = () => {
-        this.isConnecting = false;
-      };
-    } catch {
-      this.isConnecting = false;
-      this.attemptReconnect();
-    }
-  }
-
-  disconnect(): void {
-    if (this.ws) {
-      this.ws.close();
+    if (this.ws) return;
+    const ws = new WebSocket(this.wsUrl);
+    this.ws = ws;
+    ws.onopen = () => {
+      this.reconnectAttempts = 0;
+      this.sendPing();
+    };
+    ws.onmessage = (event) => {
+      try {
+        const message: WsMessage = JSON.parse(event.data);
+        this.listeners.get(message.type)?.forEach((cb) => cb(message));
+      } catch {}
+    };
+    ws.onclose = () => {
       this.ws = null;
-    }
-    this.reconnectAttempts = this.maxReconnectAttempts;
+      const delay = Math.min(1000 * 2 ** this.reconnectAttempts++, 30_000);
+      setTimeout(() => this.connect(), delay);
+    };
   }
 
   on(type: string, callback: (data: WsMessage) => void): () => void {
-    if (!this.listeners.has(type)) {
-      this.listeners.set(type, new Set());
-    }
+    if (!this.listeners.has(type)) this.listeners.set(type, new Set());
     this.listeners.get(type)!.add(callback);
     return () => {
       this.listeners.get(type)?.delete(callback);
     };
   }
 
-  isConnected(): boolean {
-    return this.ws?.readyState === WebSocket.OPEN;
-  }
-
   sendPing(): void {
-    if (this.ws?.readyState === WebSocket.OPEN) {
+    if (this.ws?.readyState === WebSocket.OPEN)
       this.ws.send(JSON.stringify({ type: "ping" }));
-    }
-  }
-
-  private emit(type: string, message: WsMessage): void {
-    this.listeners.get(type)?.forEach((cb) => cb(message));
-  }
-
-  private attemptReconnect(): void {
-    if (this.reconnectAttempts >= this.maxReconnectAttempts) return;
-    this.reconnectAttempts++;
-    const delay = this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1);
-    setTimeout(() => this.connect(), delay);
   }
 }
 

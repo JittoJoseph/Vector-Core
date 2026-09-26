@@ -35,19 +35,6 @@ export function Tabs({ value, onValueChange, children, className }: TabsProps) {
   );
 }
 
-interface TabsListProps {
-  children: React.ReactNode;
-  className?: string;
-}
-
-
-interface TabsTriggerProps {
-  value: string;
-  children: React.ReactNode;
-  className?: string;
-}
-
-
 interface TabsContentProps {
   value: string;
   children: React.ReactNode;
