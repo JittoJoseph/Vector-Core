@@ -87,6 +87,9 @@ function sampleExpression(init: string) {
   };
 }
 
+const isoSeconds = (ms: number) =>
+  new Date(ms).toISOString().slice(0, 19) + "Z";
+
 function utcFromStamp(stamp: string): number {
   return Date.UTC(
     +stamp.slice(0, 4),
@@ -142,9 +145,7 @@ export class WeatherNextFeed extends EventEmitter {
   private async poll(): Promise<void> {
     const now = Date.now();
     this.stats.lastPollAt = new Date(now).toISOString();
-    const since = new Date(now - LOOKBACK_MS)
-      .toISOString()
-      .replace(/.d{3}Z$/, "Z");
+    const since = isoSeconds(now - LOOKBACK_MS);
     const listed = await this.request<{
       assets?: {
         startTime: string;
@@ -174,10 +175,7 @@ export class WeatherNextFeed extends EventEmitter {
 
     for (const run of ready) {
       const started = Date.now();
-      const series = await this.sample(
-        new Date(run.init).toISOString().replace(/.d{3}Z$/, "Z"),
-        run.init,
-      );
+      const series = await this.sample(isoSeconds(run.init), run.init);
       this.processed.add(run.init);
       this.stats = {
         ...this.stats,
