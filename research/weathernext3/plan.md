@@ -21,19 +21,19 @@ The parameter evidence is in `findings.md` (v2 table). The data-access specifics
 
 ## Frontend
 
-- Static export (`output: "export"`) served by nginx on the same origin as the API.
+- Static export (`output: "export"`) hosted on Vercel; the API base comes from `NEXT_PUBLIC_API_BASE_URL` and the WebSocket URL is derived from it.
 - **ACTIVE CAMPAIGNS:** WN3 max, model top vs market top, and edge.
 - **Campaign popup:** per bucket, the bid/ask, the WN3 probability, the edge and our positions.
 - **Trades:** side and take-profit target; the trade popup shows the WeatherNext signal.
 - **Diagnostics:** Earth Engine run telemetry.
 
-## Deploy (Oracle VM, pm2 + nginx)
+## Deploy
 
-1. Restore Supabase and run `pnpm exec tsx scripts/migrate-weathernext.mts` once.
-2. On the VM, run `gcloud auth application-default login` as the approved account.
-3. Backend: `pnpm build`, then `pm2 start ecosystem.config.cjs`.
-4. Frontend: `pnpm build`, then point nginx at `frontend/out`, proxying `/api/` and `/ws` to `127.0.0.1:4000`.
-5. Auto-deploy workflow: mirror the other repo's once SSH access is available.
+- **Backend:** Oracle VM `~/vector-core`, run by pm2 as `vector-core-api` on 127.0.0.1:4100, behind nginx at `vector-api.jittojoseph.xyz` (Cloudflare-proxied, certbot TLS).
+  - Auto-deploys on push to main via `deploy.sh`.
+  - Coexists with market-engine: port 4000, `market-api.jittojoseph.xyz`.
+- **Frontend:** Vercel static export at `vector.jittojoseph.xyz` with `NEXT_PUBLIC_API_BASE_URL=https://vector-api.jittojoseph.xyz`. This keeps the 1 GB VM's RAM free.
+- **Database:** Supabase (`aws-1-ap-northeast-2` pooler), schema created by `scripts/migrate-weathernext.mts`.
 
 ## Kill criteria
 

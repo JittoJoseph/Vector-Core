@@ -12,8 +12,6 @@ import type {
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "";
 
 function wsBaseUrl(): string {
-  if (process.env.NEXT_PUBLIC_WS_BASE_URL)
-    return process.env.NEXT_PUBLIC_WS_BASE_URL;
   if (API_BASE_URL) return API_BASE_URL.replace(/^http/, "ws");
   const { protocol, host } = window.location;
   return `${protocol === "https:" ? "wss:" : "ws:"}//${host}`;

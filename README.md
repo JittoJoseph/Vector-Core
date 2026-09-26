@@ -15,17 +15,15 @@ Research, backtests and data-access notes live in [`research/weathernext3`](rese
 
 ## Layout
 
-- `backend/` — Node.js/TypeScript engine + REST/WebSocket API (Express, drizzle, Postgres)
-- `frontend/` — Next.js dashboard, built as a static export and served by nginx
-- `ecosystem.config.cjs` — pm2 process definition for the backend
+- `backend/` — Node.js/TypeScript engine + REST/WebSocket API (Express, drizzle, Supabase Postgres), run by pm2 on the Oracle VM behind nginx at `vector-api.jittojoseph.xyz`
+- `frontend/` — Next.js dashboard (static export) on Vercel at `vector.jittojoseph.xyz`, pointed at the API with `NEXT_PUBLIC_API_BASE_URL`
+- `deploy.sh` + `.github/workflows/deploy.yml` — pushes to `main` touching the backend redeploy the VM over SSH (secrets `ORACLE_HOST`, `ORACLE_USER`, `ORACLE_SSH_KEY`)
+- `ecosystem.config.cjs` — pm2 process definition (`vector-core-api`, port from `backend/.env`)
 
-## Running
+## First-time setup
 
 ```bash
-cd backend && pnpm install && pnpm build
-pnpm exec tsx scripts/migrate-weathernext.mts
-pm2 start ../ecosystem.config.cjs
-cd ../frontend && pnpm install && pnpm build
+cd backend && pnpm install && pnpm exec tsx scripts/migrate-weathernext.mts
 ```
 
-Backend environment: see `backend/.env.example`. Earth Engine and WeatherNext access use the approved Google account's application-default credentials (`gcloud auth application-default login`).
+Backend environment: see `backend/.env.example`. Earth Engine access uses the WeatherNext-approved Google account's application-default credentials (`gcloud auth application-default login` on the VM).

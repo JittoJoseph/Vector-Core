@@ -60,7 +60,10 @@ const SEED: [string, number, number][] = [
   ["Zhengzhou", 0.931, 19],
 ];
 
-const sql = postgres(process.env.SUPABASE_DATABASE_URL!, { max: 1 });
+const sql = postgres(process.env.SUPABASE_DATABASE_URL!, {
+  max: 1,
+  onnotice: () => {},
+});
 
 const [legacy] =
   await sql`SELECT to_regclass('public.trades') IS NOT NULL AS exists`;
