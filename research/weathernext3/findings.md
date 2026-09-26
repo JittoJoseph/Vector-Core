@@ -14,6 +14,8 @@ v2 re-ran the backtest on Earth Engine data covering all 612 hourly runs (Aug 31
 | Stop | `STOP_LOSS_DELTA` env, default **0.20** | 0.30 is marginally higher; 0.10 costs ~3–4 pts; 0.05 ruins the edge |
 | Data source | **Earth Engine only** | Values are identical to BigQuery (≤ 0.005 °C). ~100 EECU·s per run, so all hourly runs use ≈ 20 of the 150 EECU-h/month |
 
+**Out-of-sample:** the same constants scored unchanged on all of August 2026 (six-hourly runs) give +37.0%/trade (CI 28.0–46.7) over 1,864 trades. See the v3 section below.
+
 Expected live flow: ≈ 70 entries/day across 51 cities at $5 each, a ~55% take-profit hit rate, and a median hold of about a day.
 
 ## v1 analysis (6-hourly BigQuery runs)
@@ -105,3 +107,79 @@ WN3 alone has comparable point accuracy but a worse probability shape, because a
 ## 5. Quota used
 
 About 186 GB of BigQuery sandbox quota (1 TiB/month free), plus ~2.3 GB of GCS Zarr downloads for the chunk-format probes. No billing is possible on the project.
+
+## v3 research round (2026-09-26, after go-live)
+
+### Fully out-of-sample check: August 2026
+
+The deployed constants (θ 0.20, lead-band sigma, seeded city bias, 20¢ stop) were fitted on September only. They were scored unchanged on August 1–31:
+- 1,517 closed ladders;
+- 132 six-hourly WN3 runs from EE (the August backfill has no interim runs);
+- publish latency modelled at 7.5 h.
+
+| | n | mean / trade | 95% CI | total ($5) |
+|---|---|---|---|---|
+| All of August | 1,864 | **+37.0%** | 28.0 – 46.7 | $3,446 |
+| Days 1–8 / 9–16 / 17–24 / 25–31 | | +30.9 / +34.0 / +33.6 / +53.4% | | |
+
+- **No sign of hindcast leakage.** On its own, WN3 is *worse* than the market in August:
+  - log-loss 1.460 vs 1.316;
+  - daily-max MAE 0.815 vs 0.765 °C.
+
+  The profit comes from the buckets where the two disagree by ≥ 20 points, not from WN3 being a better standalone forecast.
+- **Threshold grid on both months:**
+
+  | θ | Aug n / mean / total | Sep n / mean / total |
+  |---|---|---|
+  | 0.15 | 2,838 / +22.6% / $3,209 | 2,964 / +18.2% / $2,693 |
+  | 0.20 | 1,864 / +37.0% / $3,446 | 1,943 / +28.8% / $2,796 |
+  | 0.25 | 1,091 / +47.1% / $2,567 | 1,162 / +40.3% / $2,342 |
+  | 0.30 | 546 / +68.1% / $1,860 | 611 / +55.6% / $1,697 |
+
+  θ 0.20 maximises total P&L in both months, so the choice stands.
+- **Where the money is** (θ 0.20). Bands are hours before local midnight of the market day:
+
+  | Band | Aug | Sep |
+  |---|---|---|
+  | On-day | 84 trades, +$252 | 104, −$6 |
+  | 0–18 h | 1,343, +$2,980 | 1,484, +$2,791 |
+  | 18–36 h | 437, +$213 | 355, +$11 |
+  | YES | 873, +$3,031 | 963, +$2,582 |
+  | NO | 991, +$415 | 980, +$214 |
+
+  The edge is concentrated in YES buys 0–18 h before the day. On-day and 18 h+ entries are roughly break-even. They are kept for now because cutting them was not consistently better in the September split tests (see the v2 table), but this is the first knob to revisit once live data accumulates.
+- **Per-city totals are noise at this sample size**, so no city exclusions:
+  - Dallas: −$122 in Aug, +$164 in Sep.
+  - Jeddah: +$332 in Aug, −$22 in Sep.
+  - Only Ankara (−$24 / −$55) and Tel Aviv (−$57 / −$1) are negative in both months, on ~40 trades each.
+
+### Exits
+
+A static take-profit at the model probability beat every dynamic variant tried: re-targeting on each new run, trailing, time-decayed targets. Re-entry after an exit added a negligible amount. The confirmed 20¢ stop stays.
+
+### Maker vs taker entry
+
+This used real taker prints from `data-api` on a ~35% sample of signals (script `backtest/maker.mjs`):
+- **Maker only** (join the bid, or rest at mid, for 1–6 h) totals $1,078–1,082 vs $1,142 for taker. Fills happen mostly when the market is moving against us (adverse selection).
+- **Hybrid** (rest at mid for 30 min, then take if the edge is still ≥ 0.20) gives $1,261 vs $1,164 on the same signals, **~+8%**.
+
+  This is modest and adds order-state complexity, so it is not implemented.
+
+### Does anyone else trade WN3?
+
+Releases reach EE at minutes 40–59 of the hour. The absolute midpoint move in the 30 min after a release, compared with the same window at other hours, has a ratio of **0.83**: no elevated movement. There is no evidence that the market reacts to WN3 publishes, so latency to the release is not a race.
+
+### Lowest-temperature ladders
+
+136 open "Lowest temperature in …" events exist across 47 cities. However, their books are empty or one-sided (median spread 40–100¢), so they are **untradeable** at $5 taker sizes. Not added.
+
+### Live fills (first 31 entries)
+
+| Metric | Value |
+|---|---|
+| Average slippage vs the quoted ask | 0.26¢ (max 1.31¢) |
+| Fee | ≈ 0.96¢/share |
+| Average edge at entry | 24.1¢ |
+| Partial fills | 2 of 31 |
+
+The simulator's level-by-level fill matches what the book offered.

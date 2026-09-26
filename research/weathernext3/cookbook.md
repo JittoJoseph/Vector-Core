@@ -151,6 +151,13 @@ With header `x-goog-user-project: <eeProject>`:
 - **Bucket parsing:** `"64-65°F"` has a hyphen, not a minus. Use `/(-?\d+)(?:\s*-\s*(\d+))?/`, and treat `or below` / `or higher` as open tails.
 - **Resolution station:** use `resolutionSource` `?site=<ICAO>` (NOAA timeseries). The exceptions are Hong Kong (HKO, no `resolutionSource`), Taipei and Jinan (Wunderground), and Istanbul, Moscow and Tel Aviv (source only in the description text).
 - **`markets[].gameStartTime` is local midnight of the market day in UTC.** It defines the local-day window for the daily max.
+- **`prices-history` for markets closed more than ~30 days:** `interval=max` returns an empty history. Explicit windows still work: `startTs`/`endTs` spans of ≤ 60 h at `fidelity=10`, stitched together (`backtest/reprice-window.mjs`).
+- **Historical trades:** `data-api.polymarket.com/trades?market=<conditionId>&takerOnly=true&limit=500&offset=…` pages newest-first.
+  - `price` is for the traded outcome (`outcomeIndex`), so convert to YES price with `1 − price` for index 1.
+  - Aggressor direction = `side` of the taker.
+  - Useful for maker-fill simulation.
+- **Lowest-temperature ladders exist but have empty books** (median spread 40–100¢), so there is no point discovering them.
+- **Nobody visibly trades WN3 releases:** midpoint movement after an EE release is not elevated (ratio 0.83), so polling every 5 min is fast enough.
 
 ## 6. Tools set up on the dev machine
 
