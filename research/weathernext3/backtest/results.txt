@@ -1,0 +1,193 @@
+# backtest.mjs output (final data)
+samples 9037 events 1220
+
+ACCURACY (lower is better)  band      n   Brier mkt/wn3   LogLoss mkt/wn3   MAE mktExp/wn3 (deg, unit-native)
+36h+        655 0.708 / 0.705     1.392 / 1.428     1.17 / 1.08
+18-36h     3383 0.676 / 0.702     1.314 / 1.404     0.93 / 0.90
+0-18h      3618 0.635 / 0.680     1.214 / 1.334     0.83 / 0.85
+on-day     1381 0.594 / 0.667     1.119 / 1.295     0.78 / 0.85
+
+TRADING (return per $1 staked, 1c half-spread + taker fee both legs, entry 10 min after publish)
+resolve   theta 0.03 n 28697 mean    5.4% win 0.50 YES/NO 12179/16518 days+ 14/24
+resolve   theta 0.06 n 20131 mean   10.1% win 0.46 YES/NO 8784/11347 days+ 15/24
+resolve   theta 0.10 n 12528 mean   17.4% win 0.43 YES/NO 5260/7268 days+ 16/24
+resolve   theta 0.15 n  6781 mean   24.1% win 0.42 YES/NO 2503/4278 days+ 15/24
+dayStart  theta 0.03 n 28697 mean   -5.5% win 0.42 YES/NO 12179/16518 days+ 1/24
+dayStart  theta 0.06 n 20131 mean   -3.5% win 0.40 YES/NO 8784/11347 days+ 3/24
+dayStart  theta 0.10 n 12528 mean   -0.8% win 0.38 YES/NO 5260/7268 days+ 10/24
+dayStart  theta 0.15 n  6781 mean    1.2% win 0.37 YES/NO 2503/4278 days+ 10/24
+horizon6  theta 0.03 n 28697 mean   -9.8% win 0.32 YES/NO 12179/16518 days+ 0/24
+horizon6  theta 0.06 n 20131 mean   -9.4% win 0.32 YES/NO 8784/11347 days+ 0/24
+horizon6  theta 0.10 n 12528 mean   -8.1% win 0.32 YES/NO 5260/7268 days+ 0/24
+horizon6  theta 0.15 n  6781 mean   -6.6% win 0.33 YES/NO 2503/4278 days+ 2/24
+target    theta 0.03 n 28697 mean   -9.3% win 0.33 YES/NO 12179/16518 days+ 0/24
+target    theta 0.06 n 20131 mean   -8.8% win 0.33 YES/NO 8784/11347 days+ 0/24
+target    theta 0.10 n 12528 mean   -7.6% win 0.33 YES/NO 5260/7268 days+ 0/24
+target    theta 0.15 n  6781 mean   -6.1% win 0.33 YES/NO 2503/4278 days+ 3/24
+
+HOLD-TO-RESOLUTION vs PLACEBO (shuffled forecasts, same city)
+wn3     theta 0.06                 n 20131 mean/trade   10.1% day-mean 10.3% 95% CI by day [ 2.8 , 17.9 ]
+placebo theta 0.06                 n 30250 mean/trade  -12.1% day-mean -11.7% 95% CI by day [ -15.2 , -7.8 ]
+wn3     theta 0.1                  n 12528 mean/trade   17.4% day-mean 17.3% 95% CI by day [ 7.6 , 26.8 ]
+placebo theta 0.1                  n 24591 mean/trade  -13.0% day-mean -12.5% 95% CI by day [ -16.4 , -8.1 ]
+wn3     theta 0.15                 n  6781 mean/trade   24.1% day-mean 23.0% 95% CI by day [ 9.2 , 36.4 ]
+placebo theta 0.15                 n 18962 mean/trade  -13.6% day-mean -13.1% 95% CI by day [ -17.1 , -8.8 ]
+wn3     theta 0.2                  n  3591 mean/trade   27.0% day-mean 25.5% 95% CI by day [ 6.5 , 44.6 ]
+placebo theta 0.2                  n 14019 mean/trade  -14.3% day-mean -13.7% 95% CI by day [ -18.4 , -9.0 ]
+
+POOLING (leave-one-day-out): market logloss 1.3153 pooled 1.2274 improvement 0.0880
+chosen a/b by held-out day: 12:0.8/0.7 13:0.8/0.7 14:0.8/0.7 15:0.8/0.7 16:0.8/0.7 17:0.8/0.7 18:0.8/0.7 19:0.8/0.7 20:0.8/0.7 21:0.8/0.7 22:0.8/0.7 23:0.8/0.7 24:0.8/0.7 25:0.8/0.7 2:0.8/0.7 3:0.8/0.7 4:0.8/0.7 5:0.8/0.7 6:0.8/0.7 7:0.8/0.7 8:0.8/0.7 9:0.8/0.7 10:0.8/0.7 11:0.8/0.7
+
+PER CITY (lead 0-36h): n, Brier market, Brier wn3, wn3 better?
+Zhengzhou          50 0.704 0.607 YES
+San Francisco     136 0.731 0.661 YES
+Chicago           142 0.793 0.728 YES
+Wuhan             141 0.793 0.730 YES
+Jinan              50 0.160 0.109 YES
+Beijing           141 0.735 0.686 YES
+Hong Kong         135 0.820 0.773 YES
+Atlanta           142 0.678 0.639 YES
+Shenzhen          141 0.820 0.789 YES
+Chengdu           141 0.821 0.804 YES
+Paris             143 0.704 0.686 YES
+Taipei            141 0.739 0.724 YES
+Buenos Aires      142 0.671 0.657 YES
+Denver            142 0.712 0.710 YES
+Sao Paulo         142 0.796 0.793 YES
+Moscow            143 0.676 0.676 YES
+Chongqing         141 0.761 0.761 YES
+Tokyo             141 0.711 0.718 
+Manila            141 0.727 0.742 
+Lucknow           141 0.664 0.681 
+Houston           142 0.684 0.705 
+Los Angeles       136 0.617 0.639 
+Austin            142 0.698 0.720 
+London            143 0.692 0.718 
+Seoul (Incheon)   141 0.593 0.620 
+Cape Town         143 0.751 0.780 
+Karachi           141 0.733 0.762 
+Seattle           136 0.650 0.679 
+Guangzhou         141 0.775 0.809 
+Madrid            143 0.560 0.594 
+Jeddah            143 0.642 0.678 
+Warsaw            143 0.626 0.669 
+Busan             141 0.584 0.632 
+Shanghai          141 0.559 0.613 
+Toronto           142 0.612 0.668 
+Kuala Lumpur      137 0.627 0.686 
+NYC               142 0.635 0.707 
+Amsterdam         143 0.572 0.646 
+Miami             142 0.591 0.666 
+Qingdao           141 0.616 0.694 
+Panama City       142 0.691 0.769 
+Mexico City       142 0.570 0.651 
+Munich            143 0.559 0.651 
+Wellington        117 0.533 0.651 
+Tel Aviv          143 0.502 0.621 
+Milan             143 0.517 0.636 
+Dallas            142 0.649 0.776 
+Helsinki          143 0.492 0.646 
+Ankara            143 0.528 0.686 
+Singapore         141 0.478 0.636 
+Istanbul          143 0.533 0.716 
+
+REVISION LEAD TEST: WN3 revision (this init - previous init) vs market expected-max change after publish
+all     n  7401 corr(rev, mkt already moved) 0.030 | corr(rev, next3h/6h/12h) 0.182/0.187/0.142 | corr(gap wn3-mkt, next12h) 0.316 | |rev|>=0.5deg n 1294 same-dir 6h 0.65
+36h+    n    72 corr(rev, mkt already moved) -0.028 | corr(rev, next3h/6h/12h) 0.104/0.016/-0.140 | corr(gap wn3-mkt, next12h) 0.400 | |rev|>=0.5deg n 19 same-dir 6h 0.58
+18-36h  n  2703 corr(rev, mkt already moved) 0.014 | corr(rev, next3h/6h/12h) 0.246/0.254/0.241 | corr(gap wn3-mkt, next12h) 0.431 | |rev|>=0.5deg n 515 same-dir 6h 0.69
+0-18h   n  3365 corr(rev, mkt already moved) 0.067 | corr(rev, next3h/6h/12h) 0.173/0.181/0.147 | corr(gap wn3-mkt, next12h) 0.336 | |rev|>=0.5deg n 549 same-dir 6h 0.64
+on-day  n  1261 corr(rev, mkt already moved) 0.011 | corr(rev, next3h/6h/12h) 0.094/0.149/0.104 | corr(gap wn3-mkt, next12h) 0.265 | |rev|>=0.5deg n 211 same-dir 6h 0.62
+
+REVISION TRADING (direction of WN3 bucket-prob revision; taker both legs unless maker entry)
+taker hold 3h tau 0.05     c/sh -2.68 n  9307 mean/trade   -9.9% day-mean -9.9% 95% CI by day [ -10.8 , -9.1 ]
+taker hold 3h tau 0.1      c/sh -2.39 n  2797 mean/trade   -8.2% day-mean -8.4% 95% CI by day [ -9.7 , -6.9 ]
+taker hold 3h tau 0.15     c/sh -2.44 n   846 mean/trade   -8.3% day-mean -8.1% 95% CI by day [ -10.6 , -5.1 ]
+taker hold 3h tau 0.2      c/sh -2.20 n   268 mean/trade   -6.8% day-mean -7.8% 95% CI by day [ -11.2 , -3.7 ]
+taker hold 6h tau 0.05     c/sh -2.19 n  9307 mean/trade   -7.9% day-mean -8.0% 95% CI by day [ -9.0 , -6.9 ]
+taker hold 6h tau 0.1      c/sh -1.63 n  2797 mean/trade   -4.9% day-mean -5.2% 95% CI by day [ -6.9 , -3.4 ]
+taker hold 6h tau 0.15     c/sh -1.55 n   846 mean/trade   -4.0% day-mean -3.9% 95% CI by day [ -7.4 , -0.1 ]
+taker hold 6h tau 0.2      c/sh -1.01 n   268 mean/trade   -2.3% day-mean -4.6% 95% CI by day [ -9.3 , 0.5 ]
+taker hold 12h tau 0.05    c/sh -1.42 n  9307 mean/trade   -4.5% day-mean -4.6% 95% CI by day [ -6.4 , -3.0 ]
+taker hold 12h tau 0.1     c/sh -0.50 n  2797 mean/trade    0.0% day-mean -0.2% 95% CI by day [ -3.0 , 2.7 ]
+taker hold 12h tau 0.15    c/sh -0.70 n   846 mean/trade    2.4% day-mean 2.4% 95% CI by day [ -4.5 , 10.7 ]
+taker hold 12h tau 0.2     c/sh 1.11 n   268 mean/trade    8.4% day-mean 9.5% 95% CI by day [ -1.5 , 23.3 ]
+maker hold 3h tau 0.05     c/sh -0.93 n  9307 mean/trade   -3.5% day-mean -3.6% 95% CI by day [ -4.4 , -2.6 ]
+maker hold 3h tau 0.1      c/sh -0.63 n  2797 mean/trade   -1.4% day-mean -1.6% 95% CI by day [ -3.2 , -0.0 ]
+maker hold 3h tau 0.15     c/sh -0.66 n   846 mean/trade   -1.7% day-mean -1.5% 95% CI by day [ -4.2 , 2.1 ]
+maker hold 3h tau 0.2      c/sh -0.41 n   268 mean/trade    0.1% day-mean -1.2% 95% CI by day [ -5.1 , 3.1 ]
+maker hold 6h tau 0.05     c/sh -0.44 n  9307 mean/trade   -1.3% day-mean -1.5% 95% CI by day [ -2.6 , -0.2 ]
+maker hold 6h tau 0.1      c/sh 0.13 n  2797 mean/trade    2.1% day-mean 1.8% 95% CI by day [ 0.0 , 3.7 ]
+maker hold 6h tau 0.15     c/sh 0.24 n   846 mean/trade    3.2% day-mean 3.3% 95% CI by day [ -0.7 , 7.4 ]
+maker hold 6h tau 0.2      c/sh 0.78 n   268 mean/trade    5.0% day-mean 2.4% 95% CI by day [ -2.8 , 7.9 ]
+maker hold 12h tau 0.05    c/sh 0.32 n  9307 mean/trade    2.5% day-mean 2.4% 95% CI by day [ 0.4 , 4.3 ]
+maker hold 12h tau 0.1     c/sh 1.26 n  2797 mean/trade    7.7% day-mean 7.4% 95% CI by day [ 4.3 , 10.8 ]
+maker hold 12h tau 0.15    c/sh 1.08 n   846 mean/trade   10.6% day-mean 10.5% 95% CI by day [ 2.3 , 19.6 ]
+maker hold 12h tau 0.2     c/sh 2.90 n   268 mean/trade   16.8% day-mean 17.9% 95% CI by day [ 5.8 , 32.7 ]
+
+PRE-REGISTERED HOLDOUT (rule fixed on days 12-21: taker both legs, hold 12h)
+late Sep 22-25 tau 0.1             n   499 mean/trade    2.5% day-mean 2.3% 95% CI by day [ -0.3 , 5.2 ]
+  placebo late Sep 22-25 tau 0.1   n  2248 mean/trade  -14.7% day-mean -14.9% 95% CI by day [ -17.1 , -12.8 ]
+late Sep 22-25 tau 0.15            n   166 mean/trade    1.7% day-mean 1.8% 95% CI by day [ -5.0 , 6.5 ]
+  placebo late Sep 22-25 tau 0.15  n  1760 mean/trade  -13.9% day-mean -14.2% 95% CI by day [ -16.9 , -11.6 ]
+early Sep 2-11 tau 0.1             n  1084 mean/trade   -3.4% day-mean -3.6% 95% CI by day [ -7.8 , 0.9 ]
+  placebo early Sep 2-11 tau 0.1   n  5868 mean/trade  -15.0% day-mean -14.5% 95% CI by day [ -16.4 , -11.9 ]
+early Sep 2-11 tau 0.15            n   308 mean/trade   -6.0% day-mean -5.8% 95% CI by day [ -14.0 , 4.9 ]
+  placebo early Sep 2-11 tau 0.15  n  4572 mean/trade  -15.1% day-mean -15.0% 95% CI by day [ -16.4 , -13.3 ]
+explored Sep 12-21 tau 0.1         n  1214 mean/trade    2.1% day-mean 2.2% 95% CI by day [ -1.9 , 6.5 ]
+  placebo explored Sep 12-21 tau 0.1 n  6447 mean/trade  -16.0% day-mean -15.9% 95% CI by day [ -16.9 , -15.0 ]
+explored Sep 12-21 tau 0.15        n   372 mean/trade    9.7% day-mean 10.8% 95% CI by day [ -0.9 , 25.2 ]
+  placebo explored Sep 12-21 tau 0.15 n  5017 mean/trade  -16.0% day-mean -15.9% 95% CI by day [ -17.1 , -14.7 ]
+
+# level2.mjs (modelled spreads)
+
+=== modelled spreads, skip if spread > 0.03
+resolve th0.1 explored 12-21       n  1146 mean/trade   10.9% day-mean 10.5% 95% CI by day [ -2.4 , 23.2 ]
+resolve th0.1 holdout late 22-25   n   450 mean/trade    7.3% day-mean 7.2% 95% CI by day [ -9.9 , 38.7 ]
+resolve th0.1 holdout early 2-11   n  1293 mean/trade   10.2% day-mean 10.3% 95% CI by day [ -2.0 , 23.4 ]
+  placebo resolve th0.1            n  4693 mean/trade  -15.2% day-mean -15.1% 95% CI by day [ -20.6 , -8.4 ]
+resolve th0.15 explored 12-21      n   681 mean/trade   20.2% day-mean 20.2% 95% CI by day [ 0.2 , 44.0 ]
+resolve th0.15 holdout late 22-25  n   286 mean/trade    8.8% day-mean 8.1% 95% CI by day [ -9.0 , 35.4 ]
+resolve th0.15 holdout early 2-11  n   865 mean/trade   20.8% day-mean 21.3% 95% CI by day [ 3.8 , 40.0 ]
+  placebo resolve th0.15           n  4099 mean/trade  -16.5% day-mean -16.4% 95% CI by day [ -23.3 , -8.3 ]
+tpOrResolve th0.1 explored 12-21   n  1146 mean/trade   10.8% day-mean 10.5% 95% CI by day [ 1.7 , 20.1 ]
+tpOrResolve th0.1 holdout late 22-25 n   450 mean/trade   13.1% day-mean 13.2% 95% CI by day [ 2.2 , 20.5 ]
+tpOrResolve th0.1 holdout early 2-11 n  1293 mean/trade   18.1% day-mean 18.5% 95% CI by day [ 9.1 , 28.2 ]
+  placebo tpOrResolve th0.1        n  4693 mean/trade  -11.9% day-mean -11.8% 95% CI by day [ -16.3 , -5.9 ]
+tpOrResolve th0.15 explored 12-21  n   681 mean/trade   16.9% day-mean 15.8% 95% CI by day [ 1.7 , 29.1 ]
+tpOrResolve th0.15 holdout late 22-25 n   286 mean/trade   13.9% day-mean 13.6% 95% CI by day [ 6.8 , 23.2 ]
+tpOrResolve th0.15 holdout early 2-11 n   865 mean/trade   30.9% day-mean 31.3% 95% CI by day [ 18.7 , 43.4 ]
+  placebo tpOrResolve th0.15       n  4099 mean/trade  -12.4% day-mean -12.3% 95% CI by day [ -17.5 , -5.7 ]
+tpOrResolve th0.15 by band/side: 18-36h NO n632 -1.3% | 0-18h YES n638 58.7% | 0-18h NO n458 11.6% | on-day YES n96 7.8% | 18-36h YES n2 75.1% | on-day NO n6 -104.4%
+
+=== modelled spreads, skip if spread > 0.05
+resolve th0.1 explored 12-21       n  1307 mean/trade   12.5% day-mean 12.2% 95% CI by day [ 0.3 , 22.5 ]
+resolve th0.1 holdout late 22-25   n   512 mean/trade    8.3% day-mean 8.5% 95% CI by day [ -13.0 , 40.9 ]
+resolve th0.1 holdout early 2-11   n  1440 mean/trade   15.3% day-mean 15.8% 95% CI by day [ 3.5 , 30.1 ]
+  placebo resolve th0.1            n  5288 mean/trade  -20.9% day-mean -20.7% 95% CI by day [ -25.8 , -15.4 ]
+resolve th0.15 explored 12-21      n   796 mean/trade   21.4% day-mean 21.5% 95% CI by day [ 4.3 , 39.0 ]
+resolve th0.15 holdout late 22-25  n   329 mean/trade   11.7% day-mean 10.7% 95% CI by day [ -10.3 , 36.0 ]
+resolve th0.15 holdout early 2-11  n   994 mean/trade   29.4% day-mean 30.3% 95% CI by day [ 13.2 , 49.1 ]
+  placebo resolve th0.15           n  4724 mean/trade  -21.3% day-mean -21.1% 95% CI by day [ -26.8 , -14.2 ]
+tpOrResolve th0.1 explored 12-21   n  1307 mean/trade    9.8% day-mean 9.5% 95% CI by day [ 1.9 , 16.8 ]
+tpOrResolve th0.1 holdout late 22-25 n   512 mean/trade   13.7% day-mean 13.6% 95% CI by day [ 5.2 , 21.8 ]
+tpOrResolve th0.1 holdout early 2-11 n  1440 mean/trade   19.0% day-mean 19.5% 95% CI by day [ 8.9 , 31.1 ]
+  placebo tpOrResolve th0.1        n  5288 mean/trade  -18.5% day-mean -18.3% 95% CI by day [ -22.2 , -13.6 ]
+tpOrResolve th0.15 explored 12-21  n   796 mean/trade   16.4% day-mean 15.4% 95% CI by day [ 3.0 , 26.8 ]
+tpOrResolve th0.15 holdout late 22-25 n   329 mean/trade   16.3% day-mean 16.0% 95% CI by day [ 6.0 , 24.6 ]
+tpOrResolve th0.15 holdout early 2-11 n   994 mean/trade   32.7% day-mean 33.4% 95% CI by day [ 19.9 , 46.8 ]
+  placebo tpOrResolve th0.15       n  4724 mean/trade  -17.6% day-mean -17.4% 95% CI by day [ -22.5 , -11.5 ]
+tpOrResolve th0.15 by band/side: 18-36h NO n538 -0.1% | 18-36h YES n112 82.0% | 0-18h YES n570 53.1% | on-day NO n170 10.7% | 0-18h NO n442 12.4% | on-day YES n161 27.8% | 36h+ NO n125 -2.2% | 36h+ YES n1 49.6%
+
+# level4.mjs (TP-or-resolve with stops)
+stop none {"resolve":780,"tp":1052} n  1832 mean/trade   23.0% day-mean 21.9% 95% CI by day [ 13.6 , 29.7 ]
+   holdout late                    n   286 mean/trade   13.9% day-mean 13.6% 95% CI by day [ 6.8 , 23.2 ]
+   holdout early                   n   865 mean/trade   30.9% day-mean 31.3% 95% CI by day [ 18.3 , 43.0 ]
+stop 0.05 {"stop":1398,"tp":417,"resolve":17} n  1832 mean/trade    4.1% day-mean 3.5% 95% CI by day [ -1.2 , 8.3 ]
+   holdout late                    n   286 mean/trade   -3.5% day-mean -3.6% 95% CI by day [ -10.3 , 3.0 ]
+   holdout early                   n   865 mean/trade    8.7% day-mean 8.5% 95% CI by day [ 1.7 , 15.3 ]
+stop 0.1 {"stop":910,"tp":669,"resolve":253} n  1832 mean/trade   17.8% day-mean 16.8% 95% CI by day [ 10.2 , 23.4 ]
+   holdout late                    n   286 mean/trade    9.4% day-mean 9.4% 95% CI by day [ 7.1 , 11.0 ]
+   holdout early                   n   865 mean/trade   25.8% day-mean 25.8% 95% CI by day [ 15.9 , 34.6 ]
+stop 0.2 {"stop":511,"tp":887,"resolve":434} n  1832 mean/trade   21.0% day-mean 19.9% 95% CI by day [ 12.8 , 27.2 ]
+   holdout late                    n   286 mean/trade   11.8% day-mean 11.6% 95% CI by day [ 5.8 , 18.4 ]
+   holdout early                   n   865 mean/trade   29.6% day-mean 29.8% 95% CI by day [ 17.5 , 41.6 ]

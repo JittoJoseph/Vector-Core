@@ -1,0 +1,141 @@
+# bt2.mjs (Earth Engine hourly runs, 2026-09-26)
+samples 32034 6h 7087 events 1220
+
+== static bias, band sigma | 6h runs | logloss wn3 1.328 mkt 1.224
+  explored                                     n   728  mean   20.1%  CI[7.8, 31.4]
+  late 22-25                                   n   306  mean   11.4%  CI[-2.7, 21.5]
+  early 2-11                                   n   893  mean   25.5%  CI[16.5, 32.5]
+
+== static bias, band sigma | all runs | logloss wn3 1.321 mkt 1.201
+  explored                                     n  1179  mean   11.9%  CI[2.8, 21.0]
+  late 22-25                                   n   453  mean   12.9%  CI[8.8, 16.6]
+  early 2-11                                   n  1341  mean   17.6%  CI[9.8, 24.6]
+samples 32034 6h 7087 events 1220
+
+== online bias l0.97 k8, band sigma | 6h runs | logloss wn3 1.393 mkt 1.224
+  explored                                     n   829  mean   10.1%  CI[1.1, 18.7]
+  late 22-25                                   n   324  mean    9.3%  CI[-3.0, 21.7]
+  early 2-11                                   n   901  mean   17.1%  CI[10.7, 24.0]
+
+== online bias l0.97 k8, band sigma | all runs | logloss wn3 1.373 mkt 1.201
+  explored                                     n  1224  mean    5.6%  CI[-2.1, 15.9]
+  late 22-25                                   n   478  mean   10.2%  CI[-1.7, 23.6]
+  early 2-11                                   n  1342  mean   10.4%  CI[3.6, 17.5]
+
+== online bias l0.93 k5, band sigma | 6h runs | logloss wn3 1.394 mkt 1.224
+  explored                                     n   829  mean    9.8%  CI[1.3, 17.3]
+  late 22-25                                   n   321  mean   12.9%  CI[-1.9, 24.9]
+  early 2-11                                   n   902  mean   17.2%  CI[9.5, 24.4]
+
+== online bias l0.93 k5, band sigma | all runs | logloss wn3 1.374 mkt 1.201
+  explored                                     n  1233  mean    6.6%  CI[-0.9, 15.9]
+  late 22-25                                   n   478  mean   11.4%  CI[0.2, 29.4]
+  early 2-11                                   n  1343  mean   11.4%  CI[4.4, 18.6]
+samples 32034 6h 7087 events 1220
+
+== static bias, ens sigma a0.8 b1 | 6h runs | logloss wn3 1.481 mkt 1.224
+  explored                                     n   663  mean    9.6%  CI[-1.1, 21.0]
+  late 22-25                                   n   266  mean  -11.3%  CI[-23.7, 0.1]
+  early 2-11                                   n   756  mean   16.1%  CI[2.8, 28.1]
+
+== static bias, ens sigma a0.8 b1 | all runs | logloss wn3 1.473 mkt 1.201
+  explored                                     n   926  mean    8.2%  CI[0.2, 14.7]
+  late 22-25                                   n   367  mean   -3.9%  CI[-12.9, 4.2]
+  early 2-11                                   n  1029  mean   14.7%  CI[3.1, 24.4]
+
+== static bias, ens sigma a0.6 b1.3 | 6h runs | logloss wn3 1.575 mkt 1.224
+  explored                                     n   721  mean    5.2%  CI[-4.1, 14.5]
+  late 22-25                                   n   296  mean  -11.5%  CI[-20.4, -4.3]
+  early 2-11                                   n   781  mean    3.7%  CI[-6.7, 17.1]
+
+== static bias, ens sigma a0.6 b1.3 | all runs | logloss wn3 1.566 mkt 1.201
+  explored                                     n   953  mean    4.6%  CI[-2.8, 11.2]
+  late 22-25                                   n   379  mean   -5.7%  CI[-16.1, 0.9]
+  early 2-11                                   n  1030  mean   11.1%  CI[0.8, 21.5]
+
+== static bias, ens sigma a1 b0.8 | 6h runs | logloss wn3 1.458 mkt 1.224
+  explored                                     n   639  mean   11.4%  CI[1.6, 22.2]
+  late 22-25                                   n   263  mean  -11.2%  CI[-20.6, -1.5]
+  early 2-11                                   n   738  mean   17.2%  CI[2.8, 30.3]
+
+== static bias, ens sigma a1 b0.8 | all runs | logloss wn3 1.451 mkt 1.201
+  explored                                     n   911  mean   10.3%  CI[3.7, 16.4]
+  late 22-25                                   n   360  mean   -2.7%  CI[-12.9, 6.0]
+  early 2-11                                   n  1043  mean   15.7%  CI[4.5, 25.8]
+samples 32034 6h 7087 events 1220
+
+== static bias, band sigma, lead<=18h | 6h runs | logloss wn3 1.328 mkt 1.224
+  explored                                     n   682  mean   22.4%  CI[9.1, 33.9]
+  late 22-25                                   n   285  mean    9.0%  CI[-7.1, 19.1]
+  early 2-11                                   n   858  mean   26.8%  CI[17.5, 34.2]
+
+== static bias, band sigma, lead<=18h | all runs | logloss wn3 1.321 mkt 1.201
+  explored                                     n  1159  mean   12.6%  CI[3.0, 22.2]
+  late 22-25                                   n   438  mean   12.0%  CI[9.2, 14.5]
+  early 2-11                                   n  1325  mean   18.3%  CI[10.2, 25.9]
+samples 32034 6h 7087 events 1220
+theta 0.12 stop 0.1  explored: n 1487 mean 6.1% CI[1.1, 11.9] tot $454 | late 22-25: n 585 mean 3.1% CI[-2.4, 8.9] tot $91 | early 2-11: n 1585 mean 10.3% CI[2.4, 18.1] tot $820
+theta 0.12 stop 0.2  explored: n 1487 mean 7.9% CI[2.4, 14.1] tot $589 | late 22-25: n 585 mean 7.9% CI[3.3, 11.7] tot $232 | early 2-11: n 1585 mean 13.2% CI[5.5, 21.3] tot $1043
+theta 0.12 stop 0.3  explored: n 1487 mean 9.0% CI[2.7, 15.4] tot $671 | late 22-25: n 585 mean 8.7% CI[3.4, 12.4] tot $254 | early 2-11: n 1585 mean 15.1% CI[7.6, 23.4] tot $1200
+theta 0.15 stop 0.1  explored: n 1179 mean 9.4% CI[1.3, 18.1] tot $555 | late 22-25: n 453 mean 7.9% CI[5.9, 10.5] tot $179 | early 2-11: n 1341 mean 13.7% CI[6.8, 19.8] tot $921
+theta 0.15 stop 0.2  explored: n 1179 mean 11.9% CI[2.7, 21.4] tot $702 | late 22-25: n 453 mean 12.9% CI[8.8, 16.6] tot $292 | early 2-11: n 1341 mean 17.6% CI[9.9, 24.9] tot $1182
+theta 0.15 stop 0.3  explored: n 1179 mean 13.1% CI[3.1, 22.5] tot $771 | late 22-25: n 453 mean 13.1% CI[9.3, 17.9] tot $297 | early 2-11: n 1341 mean 18.9% CI[11.5, 26.1] tot $1270
+theta 0.18 stop 0.1  explored: n 905 mean 12.6% CI[2.3, 23.0] tot $570 | late 22-25: n 333 mean 12.7% CI[10.4, 14.7] tot $211 | early 2-11: n 1091 mean 20.3% CI[11.1, 28.2] tot $1105
+theta 0.18 stop 0.2  explored: n 905 mean 15.8% CI[3.3, 27.6] tot $715 | late 22-25: n 333 mean 17.0% CI[11.9, 25.6] tot $284 | early 2-11: n 1091 mean 26.0% CI[16.2, 35.1] tot $1417
+theta 0.18 stop 0.3  explored: n 905 mean 17.1% CI[4.0, 30.0] tot $773 | late 22-25: n 333 mean 18.1% CI[11.5, 27.8] tot $302 | early 2-11: n 1091 mean 27.2% CI[17.2, 36.5] tot $1485
+theta 0.2 stop 0.1   explored: n 731 mean 18.6% CI[7.0, 29.1] tot $680 | late 22-25: n 280 mean 14.6% CI[5.1, 23.1] tot $204 | early 2-11: n 933 mean 27.0% CI[17.1, 36.8] tot $1260
+theta 0.2 stop 0.2   explored: n 731 mean 23.0% CI[9.1, 34.8] tot $840 | late 22-25: n 280 mean 17.5% CI[6.4, 28.2] tot $245 | early 2-11: n 933 mean 31.6% CI[20.9, 41.2] tot $1473
+theta 0.2 stop 0.3   explored: n 731 mean 23.8% CI[8.9, 36.7] tot $870 | late 22-25: n 280 mean 18.1% CI[7.6, 30.3] tot $253 | early 2-11: n 933 mean 32.5% CI[22.2, 42.4] tot $1517
+samples 32034 6h 7087 events 1220
+{"global":0.6614735541557739,"sigma":{"0":0.8746492837332153,"1":0.9040453086224758,"2":0.9503889287136935}}
+Amsterdam: 0.399 (days 24)
+Ankara: 0.960 (days 24)
+Atlanta: 0.830 (days 24)
+Austin: 1.920 (days 24)
+Beijing: 0.795 (days 24)
+Buenos Aires: 0.776 (days 23)
+Busan: 1.336 (days 24)
+Cape Town: 0.725 (days 23)
+Chengdu: 0.298 (days 23)
+Chicago: 0.955 (days 24)
+Chongqing: -0.336 (days 21)
+Dallas: 1.023 (days 24)
+Denver: 1.568 (days 24)
+Guangzhou: 1.320 (days 24)
+Helsinki: 0.366 (days 24)
+Hong Kong: 0.635 (days 23)
+Houston: 1.084 (days 24)
+Istanbul: 0.210 (days 24)
+Jeddah: 0.343 (days 24)
+Jinan: 0.066 (days 3)
+Karachi: 1.214 (days 22)
+Kuala Lumpur: 0.234 (days 24)
+London: 0.757 (days 24)
+Los Angeles: 0.847 (days 22)
+Lucknow: -0.081 (days 23)
+Madrid: 0.627 (days 24)
+Manila: 0.653 (days 24)
+Mexico City: 0.674 (days 21)
+Miami: 0.884 (days 24)
+Milan: 0.313 (days 24)
+Moscow: 0.080 (days 23)
+Munich: 0.567 (days 24)
+NYC: 0.302 (days 24)
+Panama City: 0.684 (days 23)
+Paris: 0.984 (days 24)
+Qingdao: 0.219 (days 24)
+San Francisco: 0.556 (days 23)
+Sao Paulo: 0.794 (days 23)
+Seattle: 0.941 (days 22)
+Seoul (Incheon): 0.790 (days 24)
+Shanghai: 0.698 (days 24)
+Shenzhen: -0.085 (days 24)
+Singapore: 1.256 (days 24)
+Taipei: 1.604 (days 24)
+Tel Aviv: 0.176 (days 24)
+Tokyo: 0.204 (days 24)
+Toronto: -0.151 (days 24)
+Warsaw: 0.116 (days 24)
+Wellington: 0.864 (days 24)
+Wuhan: 0.274 (days 23)
+Zhengzhou: 0.931 (days 19)

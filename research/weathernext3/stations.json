@@ -1,0 +1,461 @@
+{
+ "Amsterdam": {
+  "icao": "EHAM",
+  "unit": "C",
+  "lat": 52.315,
+  "lon": 4.79,
+  "elevM": -2,
+  "station": "Amsterdam Airport Schiphol",
+  "localMidnightUtc": "22:00"
+ },
+ "Ankara": {
+  "icao": "LTAC",
+  "unit": "C",
+  "lat": 40.128,
+  "lon": 32.995,
+  "elevM": 952,
+  "station": "Esenboğa Intl Airport",
+  "localMidnightUtc": "21:00"
+ },
+ "Atlanta": {
+  "icao": "KATL",
+  "unit": "F",
+  "lat": 33.62972,
+  "lon": -84.44223,
+  "elevM": 309,
+  "station": "Hartsfield-Jackson International Airport",
+  "localMidnightUtc": "04:00"
+ },
+ "Austin": {
+  "icao": "KAUS",
+  "unit": "F",
+  "lat": 30.1831,
+  "lon": -97.68063,
+  "elevM": 148,
+  "station": "Austin-Bergstrom International Airport",
+  "localMidnightUtc": "05:00"
+ },
+ "Beijing": {
+  "icao": "ZBAA",
+  "unit": "C",
+  "lat": 40.082,
+  "lon": 116.603,
+  "elevM": 31,
+  "station": "Beijing Capital International Airport",
+  "localMidnightUtc": "16:00"
+ },
+ "Buenos Aires": {
+  "icao": "SAEZ",
+  "unit": "C",
+  "lat": -34.822,
+  "lon": -58.536,
+  "elevM": 16,
+  "station": "Minister Pistarini Intl Airport",
+  "localMidnightUtc": "03:00"
+ },
+ "Busan": {
+  "icao": "RKPK",
+  "unit": "C",
+  "lat": 35.179,
+  "lon": 128.938,
+  "elevM": 3,
+  "station": "Gimhae Intl Airport",
+  "localMidnightUtc": "15:00"
+ },
+ "Cape Town": {
+  "icao": "FACT",
+  "unit": "C",
+  "lat": -33.965,
+  "lon": 18.602,
+  "elevM": 48,
+  "station": "Cape Town International Airport",
+  "localMidnightUtc": "22:00"
+ },
+ "Chengdu": {
+  "icao": "ZUUU",
+  "unit": "C",
+  "lat": 30.576,
+  "lon": 103.95,
+  "elevM": 494,
+  "station": "Chengdu Shuangliu International Airport",
+  "localMidnightUtc": "16:00"
+ },
+ "Chicago": {
+  "icao": "KORD",
+  "unit": "F",
+  "lat": 41.96017,
+  "lon": -87.93161,
+  "elevM": 202,
+  "station": "Chicago O'Hare Intl Airport",
+  "localMidnightUtc": "05:00"
+ },
+ "Chongqing": {
+  "icao": "ZUCK",
+  "unit": "C",
+  "lat": 29.718,
+  "lon": 106.639,
+  "elevM": 416,
+  "station": "Chongqing Jiangbei International Airport",
+  "localMidnightUtc": "16:00"
+ },
+ "Dallas": {
+  "icao": "KDAL",
+  "unit": "F",
+  "lat": 32.83836,
+  "lon": -96.83584,
+  "elevM": 148,
+  "station": "Dallas Love Field",
+  "localMidnightUtc": "05:00"
+ },
+ "Denver": {
+  "icao": "KBKF",
+  "unit": "F",
+  "lat": 39.713,
+  "lon": -104.758,
+  "elevM": 1703,
+  "station": "Buckley Space Force Base",
+  "localMidnightUtc": "06:00"
+ },
+ "Guangzhou": {
+  "icao": "ZGGG",
+  "unit": "C",
+  "lat": 23.392,
+  "lon": 113.307,
+  "elevM": 11,
+  "station": "Guangzhou Baiyun International Airport",
+  "localMidnightUtc": "16:00"
+ },
+ "Helsinki": {
+  "icao": "EFHK",
+  "unit": "C",
+  "lat": 60.327,
+  "lon": 24.957,
+  "elevM": 56,
+  "station": "Helsinki Vantaa Airport",
+  "localMidnightUtc": "21:00"
+ },
+ "Hong Kong": {
+  "icao": "HKO",
+  "unit": "C",
+  "lat": 22.302,
+  "lon": 114.174,
+  "elevM": 9,
+  "station": "Hong Kong Observatory HQ",
+  "localMidnightUtc": "16:00"
+ },
+ "Houston": {
+  "icao": "KHOU",
+  "unit": "F",
+  "lat": 29.64582,
+  "lon": -95.28214,
+  "elevM": 13,
+  "station": "William P. Hobby Airport",
+  "localMidnightUtc": "05:00"
+ },
+ "Istanbul": {
+  "icao": "LTFM",
+  "unit": "C",
+  "lat": 41.262,
+  "lon": 28.74,
+  "elevM": 99,
+  "station": "Istanbul Airport",
+  "localMidnightUtc": "21:00"
+ },
+ "Jeddah": {
+  "icao": "OEJN",
+  "unit": "C",
+  "lat": 21.685,
+  "lon": 39.166,
+  "elevM": 8,
+  "station": "King Abdulaziz International Airport",
+  "localMidnightUtc": "21:00"
+ },
+ "Jinan": {
+  "icao": "ZSJN",
+  "unit": "C",
+  "lat": 36.856,
+  "lon": 117.206,
+  "elevM": 22,
+  "station": "Jinan Yaoqiang International Airport",
+  "localMidnightUtc": "16:00"
+ },
+ "Karachi": {
+  "icao": "OPKC",
+  "unit": "C",
+  "lat": 24.902,
+  "lon": 67.139,
+  "elevM": 20,
+  "station": "Jinnah International Airport",
+  "localMidnightUtc": "19:00"
+ },
+ "Kuala Lumpur": {
+  "icao": "WMKK",
+  "unit": "C",
+  "lat": 2.747,
+  "lon": 101.714,
+  "elevM": 21,
+  "station": "Kuala Lumpur Intl Airport",
+  "localMidnightUtc": "16:00"
+ },
+ "London": {
+  "icao": "EGLC",
+  "unit": "C",
+  "lat": 51.505,
+  "lon": 0.055,
+  "elevM": 10,
+  "station": "London City Airport",
+  "localMidnightUtc": "23:00"
+ },
+ "Los Angeles": {
+  "icao": "KLAX",
+  "unit": "F",
+  "lat": 33.93817,
+  "lon": -118.3866,
+  "elevM": 30,
+  "station": "Los Angeles International Airport",
+  "localMidnightUtc": "07:00"
+ },
+ "Lucknow": {
+  "icao": "VILK",
+  "unit": "C",
+  "lat": 26.761,
+  "lon": 80.889,
+  "elevM": 121,
+  "station": "Chaudhary Charan Singh Intl Airport",
+  "localMidnightUtc": "18:30"
+ },
+ "Madrid": {
+  "icao": "LEMD",
+  "unit": "C",
+  "lat": 40.466,
+  "lon": -3.555,
+  "elevM": 589,
+  "station": "Adolfo Suárez Madrid-Barajas Airport",
+  "localMidnightUtc": "22:00"
+ },
+ "Manila": {
+  "icao": "RPLL",
+  "unit": "C",
+  "lat": 14.507,
+  "lon": 121.004,
+  "elevM": 15,
+  "station": "Ninoy Aquino International Airport",
+  "localMidnightUtc": "16:00"
+ },
+ "Mexico City": {
+  "icao": "MMMX",
+  "unit": "C",
+  "lat": 19.436,
+  "lon": -99.072,
+  "elevM": 2224,
+  "station": "Benito Juárez International Airport",
+  "localMidnightUtc": "06:00"
+ },
+ "Miami": {
+  "icao": "KMIA",
+  "unit": "F",
+  "lat": 25.78806,
+  "lon": -80.31692,
+  "elevM": 1,
+  "station": "Miami Intl Airport",
+  "localMidnightUtc": "04:00"
+ },
+ "Milan": {
+  "icao": "LIMC",
+  "unit": "C",
+  "lat": 45.631,
+  "lon": 8.728,
+  "elevM": 221,
+  "station": "Malpensa Intl Airport",
+  "localMidnightUtc": "22:00"
+ },
+ "Moscow": {
+  "icao": "UUWW",
+  "unit": "C",
+  "lat": 55.592,
+  "lon": 37.261,
+  "elevM": 195,
+  "station": "Vnukovo International Airport",
+  "localMidnightUtc": "21:00"
+ },
+ "Munich": {
+  "icao": "EDDM",
+  "unit": "C",
+  "lat": 48.348,
+  "lon": 11.813,
+  "elevM": 445,
+  "station": "Munich Airport",
+  "localMidnightUtc": "22:00"
+ },
+ "NYC": {
+  "icao": "KLGA",
+  "unit": "F",
+  "lat": 40.77945,
+  "lon": -73.88027,
+  "elevM": 9,
+  "station": "LaGuardia Airport",
+  "localMidnightUtc": "04:00"
+ },
+ "Panama City": {
+  "icao": "MPMG",
+  "unit": "C",
+  "lat": 8.967,
+  "lon": -79.555,
+  "elevM": 6,
+  "station": "Marcos A. Gelabert Intl Airport",
+  "localMidnightUtc": "05:00"
+ },
+ "Paris": {
+  "icao": "LFPB",
+  "unit": "C",
+  "lat": 48.967,
+  "lon": 2.428,
+  "elevM": 50,
+  "station": "Paris-Le Bourget Airport",
+  "localMidnightUtc": "22:00"
+ },
+ "Qingdao": {
+  "icao": "ZSQD",
+  "unit": "C",
+  "lat": 36.362,
+  "lon": 120.087,
+  "elevM": 2,
+  "station": "Qingdao Jiaodong International Airport",
+  "localMidnightUtc": "16:00"
+ },
+ "San Francisco": {
+  "icao": "KSFO",
+  "unit": "F",
+  "lat": 37.61961,
+  "lon": -122.36561,
+  "elevM": 2,
+  "station": "San Francisco International Airport",
+  "localMidnightUtc": "07:00"
+ },
+ "Sao Paulo": {
+  "icao": "SBGR",
+  "unit": "C",
+  "lat": -23.432,
+  "lon": -46.469,
+  "elevM": 745,
+  "station": "Sao Paulo-Guarulhos International Airport",
+  "localMidnightUtc": "03:00"
+ },
+ "Seattle": {
+  "icao": "KSEA",
+  "unit": "F",
+  "lat": 47.44467,
+  "lon": -122.31442,
+  "elevM": 115,
+  "station": "Seattle-Tacoma International Airport",
+  "localMidnightUtc": "07:00"
+ },
+ "Seoul (Incheon)": {
+  "icao": "RKSI",
+  "unit": "C",
+  "lat": 37.469,
+  "lon": 126.451,
+  "elevM": 7,
+  "station": "Incheon Intl Airport",
+  "localMidnightUtc": "15:00"
+ },
+ "Shanghai": {
+  "icao": "ZSPD",
+  "unit": "C",
+  "lat": 31.146,
+  "lon": 121.8,
+  "elevM": 4,
+  "station": "Shanghai Pudong International Airport",
+  "localMidnightUtc": "16:00"
+ },
+ "Shenzhen": {
+  "icao": "ZGSZ",
+  "unit": "C",
+  "lat": 22.639,
+  "lon": 113.803,
+  "elevM": 18,
+  "station": "Shenzhen Bao'an International Airport",
+  "localMidnightUtc": "16:00"
+ },
+ "Singapore": {
+  "icao": "WSSS",
+  "unit": "C",
+  "lat": 1.368,
+  "lon": 103.982,
+  "elevM": 17,
+  "station": "Singapore Changi Airport",
+  "localMidnightUtc": "16:00"
+ },
+ "Taipei": {
+  "icao": "RCSS",
+  "unit": "C",
+  "lat": 25.069,
+  "lon": 121.552,
+  "elevM": 8,
+  "station": "Taipei Songshan Airport",
+  "localMidnightUtc": "16:00"
+ },
+ "Tel Aviv": {
+  "icao": "LLBG",
+  "unit": "C",
+  "lat": 32.011,
+  "lon": 34.887,
+  "elevM": 35,
+  "station": "Ben Gurion International Airport",
+  "localMidnightUtc": "21:00"
+ },
+ "Tokyo": {
+  "icao": "RJTT",
+  "unit": "C",
+  "lat": 35.553,
+  "lon": 139.781,
+  "elevM": 5,
+  "station": "Tokyo Haneda Airport",
+  "localMidnightUtc": "15:00"
+ },
+ "Toronto": {
+  "icao": "CYYZ",
+  "unit": "C",
+  "lat": 43.679,
+  "lon": -79.629,
+  "elevM": 171,
+  "station": "Toronto Pearson Intl Airport",
+  "localMidnightUtc": "04:00"
+ },
+ "Warsaw": {
+  "icao": "EPWA",
+  "unit": "C",
+  "lat": 52.163,
+  "lon": 20.961,
+  "elevM": 107,
+  "station": "Warsaw Chopin Airport",
+  "localMidnightUtc": "22:00"
+ },
+ "Wellington": {
+  "icao": "NZWN",
+  "unit": "C",
+  "lat": -41.331,
+  "lon": 174.806,
+  "elevM": 12,
+  "station": "Wellington Intl Airport",
+  "localMidnightUtc": "12:00"
+ },
+ "Wuhan": {
+  "icao": "ZHHH",
+  "unit": "C",
+  "lat": 30.783,
+  "lon": 114.205,
+  "elevM": 33,
+  "station": "Wuhan Tianhe International Airport",
+  "localMidnightUtc": "16:00"
+ },
+ "Zhengzhou": {
+  "icao": "ZHCC",
+  "unit": "C",
+  "lat": 34.52,
+  "lon": 113.834,
+  "elevM": 149,
+  "station": "Zhengzhou Xinzheng International Airport",
+  "localMidnightUtc": "16:00"
+ }
+}
