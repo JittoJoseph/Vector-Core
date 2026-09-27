@@ -183,3 +183,51 @@ Releases reach EE at minutes 40–59 of the hour. The absolute midpoint move in 
 | Partial fills | 2 of 31 |
 
 The simulator's level-by-level fill matches what the book offered.
+
+## Live review and YES-only switch (2026-09-27)
+
+After about 30 hours live there were 116 trades: 44 closed, 72 open. Open positions are marked at the current mid.
+
+| Group | Trades | Cost | P&L |
+|---|---|---|---|
+| YES < 20¢ | 48 | $222 | **+$25.9** |
+| YES ≥ 20¢ | 5 | $20 | −$1.7 |
+| NO < 40¢ | 7 | $34 | +$9.7 |
+| NO 40–60¢ | 36 | $180 | **−$21.2** |
+| NO ≥ 60¢ | 20 | $100 | −$8.7 |
+
+- **Net P&L hid the capital problem.** Net was ≈ +$4, but the engine needed up to **$416 of capital at once**. Entries also come in bursts: single runs opened 31 and 27 positions.
+- **Stops filled far past the trigger:**
+  - Live stops filled on average 8¢ past the trigger (max 34¢, Miami: triggered at 55¢, filled at 21¢).
+  - NO trades win about $1.5–2.7 at take-profit but lose $2–4 at the stop, so they need a win rate above 60%.
+- **The backtest (Aug + Sep, with 8¢ stop slippage added) agrees.** Return per $:
+
+  | Segment | Aug | Sep |
+  |---|---|---|
+  | YES < 10¢ | +108% | +75% |
+  | YES 10–20¢ | +29% | +34% |
+  | NO 40–60¢ | −3% | −5% |
+  | NO < 40¢ | −12% | −9% |
+
+  NO trades only turn positive without a stop, and only at ≥ 60¢.
+- **YES-only keeps nearly all the P&L with half the trades and capital.** With a $100 bankroll and $5 stakes over the chronological Aug 1 – Sep 25 path: all trades end at $5,465, YES only at $5,461.
+- **The stop is irrelevant for most YES entries.** It sits 20¢ below entry, so it can never trigger on a YES bought under 20¢ (≈ 90% of YES entries).
+
+**Decision:** entries are YES only. The research engine keeps a fixed $5 per trade, realistic book-walking fills, and entries even with negative cash, so the per-trade data isn't shaped by bankroll luck.
+
+**Sizing for a future real-money engine.** Rule under test: stake = fraction × equity, clamped to $5–20; skip the trade when cash is tied up. Bootstrap of 30-day paths, YES only:
+
+| Fraction of equity | P(30-day loss) from $25 | from $50 | from $100 |
+|---|---|---|---|
+| 1/5 | 39% | 26% | 13% |
+| 1/10 | 21% | 8% | 5% |
+| **1/20** | **14%** | **3%** | **1%** |
+
+The median outcome is about the same for all three, because the $20 cap binds. So **1/20 of equity** is the recommended fraction, and a bankroll of ≥ $50 is advisable.
+
+**Also tested, no gain:**
+- Kelly sizing (no better than a flat fraction);
+- a one-position-per-ladder cap (worse);
+- θ 0.15, 0.25 and 0.30 (0.20 is still best).
+
+Scripts: `bank.mjs` (bankroll simulator) and the `bt2.mjs export` mode.

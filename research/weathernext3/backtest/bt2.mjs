@@ -405,3 +405,56 @@ if (which === "breakdown") {
   fs.writeFileSync(process.env.OUTCITY ?? "city.json", JSON.stringify({ city: agg("city"), side: agg("side"), band: agg("band") }));
   console.log("side", JSON.stringify(agg("side")), "band", JSON.stringify(agg("band")));
 }
+
+function tradeX(list, { theta = 0.2, stop = 0.2, stopSlip = 0 } = {}) {
+  const out = [], seen = new Set();
+  for (const s of [...list].sort((a, b) => a.t - b.t)) {
+    s.buckets.forEach((b, i) => {
+      const key = s.city + "|" + s.day + "|" + i;
+      if (seen.has(key)) return;
+      const pm = s.market[i], pw = s.p[i];
+      if (pm < 0.03 || pm > 0.97) return;
+      const sp = spreadAt(s.leadH, pm);
+      if (sp > 0.03) return;
+      const yes = pm + sp / 2, no = 1 - pm + sp / 2;
+      let side = null;
+      if (pw - yes - fee(yes) >= theta) side = "YES";
+      else if (1 - pw - no - fee(no) >= theta) side = "NO";
+      if (!side) return;
+      seen.add(key);
+      const entry = side === "YES" ? yes : no, target = side === "YES" ? pw : 1 - pw;
+      const resolve = side === "YES" ? (b.win ? 1 : 0) : b.win ? 0 : 1;
+      let exit = null, xt = null, how = "RES";
+      const noStop = [], noStopNoTp = null;
+      for (const x of b.h) {
+        const tt = x.t * 1000;
+        if (tt <= s.t) continue;
+        if (tt >= Math.min(s.closeT, s.dayStart + 86400e3)) break;
+        const v = side === "YES" ? x.p : 1 - x.p;
+        const hs = spreadAt((s.dayStart - tt) / 3600e3, v) / 2;
+        if (v - hs >= target) { exit = v - hs; xt = tt; how = "TP"; break; }
+        if (stop && v + hs <= entry - stop) { exit = Math.max(0, v - hs - stopSlip); xt = tt; how = "SL"; break; }
+      }
+      let tpOnly = null;
+      for (const x of b.h) {
+        const tt = x.t * 1000;
+        if (tt <= s.t) continue;
+        if (tt >= Math.min(s.closeT, s.dayStart + 86400e3)) break;
+        const v = side === "YES" ? x.p : 1 - x.p;
+        const hs = spreadAt((s.dayStart - tt) / 3600e3, v) / 2;
+        if (v - hs >= target) { tpOnly = v - hs; break; }
+      }
+      const val = exit ?? resolve;
+      const r = (v, isExit) => (v - (isExit ? fee(v) : 0) - entry - fee(entry)) / (entry + fee(entry));
+      out.push({ key: s.city + "|" + s.day, city: s.city, day: s.day, side, entry, target, pw, pm, leadH: s.leadH, t: s.t,
+        xt: xt ?? s.closeT, how, ret: r(val, exit !== null), retHold: r(resolve, false), retTpOnly: tpOnly !== null ? r(tpOnly, true) : r(resolve, false), win: resolve });
+    });
+  }
+  return out;
+}
+if (which === "export") {
+  build({ bias: "prod" });
+  const list = samples.filter((x) => (process.env.SIX ? x.six : true));
+  fs.writeFileSync(process.env.OUT, JSON.stringify(tradeX(list, { theta: +(process.env.THETA ?? 0.2), stop: +(process.env.STOP ?? 0.2), stopSlip: +(process.env.SLIP ?? 0) })));
+  console.log("exported");
+}

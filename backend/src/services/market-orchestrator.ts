@@ -57,7 +57,6 @@ interface Bucket {
   title: string;
   range: [number, number];
   yesToken: string;
-  noToken: string;
   feeRate: number;
 }
 
@@ -260,7 +259,6 @@ export class MarketOrchestrator extends EventEmitter {
         title: m.groupItemTitle,
         range: bucketRange(m.groupItemTitle),
         yesToken: tokens[0],
-        noToken: tokens[1],
         feeRate: m.feeSchedule?.rate ?? 0,
       });
     }
@@ -438,9 +436,8 @@ export class MarketOrchestrator extends EventEmitter {
         for (const [i, bucket] of campaign.buckets.entries()) {
           if (this.tradedBuckets.has(bucket.id)) continue;
           const q = this.quotes.get(bucket.yesToken);
-          const side = q && this.pickSide(probs[i]!, q, bucket.feeRate);
-          if (!side) continue;
-          if (await this.enter(campaign, bucket, side, probs[i]!, run, q))
+          if (!q || !this.hasEdge(probs[i]!, q, bucket.feeRate)) continue;
+          if (await this.enter(campaign, bucket, probs[i]!, run, q))
             entries++;
         }
       }
@@ -461,27 +458,21 @@ export class MarketOrchestrator extends EventEmitter {
     );
   }
 
-  private pickSide(p: number, q: Quote, feeRate: number): Side | null {
+  private hasEdge(p: number, q: Quote, feeRate: number): boolean {
     const mid = (q.bid + q.ask) / 2;
-    if (q.ask - q.bid > STRATEGY.maxSpread + 1e-9) return null;
-    if (mid < STRATEGY.minPrice || mid > STRATEGY.maxPrice) return null;
-    const fee = (x: number) => calculateFeePerShare(x, feeRate);
-    if (p - q.ask - fee(q.ask) >= STRATEGY.edge) return "YES";
-    const noAsk = 1 - q.bid;
-    if (1 - p - noAsk - fee(noAsk) >= STRATEGY.edge) return "NO";
-    return null;
+    if (q.ask - q.bid > STRATEGY.maxSpread + 1e-9) return false;
+    if (mid < STRATEGY.minPrice || mid > STRATEGY.maxPrice) return false;
+    return p - q.ask - calculateFeePerShare(q.ask, feeRate) >= STRATEGY.edge;
   }
 
   private async enter(
     campaign: Campaign,
     bucket: Bucket,
-    side: Side,
-    pYes: number,
+    target: number,
     run: ForecastRun,
     quote: Quote,
   ): Promise<boolean> {
-    const tokenId = side === "YES" ? bucket.yesToken : bucket.noToken;
-    const target = side === "YES" ? pYes : 1 - pYes;
+    const tokenId = bucket.yesToken;
     const book = await this.client.getOrderbook(tokenId);
     const top = getTopOfBook(book);
     if (top.bestBid === null || top.bestAsk === null) return false;
@@ -516,7 +507,7 @@ export class MarketOrchestrator extends EventEmitter {
         bucketSlug: bucket.slug,
         bucketGroupTitle: bucket.title,
         tokenId,
-        side,
+        side: "YES",
         entryTs: new Date(now),
         entryPrice: fill.averagePrice.toFixed(8),
         entryShares: fill.totalShares.toFixed(8),
@@ -527,7 +518,7 @@ export class MarketOrchestrator extends EventEmitter {
           init: new Date(run.init).toISOString(),
           leadH: round4((campaign.dayStart - now) / 3_600_000),
           pModel: round4(target),
-          quote: side === "YES" ? quote.ask : round4(1 - quote.bid),
+          quote: quote.ask,
           edge: round4(
             target - fill.averagePrice - fill.fees / fill.totalShares,
           ),
@@ -543,7 +534,7 @@ export class MarketOrchestrator extends EventEmitter {
       campaignId: campaign.id,
       bucketId: bucket.id,
       tokenId,
-      side,
+      side: "YES",
       entryPrice: fill.averagePrice,
       shares: fill.totalShares,
       fees: fill.fees,
@@ -560,7 +551,7 @@ export class MarketOrchestrator extends EventEmitter {
     await logAudit(
       "info",
       "TRADE_OPENED",
-      `${side} ${bucket.title} · ${campaign.title}`,
+      `YES ${bucket.title} · ${campaign.title}`,
       {
         tradeId: trade.id,
         price: fill.averagePrice,
