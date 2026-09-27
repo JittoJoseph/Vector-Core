@@ -114,11 +114,6 @@ export function TradesTable({
                     />
                   </a>
                   <span className="text-[11px] font-medium text-muted-foreground/80">
-                    <span
-                      className={`mr-1.5 font-bold ${trade.side === "YES" ? "text-emerald-400" : "text-rose-400"}`}
-                    >
-                      {trade.side}
-                    </span>
                     {trade.bucketGroupTitle}
                   </span>
                 </div>

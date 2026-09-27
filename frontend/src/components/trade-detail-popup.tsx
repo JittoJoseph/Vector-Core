@@ -62,7 +62,7 @@ export function TradeDetailPopup({
               >
                 {isClosed ? (trade.exitOutcome ?? "SETTLED") : "OPEN"}
               </span>
-              <Chip>BUY {trade.side}</Chip>
+              <Chip>BUY YES</Chip>
             </div>
             <div className="flex items-center gap-0.5 shrink-0 -mr-1 -mt-0.5">
               <a

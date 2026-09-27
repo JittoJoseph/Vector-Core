@@ -392,7 +392,7 @@ export function useActivityLog(enabled: boolean = true) {
         id,
         kind: "TRADE_OPENED",
         title: "TRADE_OPENED",
-        detail: `${trade.side} ${trade.bucketGroupTitle} @${(parseFloat(trade.entryPrice) * 100).toFixed(1)}¢ · ${trade.campaignTitle}`,
+        detail: `${trade.bucketGroupTitle} @${(parseFloat(trade.entryPrice) * 100).toFixed(1)}¢ · ${trade.campaignTitle}`,
         ts: Date.now(),
       };
       setActivities((prev) => [entry, ...prev].slice(0, MAX_ACTIVITY_ENTRIES));
@@ -414,7 +414,7 @@ export function useActivityLog(enabled: boolean = true) {
         id,
         kind: isWin ? "TRADE_WIN" : "TRADE_LOSS",
         title: "TRADE_CLOSED",
-        detail: `${trade?.exitReason ?? ""} ${trade?.side ?? ""} ${trade?.bucketGroupTitle ?? "?"}${pnl !== undefined ? ` · ${formatPnl(pnl)}` : ""}`,
+        detail: `${trade?.exitReason ?? ""} ${trade?.bucketGroupTitle ?? "?"}${pnl !== undefined ? ` · ${formatPnl(pnl)}` : ""}`,
         ts: Date.now(),
         pnl,
       };

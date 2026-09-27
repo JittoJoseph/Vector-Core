@@ -23,7 +23,7 @@ Research, backtests and data-access notes live in [`research/weathernext3`](rese
 ## First-time setup
 
 ```bash
-cd backend && pnpm install && pnpm exec tsx scripts/migrate-weathernext.mts
+cd backend && pnpm install && pnpm exec tsx scripts/reset-db.mts
 ```
 
 Backend environment: see `backend/.env.example`. Earth Engine access uses the WeatherNext-approved Google account's application-default credentials (`gcloud auth application-default login` on the VM).

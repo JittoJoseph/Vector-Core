@@ -49,8 +49,6 @@ const DISCOVERY_MS = 30 * 60_000;
 const SETTLEMENT_MS = 20 * 60_000;
 const DAY_MS = 86_400_000;
 
-type Side = "YES" | "NO";
-
 interface Bucket {
   id: string;
   slug: string | null;
@@ -78,7 +76,6 @@ interface Position {
   campaignId: string;
   bucketId: string;
   tokenId: string;
-  side: Side;
   entryPrice: number;
   shares: number;
   fees: number;
@@ -208,7 +205,6 @@ export class MarketOrchestrator extends EventEmitter {
         campaignId: t.campaignId,
         bucketId: t.bucketId,
         tokenId: t.tokenId,
-        side: t.side as Side,
         entryPrice: parseFloat(t.entryPrice),
         shares: parseFloat(t.entryShares),
         fees: parseFloat(t.entryFees),
@@ -352,8 +348,7 @@ export class MarketOrchestrator extends EventEmitter {
     );
     if (!payouts.size || held.some((p) => !payouts.has(p.bucketId))) return;
     for (const pos of held) {
-      const [yes, no] = payouts.get(pos.bucketId)!;
-      const payout = pos.side === "YES" ? yes : no;
+      const [payout] = payouts.get(pos.bucketId)!;
       await this.closePosition(
         pos,
         payout,
@@ -507,7 +502,6 @@ export class MarketOrchestrator extends EventEmitter {
         bucketSlug: bucket.slug,
         bucketGroupTitle: bucket.title,
         tokenId,
-        side: "YES",
         entryTs: new Date(now),
         entryPrice: fill.averagePrice.toFixed(8),
         entryShares: fill.totalShares.toFixed(8),
@@ -534,7 +528,6 @@ export class MarketOrchestrator extends EventEmitter {
       campaignId: campaign.id,
       bucketId: bucket.id,
       tokenId,
-      side: "YES",
       entryPrice: fill.averagePrice,
       shares: fill.totalShares,
       fees: fill.fees,
@@ -551,7 +544,7 @@ export class MarketOrchestrator extends EventEmitter {
     await logAudit(
       "info",
       "TRADE_OPENED",
-      `YES ${bucket.title} · ${campaign.title}`,
+      `${bucket.title} · ${campaign.title}`,
       {
         tradeId: trade.id,
         price: fill.averagePrice,
@@ -744,7 +737,7 @@ export class MarketOrchestrator extends EventEmitter {
       if (!marketTop || mid > marketTop.mid)
         marketTop = { title: b.title, mid };
       if (p === undefined) return;
-      const edge = Math.max(p - q.ask, q.bid - p);
+      const edge = p - q.ask;
       if (bestEdge === null || edge > bestEdge) bestEdge = edge;
     });
     return {
@@ -788,12 +781,11 @@ export class MarketOrchestrator extends EventEmitter {
           bid: q?.bid ?? null,
           ask: q?.ask ?? null,
           model: p,
-          edge: p !== null && q ? round4(Math.max(p - q.ask, q.bid - p)) : null,
+          edge: p !== null && q ? round4(p - q.ask) : null,
           positions: [...this.positions.values()]
             .filter((pos) => pos.bucketId === b.id)
             .map((pos) => ({
               id: pos.tradeId,
-              side: pos.side,
               entryPrice: pos.entryPrice,
               shares: pos.shares,
               target: pos.target,

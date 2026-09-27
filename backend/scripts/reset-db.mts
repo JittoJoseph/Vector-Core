@@ -1,4 +1,3 @@
-import { mkdirSync, writeFileSync } from "fs";
 import postgres from "postgres";
 import dotenv from "dotenv";
 
@@ -65,20 +64,6 @@ const sql = postgres(process.env.SUPABASE_DATABASE_URL!, {
   onnotice: () => {},
 });
 
-const [legacy] =
-  await sql`SELECT to_regclass('public.trades') IS NOT NULL AS exists`;
-if (legacy?.exists) {
-  const rows = await sql`SELECT * FROM trades`;
-  if (rows.length) {
-    mkdirSync("../research/legacy", { recursive: true });
-    writeFileSync(
-      "../research/legacy/no-band-strategy-trades.json",
-      JSON.stringify(rows, null, 1),
-    );
-    console.log(`Backed up ${rows.length} legacy trades`);
-  }
-}
-
 await sql.begin(async (tx) => {
   await tx`DROP TABLE IF EXISTS buckets, trades, campaigns, audit_log, city_bias CASCADE`;
   await tx`
@@ -109,7 +94,6 @@ await sql.begin(async (tx) => {
       bucket_slug text,
       bucket_group_title text NOT NULL,
       token_id text NOT NULL,
-      side text NOT NULL,
       entry_ts timestamp NOT NULL,
       entry_price numeric(18, 8) NOT NULL,
       entry_shares numeric(18, 8) NOT NULL,
@@ -147,5 +131,5 @@ await sql.begin(async (tx) => {
   await tx`INSERT INTO city_bias ${tx(rows, "city", "weight", "sum")}`;
 });
 
-console.log("WeatherNext schema ready");
+console.log("Database reset");
 await sql.end();

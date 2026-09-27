@@ -62,7 +62,6 @@ export const trades = pgTable(
     bucketSlug: text("bucket_slug"),
     bucketGroupTitle: text("bucket_group_title").notNull(),
     tokenId: text("token_id").notNull(),
-    side: text("side").notNull(),
     entryTs: timestamp("entry_ts").notNull(),
     entryPrice: decimal("entry_price", { precision: 18, scale: 8 }).notNull(),
     entryShares: decimal("entry_shares", { precision: 18, scale: 8 }).notNull(),

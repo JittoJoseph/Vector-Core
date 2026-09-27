@@ -42,7 +42,6 @@ export interface CampaignBucket {
   edge: number | null;
   positions: {
     id: string;
-    side: "YES" | "NO";
     entryPrice: number;
     shares: number;
     target: number;
@@ -71,7 +70,6 @@ export interface Trade {
   bucketGroupTitle: string;
   campaignEndDate: string | null;
   tokenId: string;
-  side: "YES" | "NO";
   entryTs: string;
   entryPrice: string;
   entryShares: string;

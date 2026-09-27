@@ -143,9 +143,6 @@ export function CampaignDetailPopup({
                             key={p.id}
                             className="flex items-center justify-end gap-2"
                           >
-                            <span className="text-amber-500 font-bold">
-                              {p.side}
-                            </span>
                             <span>
                               {cents(p.entryPrice)}→{cents(p.target)}
                             </span>
@@ -180,7 +177,7 @@ export function CampaignDetailPopup({
                   >
                     <div className="flex flex-col gap-1">
                       <span className="font-bold text-xs text-foreground">
-                        {t.side} {t.bucketGroupTitle}
+                        {t.bucketGroupTitle}
                       </span>
                       <span className="text-muted-foreground uppercase tracking-wider">
                         {t.exitReason ?? "OPEN"}
