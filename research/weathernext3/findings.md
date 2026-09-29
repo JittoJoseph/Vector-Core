@@ -231,3 +231,61 @@ The median outcome is about the same for all three, because the $20 cap binds. S
 - θ 0.15, 0.25 and 0.30 (0.20 is still best).
 
 Scripts: `bank.mjs` (bankroll simulator) and the `bt2.mjs export` mode.
+
+## YES-only live review and model research (2026-09-29)
+
+### What happened live
+
+After about 40 hours on the YES-only rule: 75 trades, 25 closed, −$34.6 on $117.
+
+Almost all closed trades belong to Sep 28 ladders:
+- 24 trades hit only 3 take-profits.
+- The backtest replayed on newly pulled EE runs and prices for Sep 25–28 reproduces this: Sep 28 is **−64% to −71%**.
+- That is the worst day in 57 backtest days. The next worst is −8%, and the median day is +52%.
+- There was no common direction that day: WN3 was warmer than the market in 19 cities and colder in 16.
+
+### Integrity checks (all passed)
+
+- **Archive = live:** EE archive values for the runs the engine used live match its stored forecasts (39 ladders, max diff 0.005 °C). The backtest is not using revised or hindcast data.
+- **Exits are realistic:** on the same 27 finished trades, the backtest exit rule agreed with the live exit 25 times. The two mismatches were live take-profits the backtest missed, so mid-based exits are not optimistic.
+- **Placebo: WN3 is the edge, not the exit mechanics.** The same entry and exit rules on buckets under 30¢:
+
+  | WN3 vs price | Aug | Sep | Win rate |
+  |---|---|---|---|
+  | WN3 ≥ 20 pts above (our trades) | +66% | +51% | 17–18% at ~11¢ |
+  | WN3 10–20 pts above | +13% | +10% | |
+  | WN3 roughly agrees | −24% | −28% | |
+  | WN3 says overpriced | −39% | −43% | |
+
+  Take-profit ≈ hold-to-resolution on average, so the value is in WN3 picking under-priced buckets.
+
+### Tested, not adopted
+
+- **Pooling WN3 with the market** (logistic regression, fitted on Aug):
+  - Log-loss improves (Sep 1.288 → 1.184).
+  - Trades get worse: +33% vs +49% per trade on Sep. The pooling shrinks exactly the longshot disagreements that carry the edge.
+- **Live station observations (IEM METAR archive, 51 ICAO stations):**
+  - The latest obs-minus-forecast error barely predicts the daily-max error (corr 0.03–0.10).
+  - An observed-max floor kills few trades, because the market already prices dead buckets near 0.
+  - Log-loss unchanged. Not worth the extra feed.
+- **Univariate filters** on edge, price, the gap between model and market means, market rank, and market top price:
+  - Several raise per-trade return in Aug and Sep.
+  - None protects the late period consistently.
+
+### Improvement found: smoothed fair value + model-flip exit
+
+- **Fair value** = normal around the mean of μ over all runs published in the last **6 h**, instead of the latest run only.
+- **Per-city σ scale** = `0.5 + 0.5 · cityResidSD / globalResidSD`, fitted on Aug.
+- **Flip exit:** exit at the bid when a newer run's fair value falls below the current bid.
+
+| | Aug (n / ret / worst day) | Sep, out of sample | Sep 26–28, out of sample |
+|---|---|---|---|
+| Current rule | 877 / +66% / −7% | 976 / +49% / −6% | 105 / +23% / −64% |
+| 6 h mean + city σ | 806 / +67% / −22% | 624 / +67% / +6% | 52 / +19% / −52% |
+| **6 h mean + city σ + flip exit** | 806 / +67% / −18% | 624 / **+64% / +10%** | 52 / **+30% / −33%** |
+
+- Log-loss (Sep) goes from 1.288 to 1.253.
+- There are fewer trades, but higher return per trade and a smaller worst day, which is what matters for a small bankroll.
+- The flip exit on the unsmoothed hourly model hurts Sep (+43%), because single hourly runs flip too often. It only works on the smoothed fair value.
+
+Scripts: `bt2.mjs` modes `feat`, `placebo`, `pool`, `obs`, `model2`, `flip`; `obs-pull.mjs` (IEM ASOS archive, rate-limited to about 1 station per minute).
