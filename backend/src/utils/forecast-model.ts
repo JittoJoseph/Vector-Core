@@ -52,16 +52,14 @@ export function localDayMaxC(
 }
 
 export function fairValue(params: {
-  temps: number[];
-  init: number;
+  fmaxC: number;
   dayStart: number;
   now: number;
   biasC: number;
   fahrenheit: boolean;
   ranges: [number, number][];
-}): FairValue | null {
-  const fmaxC = localDayMaxC(params.temps, params.init, params.dayStart);
-  if (fmaxC === null) return null;
+}): FairValue {
+  const { fmaxC } = params;
   const toUnit = (c: number) => (params.fahrenheit ? c * 1.8 + 32 : c);
   const mu = toUnit(fmaxC + params.biasC);
   const sigma =

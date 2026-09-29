@@ -117,6 +117,7 @@ export interface WeatherNextStats {
     init: string;
     covered: number;
     entries: number;
+    exits: number;
   } | null;
 }
 

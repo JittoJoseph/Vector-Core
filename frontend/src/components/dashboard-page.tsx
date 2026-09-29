@@ -512,6 +512,10 @@ export function DashboardPage() {
                               "Entries Last Run",
                               String(wn?.lastEvaluation?.entries ?? 0),
                             ],
+                            [
+                              "Model Exits Last Run",
+                              String(wn?.lastEvaluation?.exits ?? 0),
+                            ],
                             ["Last Poll", timeAgo(wn?.lastPollAt)],
                             [
                               "WS Messages",
@@ -691,7 +695,9 @@ export function DashboardPage() {
                       `${cents(config?.minPrice)} — ${cents(config?.maxPrice)}`,
                     ],
                     ["Trade Size", `$${config?.tradeBudget ?? 0}`],
+                    ["Forecast", "Mean of runs in last 3h"],
                     ["Take Profit", "Bid ≥ model prob"],
+                    ["Model Exit", "New run prob < bid"],
                     [
                       "Stop Loss",
                       config?.stopLossDelta

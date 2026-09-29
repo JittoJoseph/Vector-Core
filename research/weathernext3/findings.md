@@ -289,3 +289,35 @@ Almost all closed trades belong to Sep 28 ladders:
 - The flip exit on the unsmoothed hourly model hurts Sep (+43%), because single hourly runs flip too often. It only works on the smoothed fair value.
 
 Scripts: `bt2.mjs` modes `feat`, `placebo`, `pool`, `obs`, `model2`, `flip`; `obs-pull.mjs` (IEM ASOS archive, rate-limited to about 1 station per minute).
+
+### Adopted (2026-09-29): 3 h run averaging + model exit, no per-city σ
+
+To limit curve fitting, the per-city σ table (51 constants fitted on Aug) was **dropped**. Its out-of-sample effect was mixed.
+
+Averaging window sensitivity, with the model exit:
+
+| Window | Aug ret / worst day | Sep ret / worst day | Sep 26–28 ret / worst day |
+|---|---|---|---|
+| 3 h | +67% / −13% | +64% / −12% | **+35% / −25%** |
+| 6 h | +64% / −32% | +71% / −10% | +24% / −45% |
+| 9 h | +64% / −32% | +72% / −7% | +41% / −48% |
+| 12 h | +67% / −68% | +71% / −11% | +7% / −67% |
+| Old rule | +66% / −7% | +49% / −6% | +23% / −64% |
+
+- 3–9 h all beat the old rule on Sep; 3 h is the most consistent across all three periods.
+- Aug only has 6-hourly runs, so there the 3 h window means "latest run only", and the model exit alone still holds up.
+- Model-exit precision with 3 h averaging: exited trades were losers at resolution 90% (Aug), 76% (Sep) and 89% (late) of the time.
+
+### Winners vs losers at entry (1,946 YES trades, medians)
+
+| At entry | Won at resolution | TP, then lost at resolution | Lost (no TP) |
+|---|---|---|---|
+| Model p | 0.40–0.41 | 0.36–0.38 | 0.34–0.38 |
+| Entry | 12–15¢ | 12–13¢ | 8.5–10¢ |
+| Model p / price | 2.6–3.3× | 2.8–3.2× | 3.5–3.8× |
+| Distance from model μ | 0.35–0.50 sd | 0.53–0.67 sd | 0.56–0.72 sd |
+
+- Lead, ensemble spread, model swing and market momentum show no consistent difference.
+- **Winners** cluster on the bucket the model centres on.
+- **Losers** cluster on the cheapest, most extreme disagreements. Those still carry the highest return per $ (+90% or more under 8¢), because the payoff outweighs the lower hit rate. So they are not filtered out.
+- At entry, outcomes are largely weather still to come. Later runs are what separate them, hence the model exit.

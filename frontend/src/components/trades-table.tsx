@@ -308,7 +308,9 @@ export function TradesTable({
                         ? "TP"
                         : trade.exitReason === "STOP_LOSS"
                           ? "STOP"
-                          : trade.exitOutcome}
+                          : trade.exitReason === "MODEL_EXIT"
+                            ? "MODEL"
+                            : trade.exitOutcome}
                   </span>
                 </td>
 

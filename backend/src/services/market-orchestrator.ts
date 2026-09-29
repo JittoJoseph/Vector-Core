@@ -10,6 +10,7 @@ import {
   shrinkTrade,
   sumRealizedPnl,
   wipeTrades,
+  type ExitReason,
 } from "../db/client.js";
 import * as schema from "../db/schema.js";
 import type { ForecastSummary } from "../db/schema.js";
@@ -31,7 +32,11 @@ import {
 import { getWeatherNextFeed, type ForecastRun } from "./weathernext.js";
 import { executionPolicy } from "./execution-policy.js";
 import { CityBias } from "./city-bias.js";
-import { fairValue, winnerTempC } from "../utils/forecast-model.js";
+import {
+  fairValue,
+  localDayMaxC,
+  winnerTempC,
+} from "../utils/forecast-model.js";
 import { bucketRange, cityOf, isFahrenheit } from "../utils/weather-logic.js";
 import type { GammaEvent } from "../types/index.js";
 
@@ -45,6 +50,8 @@ export const STRATEGY = {
   tradeBudget: 5,
 } as const;
 const STOP_CONFIRM_MS = 5_000;
+const AVERAGING_MS = 3 * 3_600_000;
+const FRESH_RUN_MS = 3_600_000;
 const DISCOVERY_MS = 30 * 60_000;
 const SETTLEMENT_MS = 20 * 60_000;
 const DAY_MS = 86_400_000;
@@ -69,6 +76,7 @@ interface Campaign {
   buckets: Bucket[];
   forecast: ForecastSummary | null;
   probs: number[] | null;
+  recent: { publishedAt: number; fmaxC: number }[];
 }
 
 interface Position {
@@ -115,6 +123,7 @@ export class MarketOrchestrator extends EventEmitter {
     init: string;
     covered: number;
     entries: number;
+    exits: number;
   } | null = null;
 
   private timers: ReturnType<typeof setInterval>[] = [];
@@ -232,6 +241,7 @@ export class MarketOrchestrator extends EventEmitter {
         buckets: [],
         forecast: c.forecast ?? null,
         probs: null,
+        recent: [],
       });
     }
   }
@@ -270,6 +280,7 @@ export class MarketOrchestrator extends EventEmitter {
       buckets,
       forecast: null,
       probs: null,
+      recent: [],
     };
   }
 
@@ -387,18 +398,24 @@ export class MarketOrchestrator extends EventEmitter {
       const temps = run.series.get(campaign.city);
       if (!temps || !campaign.buckets.length || campaign.endDate <= now)
         continue;
-      if (campaign.forecast && Date.parse(campaign.forecast.init) > run.init)
-        continue;
+      const runMaxC = localDayMaxC(temps, run.init, campaign.dayStart);
+      if (runMaxC === null) continue;
+      campaign.recent = [
+        ...campaign.recent.filter(
+          (r) => r.publishedAt >= run.publishedAt - AVERAGING_MS,
+        ),
+        { publishedAt: run.publishedAt, fmaxC: runMaxC },
+      ];
       const fv = fairValue({
-        temps,
-        init: run.init,
+        fmaxC:
+          campaign.recent.reduce((sum, r) => sum + r.fmaxC, 0) /
+          campaign.recent.length,
         dayStart: campaign.dayStart,
         now,
         biasC: this.bias.get(campaign.city),
         fahrenheit: campaign.fahrenheit,
         ranges: campaign.buckets.map((b) => b.range),
       });
-      if (!fv) continue;
       campaign.probs = fv.probs;
       campaign.forecast = {
         init: new Date(run.init).toISOString(),
@@ -409,6 +426,7 @@ export class MarketOrchestrator extends EventEmitter {
       };
       scored.push({ campaign, probs: fv.probs });
     }
+    if (now - run.publishedAt > FRESH_RUN_MS) return;
     await Promise.all(
       scored.map(({ campaign }) =>
         getDb()
@@ -424,6 +442,18 @@ export class MarketOrchestrator extends EventEmitter {
     if (tokens.length)
       for (const [token, quote] of await this.client.getQuotes(tokens))
         this.quotes.set(token, quote);
+
+    let exits = 0;
+    for (const { campaign, probs } of scored) {
+      for (const pos of this.positions.values()) {
+        if (pos.campaignId !== campaign.id || pos.exiting) continue;
+        const i = campaign.buckets.findIndex((b) => b.id === pos.bucketId);
+        const bid = this.quotes.get(campaign.buckets[i]?.yesToken ?? "")?.bid;
+        if (i < 0 || bid === undefined || probs[i]! >= bid) continue;
+        this.exit(pos, "MODEL_EXIT");
+        exits++;
+      }
+    }
 
     let entries = 0;
     if (!this.paused && executionPolicy.canOpenNewPositions()) {
@@ -442,11 +472,12 @@ export class MarketOrchestrator extends EventEmitter {
       init: new Date(run.init).toISOString(),
       covered: scored.length,
       entries,
+      exits,
     };
     await logAudit(
       "info",
       "FORECAST_RUN",
-      `WeatherNext run evaluated: ${scored.length} ladders, ${entries} entries`,
+      `WeatherNext run evaluated: ${scored.length} ladders, ${entries} entries, ${exits} model exits`,
       {
         init: this.lastEvaluation.init,
       },
@@ -583,7 +614,7 @@ export class MarketOrchestrator extends EventEmitter {
     }
   }
 
-  private exit(pos: Position, reason: "TAKE_PROFIT" | "STOP_LOSS"): void {
+  private exit(pos: Position, reason: ExitReason): void {
     pos.exiting = true;
     this.sell(pos, reason)
       .catch((err) =>
@@ -596,7 +627,7 @@ export class MarketOrchestrator extends EventEmitter {
 
   private async sell(
     pos: Position,
-    reason: "TAKE_PROFIT" | "STOP_LOSS",
+    reason: ExitReason,
   ): Promise<void> {
     const book = await this.client.getOrderbook(pos.tokenId);
     if (!this.positions.has(pos.tradeId)) return;
@@ -635,7 +666,7 @@ export class MarketOrchestrator extends EventEmitter {
     pos: Position,
     exitPrice: number,
     pnl: number,
-    reason: "RESOLUTION" | "TAKE_PROFIT" | "STOP_LOSS",
+    reason: ExitReason,
   ): Promise<void> {
     this.positions.delete(pos.tradeId);
     this.ws.unsubscribe([pos.tokenId]);

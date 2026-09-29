@@ -56,13 +56,19 @@ export async function wipeTrades(): Promise<void> {
   await db.delete(schema.auditLogs);
 }
 
+export type ExitReason =
+  | "RESOLUTION"
+  | "TAKE_PROFIT"
+  | "STOP_LOSS"
+  | "MODEL_EXIT";
+
 export async function settleTrade(
   id: string,
   fields: {
     outcome: "WIN" | "LOSS";
     realizedPnl: number;
     exitPrice: number;
-    exitReason: "RESOLUTION" | "TAKE_PROFIT" | "STOP_LOSS";
+    exitReason: ExitReason;
     minPrice: number | null;
   },
 ) {
