@@ -321,3 +321,86 @@ Averaging window sensitivity, with the model exit:
 - **Winners** cluster on the bucket the model centres on.
 - **Losers** cluster on the cheapest, most extreme disagreements. Those still carry the highest return per $ (+90% or more under 8¢), because the payoff outweighs the lower hit rate. So they are not filtered out.
 - At entry, outcomes are largely weather still to come. Later runs are what separate them, hence the model exit.
+
+## Live review 2026-10-03: the edge faded from Sep 28
+
+### Live (Sep 29 – Oct 2, 3 h averaging + model exit)
+
+113 trades; 80 closed for −$36.8 on $359:
+
+| Exit | Trades | P&L |
+|---|---|---|
+| Take-profit | 21 | +$165 |
+| Model exit | 10 | +$14 |
+| Stop | 3 | −$11 |
+| Resolution | 46 | −$205 (all losers) |
+
+The take-profit hit rate is 26%; break-even needs about 36%. By market day:
+
+| Market day | Return per $ |
+|---|---|
+| Sep 29 | −100% |
+| Sep 30 | −54% |
+| Oct 1 | −8% |
+| Oct 2 | +140% |
+
+### The backtest agrees, so this is not execution
+
+New EE runs and prices to Oct 2. Same rules, per day:
+
+| Day | Sep 26 | Sep 27 | Sep 28 | Sep 29 | Sep 30 | Oct 1 | Oct 2 (partly resolved) |
+|---|---|---|---|---|---|---|---|
+| Return | +135% | +9% | −25% | −28% | −64% | +30% | −58% |
+
+### Root cause: WN3 lost relative accuracy
+
+Head-to-head on resolved ladders (market error − WN3 error, °C; > 0 means WN3 was better):
+
+| Aug | Sep weeks | Sep 28 → Oct 2 |
+|---|---|---|
+| −0.06 | −0.03 to +0.04 | −0.14, −0.11, −0.18, −0.14, −0.12 |
+
+- After the seeded per-city correction, WN3 now runs about 0.1–0.3 °C warm.
+- The market's drift toward WN3 in the 6 h after a release fell from 1.5–2.7 pts to 0.75.
+- There is still **no reaction in the first 30 min** after a release, so this is not other bots trading WN3.
+
+### Data notes
+
+- **August EE data is a backfill.** Ingestion was days to weeks after init (Aug 10 was ingested Aug 26). Real-time ingestion starts **Aug 27**, so treat Aug 27 – Sep 25 as the reference period.
+- **The old spread model was stale.** Live books now (Oct 3) have median spread 2–3¢ at every lead up to 24 h (≤ 3¢ for 82–88%). At 24–60 h the median is 44¢ (no market makers yet). The backtest now uses a flat 2¢ within 24 h (`FLATSPREAD`).
+
+### Tested and rejected (do not fix the bad week, or cost too much in good periods)
+
+Return per trade:
+
+| Variant | Real-time Sep | Sep 26 – Oct 2 |
+|---|---|---|
+| Baseline | +64% | −1% |
+| Causal adaptive bias (global 4-day EWMA + city 21-day) | +55% | −6% |
+| Common-mode removal (subtract the cross-city mean model-minus-market gap per run) | +55% | **+13%** |
+| Skill gating, global (WN3 vs market error, last 2–5 d) | roughly unchanged, ~⅓ fewer trades | n too small |
+| Paper-P&L gating (trade only if last 24 h of paper trades > 0) | −3 pts | **+26%** |
+| Partial take-profit at entry + k·(model − entry), k = 0.35–0.75 | +40% to +59% | +5% to +10% |
+
+- Per-city skill gating fails because city skill does not persist (corr 0.21 between halves of September).
+- Paper-P&L gating looked good under the old spread model, but its benefit **vanishes with realistic spreads** (+10% → +7%).
+
+### Best supported change: enter only ≥ ~12 h before the market day
+
+- **Structural reason:** close to the day, the market has information WN3 lacks — the previous afternoon's observed high (about 9–12 h before day start), live obs, nowcasts and short-range high-resolution models. Far out, everyone relies on medium-range models, where WN3 is strongest.
+- **Live:** < 12 h −43% (n 27), on-day −25% (21), 12–24 h +16% (22), 24 h+ +43% (10).
+- **Backtest at the mid price, real-time Sep:** 0–12 h +107%, 18–24 h +121%, 24–36 h +129%. In the bad week: 0–12 h −14%, 18–36 h +34–38%.
+- **Backtest with realistic spreads:**
+
+  | Min lead | Real-time Sep (ret / losing days) | Sep 26 – Oct 2 (ret / losing days) |
+  |---|---|---|
+  | All leads | +69%, 2/29 | +10%, 4/7 |
+  | 9 h | +80% | +11% |
+  | **12 h** | **+77%, 1/29** | **+10%, 2/7** |
+  | 15 h | +78% | +11% |
+
+  The response is smooth across 9–15 h, so 12 h is not a knife-edge. It cuts about half the trades.
+
+**Honest bottom line:** no rule recovers the bad week much beyond +10–13%. The edge depends on WN3 out-forecasting the market on the disagreements, and for about 5 days it did not.
+
+**Future channel:** at 24–60 h, WN3's edge measured at the mid is strongest, but books are empty (44¢ spreads). Resting maker bids there is untested.
