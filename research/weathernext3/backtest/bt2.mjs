@@ -55,12 +55,14 @@ for (const ev of events) {
     if (!s) continue;
     const t = r.pub;
     if (t >= closeT || t >= ev.dayStart + 86400e3) continue;
-    let max = -Infinity, iMax = -1, covered = 0;
+    let max = -Infinity, iMax = -1, covered = 0, q10 = -Infinity, q90 = -Infinity;
     for (let o = 0; o < s.mean.length; o++) {
       const vt = r.init + (o + 1) * 3600e3;
       if (vt >= ev.dayStart && vt < ev.dayStart + 86400e3 && s.mean[o] != null) {
         covered++;
         if (s.mean[o] > max) { max = s.mean[o]; iMax = o; }
+        if (s.p10?.[o] != null && s.p10[o] > q10) q10 = s.p10[o];
+        if (s.p90?.[o] != null && s.p90[o] > q90) q90 = s.p90[o];
       }
     }
     if (covered < 24) continue;
@@ -69,7 +71,7 @@ for (const ev of events) {
     const spreadC = (s.p90[iMax] - s.p10[iMax]) / 2.563;
     samples.push({
       city: ev.city, day: ev.day, isF, six: r.six, init: r.init, t, closeT, dayStart: ev.dayStart,
-      leadH: (ev.dayStart - t) / 3600e3, fmaxC: max, ens: spreadC,
+      leadH: (ev.dayStart - t) / 3600e3, fmaxC: max, ens: spreadC, q10, q90, iMax,
       actual: center(winner.range), winIdx: buckets.indexOf(winner), buckets, market,
     });
   }
@@ -1074,5 +1076,203 @@ if (which === "far") {
       return `n ${String(out.length).padStart(4)} avgMid ${(100 * mean(out.map((x) => x.pm))).toFixed(1).padStart(4)}c win ${(100 * mean(out.map((x) => x.win))).toFixed(0).padStart(3)}% holdAtMid ${(100 * mean(out.map((x) => x.ret))).toFixed(0).padStart(4)}% reachesModel ${(100 * mean(out.map((x) => x.tp))).toFixed(0).padStart(3)}%`;
     });
     console.log(`lead ${lo}-${hi}h`.padEnd(12), cells.join(" | "));
+  }
+}
+
+if (which === "skew") {
+  build({ bias: "prod" });
+  const SPLIT = 239;
+  const muOf = (s) => toUnit(s, s.fmaxC) + (PROD_BIAS[s.city] ?? PROD_BIAS.g) * scale(s);
+  const ok = samples.filter((s) => Number.isFinite(s.q10) && Number.isFinite(s.q90) && s.q90 > s.q10);
+  const tr = ok.filter((s) => s.day < SPLIT && s.actual != null);
+  const z = (s) => (s.actual - muOf(s)) / scale(s);
+  const lowW = (s) => Math.max(0.05, s.fmaxC - s.q10), highW = (s) => Math.max(0.05, s.q90 - s.fmaxC);
+  console.log("median daily-max quantile half-widths C: low", [...ok.map(lowW)].sort((a, b) => a - b)[ok.length >> 1].toFixed(2), "high", [...ok.map(highW)].sort((a, b) => a - b)[ok.length >> 1].toFixed(2));
+  const skewTerc = (s) => (highW(s) - lowW(s)) / (highW(s) + lowW(s));
+  const sorted = [...tr].sort((a, b) => skewTerc(a) - skewTerc(b));
+  for (let k = 0; k < 4; k++) { const g = sorted.slice((k * sorted.length) / 4, ((k + 1) * sorted.length) / 4); console.log(`skew quartile ${k + 1} (${skewTerc(g[0]).toFixed(2)}..${skewTerc(g.at(-1)).toFixed(2)}): mean resid ${mean(g.map(z)).toFixed(2)}C  sd ${Math.sqrt(mean(g.map((s) => (z(s) - mean(g.map(z))) ** 2))).toFixed(2)}`); }
+  const wSorted = [...tr].sort((a, b) => lowW(a) + highW(a) - lowW(b) - highW(b));
+  for (let k = 0; k < 4; k++) { const g = wSorted.slice((k * wSorted.length) / 4, ((k + 1) * wSorted.length) / 4); const m = mean(g.map(z)); console.log(`width quartile ${k + 1} (${(lowW(g[0]) + highW(g[0])).toFixed(2)}..${(lowW(g.at(-1)) + highW(g.at(-1))).toFixed(2)}C): resid sd ${Math.sqrt(mean(g.map((s) => (z(s) - m) ** 2))).toFixed(2)} mean ${m.toFixed(2)}`); }
+  const split = (s, mu, sl, sh) => {
+    const raw = s.buckets.map(({ range: [lo, hi] }) => { const cdf = (x) => (x < mu ? 2 * sl / (sl + sh) * Phi((x - mu) / sl) : sl / (sl + sh) + 2 * sh / (sl + sh) * (Phi((x - mu) / sh) - 0.5)); return cdf(hi) - cdf(lo); });
+    const tot = raw.reduce((a, b) => a + b, 0);
+    return raw.map((p) => Math.min(0.995, Math.max(0.002, p / tot)));
+  };
+  const base = (s) => Math.max(0.6, PROD_SIGMA[band(s.leadH)]);
+  const variants = {
+    "current symmetric": (s) => s.p,
+    "split-normal, mean width = current": (s) => { const k = base(s) * 2 / ((lowW(s) + highW(s)) / 1.2816); return split(s, muOf(s), Math.max(0.3, k * lowW(s) / 1.2816) * scale(s), Math.max(0.3, k * highW(s) / 1.2816) * scale(s)); },
+    "flow width 50/50 + skew": (s) => { const w = (lowW(s) + highW(s)) / 2 / 1.2816; const sig = Math.max(0.6, 0.5 * base(s) + 0.5 * w * base(s) / 0.55); const r = highW(s) / (lowW(s) + highW(s)); return split(s, muOf(s), sig * 2 * (1 - r) * scale(s), sig * 2 * r * scale(s)); },
+  };
+  const ll = (list, f) => mean(list.map((s) => -Math.log(Math.max(1e-3, f(s)[s.winIdx]))));
+  for (const [n, f] of Object.entries(variants)) console.log(n.padEnd(36), [["backfill", (s) => s.day < SPLIT], ["realtime Aug27-Sep25", (s) => s.day >= SPLIT && s.day < 269], ["Sep26-Oct2", (s) => s.day >= 269]].map(([p, g]) => `${p} ll ${ll(ok.filter(g), f).toFixed(4)}`).join(" | "));
+}
+
+if (which === "width") {
+  build({ bias: "prod" });
+  const SPLIT = +(process.env.SPLIT ?? 239);
+  const byKey = {};
+  for (const s of samples) (byKey[s.city + "|" + s.day] ??= []).push(s);
+  for (const g of Object.values(byKey)) { g.sort((a, b) => a.t - b.t); for (const s of g) { const lag = g.filter((x) => x.t <= s.t && x.t >= s.t - 3 * 3600e3 && Number.isFinite(x.q10) && Number.isFinite(x.q90)); s.fL = mean(g.filter((x) => x.t <= s.t && x.t >= s.t - 3 * 3600e3).map((x) => x.fmaxC)); s.W = lag.length ? mean(lag.map((x) => x.q90 - x.q10)) : null; } }
+  const muOf = (s) => toUnit(s, s.fL) + (PROD_BIAS[s.city] ?? PROD_BIAS.g) * scale(s);
+  const ok = samples.filter((s) => s.W != null);
+  const tr = ok.filter((s) => s.day < SPLIT && s.actual != null);
+  const r = (s) => (s.actual - muOf(s)) / scale(s);
+  const lin = (xs, ys) => { const mx = mean(xs), my = mean(ys); const b = xs.reduce((a, x, i) => a + (x - mx) * (ys[i] - my), 0) / xs.reduce((a, x) => a + (x - mx) ** 2, 0); return [my - b * mx, b]; };
+  const [g0, g1] = lin(tr.map((s) => s.W), tr.map(r));
+  const [s0, s1] = lin(tr.map((s) => s.W), tr.map((s) => Math.abs(r(s) - (g0 + g1 * s.W)) * Math.sqrt(Math.PI / 2)));
+  console.log(`fit on day<${SPLIT}: shift = ${g0.toFixed(3)} + ${g1.toFixed(3)}*W   sigma = ${s0.toFixed(3)} + ${s1.toFixed(3)}*W   (W = q90max - q10max, C)`);
+  const PV = {
+    current: (s) => probs(s, muOf(s), Math.max(0.6, PROD_SIGMA[band(s.leadH)]) * scale(s)),
+    "width sigma only": (s) => probs(s, muOf(s), Math.max(0.6, s0 + s1 * s.W) * scale(s)),
+    "width sigma + shift": (s) => probs(s, muOf(s) + (g0 + g1 * s.W) * scale(s), Math.max(0.6, s0 + s1 * s.W) * scale(s)),
+  };
+  const periods = [["backfill(train)", (s) => s.day < SPLIT], ["realtime Aug27-Sep25", (s) => s.day >= SPLIT && s.day < 269], ["Sep26-Oct2", (s) => s.day >= 269]];
+  for (const [vn, pf] of Object.entries(PV)) {
+    for (const s of ok) s.pV = pf(s);
+    const cells = periods.map(([pn, sel]) => {
+      const list = ok.filter(sel).sort((a, b) => a.t - b.t);
+      const ll = mean(list.map((s) => -Math.log(Math.max(1e-3, s.pV[s.winIdx]))));
+      const out = [], seen = new Set();
+      for (const s of list) {
+        if (s.leadH < 12) continue;
+        const g = byKey[s.city + "|" + s.day].filter((x) => x.pV);
+        s.buckets.forEach((b, i) => {
+          const key = s.city + "|" + s.day + "|" + i;
+          if (seen.has(key)) return;
+          const pm = s.market[i], pw = s.pV[i];
+          if (pm < 0.03 || pm > 0.97) return;
+          const sp = spreadAt(s.leadH, pm);
+          if (sp > 0.03) return;
+          const yes = pm + sp / 2;
+          if (pw - yes - fee(yes) < 0.2) return;
+          seen.add(key);
+          let exit = null, q = pw, j = g.indexOf(s) + 1;
+          for (const x of b.h) {
+            const tt = x.t * 1000;
+            if (tt <= s.t) continue;
+            if (tt >= Math.min(s.closeT, s.dayStart + 86400e3)) break;
+            let fresh = false;
+            while (j < g.length && g[j].t <= tt) { q = g[j++].pV[i]; fresh = true; }
+            const hs = spreadAt((s.dayStart - tt) / 3600e3, x.p) / 2;
+            if (x.p - hs >= pw) { exit = x.p - hs; break; }
+            if (x.p + hs <= yes - 0.2) { exit = Math.max(0, x.p - hs - 0.08); break; }
+            if (fresh && q < x.p - hs) { exit = Math.max(0, x.p - hs); break; }
+          }
+          const val = exit ?? (b.win ? 1 : 0);
+          out.push({ day: s.day, ret: (val - (exit === null ? 0 : fee(val)) - yes - fee(yes)) / (yes + fee(yes)) });
+        });
+      }
+      const d = {}; for (const t of out) (d[t.day] ??= []).push(t.ret);
+      const dm = Object.values(d).map(mean);
+      return `${pn} ll ${ll.toFixed(3)} n ${String(out.length).padStart(4)} ret ${(100 * mean(out.map((t) => t.ret))).toFixed(0).padStart(4)}% $${(5 * out.reduce((a, t) => a + t.ret, 0)).toFixed(0).padStart(5)} lose ${dm.filter((x) => x < 0).length}/${dm.length}`;
+    });
+    console.log(vn.padEnd(22), cells.join(" | "));
+  }
+}
+
+if (which === "dew") {
+  build({ bias: "prod" });
+  const extra = {};
+  for (const l of fs.readFileSync("ee-extra.jsonl", "utf8").trim().split("\n")) { const j = JSON.parse(l); extra[Date.parse(j.init)] = j.byCity; }
+  const muOf = (s) => toUnit(s, s.fmaxC) + (PROD_BIAS[s.city] ?? PROD_BIAS.g) * scale(s);
+  const rows = [];
+  for (const s of samples) {
+    const e = extra[s.init]?.[s.city];
+    if (!e || s.actual == null) continue;
+    const td = e.station_head_dewpoint_temperature_2m_mean, p50 = e.station_head_temperature_2m_p50, p25 = e.station_head_temperature_2m_p25, p75 = e.station_head_temperature_2m_p75;
+    if (!td || td[s.iMax] == null || !p50) continue;
+    let m50 = -Infinity, m25 = -Infinity, m75 = -Infinity, tdMean = 0, n = 0;
+    for (let o = 0; o < p50.length; o++) {
+      const vt = s.init + (o + 1) * 3600e3;
+      if (vt >= s.dayStart && vt < s.dayStart + 86400e3) { if (p50[o] > m50) m50 = p50[o]; if (p25[o] > m25) m25 = p25[o]; if (p75[o] > m75) m75 = p75[o]; if (td[o] != null) { tdMean += td[o]; n++; } }
+    }
+    rows.push({ s, r: (s.actual - muOf(s)) / scale(s), dep: s.fmaxC - td[s.iMax], td: td[s.iMax], medGap: s.fmaxC - m50, iqr: m75 - m25, day: s.day, lead: s.leadH });
+  }
+  console.log("rows", rows.length);
+  const q = (a, f, k) => { const b = [...a].sort((x, y) => f(x) - f(y)); return [0, 1, 2, 3].map((i) => b.slice((i * b.length) / k, ((i + 1) * b.length) / k)); };
+  for (const [name, f] of [["dewpoint depression at max hour C", (x) => x.dep], ["dewpoint at max hour C", (x) => x.td], ["mean-max minus median-max C", (x) => x.medGap], ["IQR of daily max (p75-p25) C", (x) => x.iqr]]) {
+    console.log(`\n${name}`);
+    for (const half of [["Aug27-Sep12", (x) => x.day < 256], ["Sep13-Sep25", (x) => x.day >= 256 && x.day < 269], ["Sep26-Oct2", (x) => x.day >= 269]]) {
+      const a = rows.filter(half[1]);
+      console.log("  " + half[0].padEnd(12), q(a, f, 4).map((g) => `[${f(g[0]).toFixed(1)}..${f(g.at(-1)).toFixed(1)}] resid ${mean(g.map((x) => x.r)).toFixed(2).padStart(5)} sd ${Math.sqrt(mean(g.map((x) => (x.r - mean(g.map((y) => y.r))) ** 2))).toFixed(2)}`).join(" | "));
+    }
+  }
+}
+
+if (which === "median") {
+  build({ bias: "prod" });
+  const TRAIN_END = 256;
+  const extra = {};
+  for (const l of fs.readFileSync("ee-extra.jsonl", "utf8").trim().split("\n")) { const j = JSON.parse(l); extra[Date.parse(j.init)] = j.byCity; }
+  const ok = [];
+  for (const s of samples) {
+    const e = extra[s.init]?.[s.city];
+    if (!e?.station_head_temperature_2m_p50) continue;
+    let m50 = -Infinity, m25 = -Infinity, m75 = -Infinity, n = 0;
+    const p50 = e.station_head_temperature_2m_p50, p25 = e.station_head_temperature_2m_p25, p75 = e.station_head_temperature_2m_p75;
+    for (let o = 0; o < p50.length; o++) { const vt = s.init + (o + 1) * 3600e3; if (vt >= s.dayStart && vt < s.dayStart + 86400e3 && p50[o] != null) { n++; m50 = Math.max(m50, p50[o]); m25 = Math.max(m25, p25[o]); m75 = Math.max(m75, p75[o]); } }
+    if (n < 24) continue;
+    s.m50 = m50; s.iqr = m75 - m25; ok.push(s);
+  }
+  const byKey = {};
+  for (const s of ok) (byKey[s.city + "|" + s.day] ??= []).push(s);
+  for (const g of Object.values(byKey)) { g.sort((a, b) => a.t - b.t); for (const s of g) { const lag = g.filter((x) => x.t <= s.t && x.t >= s.t - 3 * 3600e3); s.fL = mean(lag.map((x) => x.fmaxC)); s.mL = mean(lag.map((x) => x.m50)); s.iL = mean(lag.map((x) => x.iqr)); } }
+  const cb = (s) => PROD_BIAS[s.city] ?? PROD_BIAS.g;
+  const tr = ok.filter((s) => s.day < TRAIN_END && s.actual != null);
+  const lin = (xs, ys) => { const mx = mean(xs), my = mean(ys); const b = xs.reduce((a, x, i) => a + (x - mx) * (ys[i] - my), 0) / xs.reduce((a, x) => a + (x - mx) ** 2, 0); return [my - b * mx, b]; };
+  const medOffset = mean(tr.map((s) => (s.actual - toUnit(s, s.mL)) / scale(s) - cb(s))) ;
+  const rMed = (s) => (s.actual - toUnit(s, s.mL)) / scale(s) - cb(s) - medOffset;
+  const [a0, a1] = lin(tr.map((s) => s.iL), tr.map((s) => Math.abs(rMed(s)) * Math.sqrt(Math.PI / 2)));
+  const rMean = (s) => (s.actual - toUnit(s, s.fL)) / scale(s) - cb(s);
+  const [b0, b1] = lin(tr.map((s) => s.iL), tr.map((s) => Math.abs(rMean(s) - mean(tr.map(rMean))) * Math.sqrt(Math.PI / 2)));
+  console.log(`fit Aug27-Sep12: median offset ${medOffset.toFixed(3)}C; sigma(median) = ${a0.toFixed(3)} + ${a1.toFixed(3)}*IQR; sigma(mean) = ${b0.toFixed(3)} + ${b1.toFixed(3)}*IQR`);
+  const PV = {
+    "current (mean, lead sigma)": (s) => probs(s, toUnit(s, s.fL) + cb(s) * scale(s), Math.max(0.6, PROD_SIGMA[band(s.leadH)]) * scale(s)),
+    "median center, lead sigma": (s) => probs(s, toUnit(s, s.mL) + (cb(s) + medOffset) * scale(s), Math.max(0.6, PROD_SIGMA[band(s.leadH)]) * scale(s)),
+    "mean center, IQR sigma": (s) => probs(s, toUnit(s, s.fL) + cb(s) * scale(s), Math.max(0.6, b0 + b1 * s.iL) * scale(s)),
+    "median center, IQR sigma": (s) => probs(s, toUnit(s, s.mL) + (cb(s) + medOffset) * scale(s), Math.max(0.6, a0 + a1 * s.iL) * scale(s)),
+  };
+  const periods = [["train Aug27-Sep12", (s) => s.day < TRAIN_END], ["test Sep13-25", (s) => s.day >= TRAIN_END && s.day < 269], ["test Sep26-Oct2", (s) => s.day >= 269]];
+  for (const [vn, pf] of Object.entries(PV)) {
+    for (const s of ok) s.pV = pf(s);
+    const cells = periods.map(([pn, sel]) => {
+      const list = ok.filter(sel).sort((a, b) => a.t - b.t);
+      const ll = mean(list.map((s) => -Math.log(Math.max(1e-3, s.pV[s.winIdx]))));
+      const out = [], seen = new Set();
+      for (const s of list) {
+        if (s.leadH < 12) continue;
+        const g = byKey[s.city + "|" + s.day];
+        s.buckets.forEach((b, i) => {
+          const key = s.city + "|" + s.day + "|" + i;
+          if (seen.has(key)) return;
+          const pm = s.market[i], pw = s.pV[i];
+          if (pm < 0.03 || pm > 0.97) return;
+          const sp = spreadAt(s.leadH, pm);
+          if (sp > 0.03) return;
+          const yes = pm + sp / 2;
+          if (pw - yes - fee(yes) < 0.2) return;
+          seen.add(key);
+          let exit = null, q = pw, j = g.indexOf(s) + 1;
+          for (const x of b.h) {
+            const tt = x.t * 1000;
+            if (tt <= s.t) continue;
+            if (tt >= Math.min(s.closeT, s.dayStart + 86400e3)) break;
+            let fresh = false;
+            while (j < g.length && g[j].t <= tt) { q = g[j++].pV[i]; fresh = true; }
+            const hs = spreadAt((s.dayStart - tt) / 3600e3, x.p) / 2;
+            if (x.p - hs >= pw) { exit = x.p - hs; break; }
+            if (x.p + hs <= yes - 0.2) { exit = Math.max(0, x.p - hs - 0.08); break; }
+            if (fresh && q < x.p - hs) { exit = Math.max(0, x.p - hs); break; }
+          }
+          const val = exit ?? (b.win ? 1 : 0);
+          out.push({ day: s.day, ret: (val - (exit === null ? 0 : fee(val)) - yes - fee(yes)) / (yes + fee(yes)) });
+        });
+      }
+      const d = {}; for (const t of out) (d[t.day] ??= []).push(t.ret);
+      const dm = Object.values(d).map(mean);
+      return `${pn} ll ${ll.toFixed(3)} n ${String(out.length).padStart(3)} ret ${(100 * mean(out.map((t) => t.ret))).toFixed(0).padStart(4)}% $${(5 * out.reduce((a, t) => a + t.ret, 0)).toFixed(0).padStart(4)} lose ${dm.filter((x) => x < 0).length}/${dm.length}`;
+    });
+    console.log(vn.padEnd(27), cells.join(" | "));
   }
 }

@@ -404,3 +404,39 @@ Return per trade:
 **Honest bottom line:** no rule recovers the bad week much beyond +10–13%. The edge depends on WN3 out-forecasting the market on the disagreements, and for about 5 days it did not.
 
 **Future channel:** at 24–60 h, WN3's edge measured at the mid is strongest, but books are empty (44¢ spreads). Resting maker bids there is untested.
+
+### Implemented 2026-10-03: entries only ≥ 12 h before the market day (commit f995894)
+
+The exits (TP, model exit, stop, resolution) still apply to every position.
+
+## What else is in WN3 (2026-10-03)
+
+The EE collection has 12 bands per image:
+- `station_head_temperature_2m_{mean,p10,p25,p50,p75,p90}`
+- `station_head_dewpoint_temperature_2m_{mean,p10,p25,p50,p75,p90}`
+
+The engine uses only `temperature_2m_mean`. The 64 raw ensemble members and other gridded variables exist only in GCS (Zarr, 60–80 MB per lead per statistic), which is too heavy for live use.
+
+Tested on the real-time period, with extra bands pulled every 2 h via `backtest/ee-pull3.mjs`:
+
+- **Ensemble spread predicts error size strongly and consistently.**
+  - With W = max-of-p90 − max-of-p10 over the local day, the residual SD runs from 0.79 °C (narrowest quartile) to 1.37 °C (widest).
+  - IQR of the daily max (p75 − p25): 0.71–0.81 → 1.11–1.18 °C in every period.
+  - Wide-spread days also run warm (actual hotter, about +0.2–0.5 °C).
+- **The median is a better centre than the mean.**
+  - When the mean max sits below the median max (cool outlier members), the actual is hotter: +0.27, +0.12, +0.06 °C across the three periods. The opposite quartile gives −0.07, −0.12, −0.25 °C. Same sign every period.
+- **Dewpoint:** humid days (small depression at the max hour) have larger errors (SD about 1.1 vs 0.8 °C). There is no consistent mean shift, so it is weaker than the spread.
+- **Skew** of the hourly p10/p90 around the mean: no signal.
+
+Out of sample (fit Aug 27 – Sep 12; lead ≥ 12 h; flat 2¢ spread):
+
+| Model | ll Sep 13–25 | ll Sep 26 – Oct 2 | ret Sep 13–25 | ret Sep 26 – Oct 2 |
+|---|---|---|---|---|
+| Current (mean, lead σ) | 1.293 | 1.396 | +68% | +19% |
+| Mean, σ = 0.29 + 0.33·IQR | 1.251 | 1.380 | +76% | +0% |
+| Median, lead σ | 1.286 | 1.384 | +52% | +6% |
+| Median, σ = 0.33 + 0.30·IQR | 1.247 | 1.373 | +56% | +7% |
+
+The extra bands give **consistently better-calibrated forecasts**, but **no consistent trading gain**. The edge lives in the disagreements, not in average calibration. Not adopted.
+
+Cheap next step if revisited: fetching all 12 bands costs about the same EECU as one, so the engine could log the IQR live and re-test once more live data exists.
