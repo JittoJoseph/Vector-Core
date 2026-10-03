@@ -372,7 +372,12 @@ export function SettingsPage() {
                       label="Price Range"
                       value={`${(stats.config.minPrice * 100).toFixed(0)}¢ — ${(stats.config.maxPrice * 100).toFixed(0)}¢`}
                     />
+                    <ConfigItem
+                      label="Entry Window"
+                      value={`≥ ${stats.config.minEntryLeadHours}h before day`}
+                    />
                     <ConfigItem label="Take Profit" value="Bid ≥ model prob" />
+                    <ConfigItem label="Model Exit" value="New run prob < bid" />
                     <ConfigItem
                       label="Stop Loss Delta"
                       value={

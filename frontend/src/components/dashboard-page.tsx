@@ -695,6 +695,10 @@ export function DashboardPage() {
                       `${cents(config?.minPrice)} — ${cents(config?.maxPrice)}`,
                     ],
                     ["Trade Size", `$${config?.tradeBudget ?? 0}`],
+                    [
+                      "Entry Window",
+                      `≥ ${config?.minEntryLeadHours ?? 0}h before day`,
+                    ],
                     ["Forecast", "Mean of runs in last 3h"],
                     ["Take Profit", "Bid ≥ model prob"],
                     ["Model Exit", "New run prob < bid"],

@@ -140,6 +140,7 @@ export interface SystemStats {
     startingCapital: number;
     tradeBudget: number;
     minEdge: number;
+    minEntryLeadHours: number;
     maxSpread: number;
     minPrice: number;
     maxPrice: number;

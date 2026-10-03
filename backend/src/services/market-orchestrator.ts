@@ -48,6 +48,7 @@ export const STRATEGY = {
   minPrice: 0.03,
   maxPrice: 0.97,
   tradeBudget: 5,
+  minEntryLeadHours: 12,
 } as const;
 const STOP_CONFIRM_MS = 5_000;
 const AVERAGING_MS = 3 * 3_600_000;
@@ -458,6 +459,8 @@ export class MarketOrchestrator extends EventEmitter {
     let entries = 0;
     if (!this.paused && executionPolicy.canOpenNewPositions()) {
       for (const { campaign, probs } of scored) {
+        const leadMs = campaign.dayStart - Date.now();
+        if (leadMs < STRATEGY.minEntryLeadHours * 3_600_000) continue;
         for (const [i, bucket] of campaign.buckets.entries()) {
           if (this.tradedBuckets.has(bucket.id)) continue;
           const q = this.quotes.get(bucket.yesToken);

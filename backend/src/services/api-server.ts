@@ -101,6 +101,7 @@ export class ApiServer {
         maxSpread: STRATEGY.maxSpread,
         minPrice: STRATEGY.minPrice,
         maxPrice: STRATEGY.maxPrice,
+        minEntryLeadHours: STRATEGY.minEntryLeadHours,
         stopLossDelta: config.strategy.stopLossDelta,
       },
       portfolio: orchestrator.getPortfolioSnapshot(),
