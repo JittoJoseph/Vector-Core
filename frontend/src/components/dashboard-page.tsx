@@ -700,6 +700,10 @@ export function DashboardPage() {
                       `≥ ${config?.minEntryLeadHours ?? 0}h before day`,
                     ],
                     ["Forecast", "Mean of runs in last 3h"],
+                    [
+                      "Partial TP",
+                      `Half at ${Math.round((config?.partialTakeProfitAt ?? 0) * 100)}% to target`,
+                    ],
                     ["Take Profit", "Bid ≥ model prob"],
                     ["Model Exit", "New run prob < bid"],
                     [

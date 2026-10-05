@@ -102,6 +102,7 @@ export class ApiServer {
         minPrice: STRATEGY.minPrice,
         maxPrice: STRATEGY.maxPrice,
         minEntryLeadHours: STRATEGY.minEntryLeadHours,
+        partialTakeProfitAt: STRATEGY.partialTakeProfitAt,
         stopLossDelta: config.strategy.stopLossDelta,
       },
       portfolio: orchestrator.getPortfolioSnapshot(),

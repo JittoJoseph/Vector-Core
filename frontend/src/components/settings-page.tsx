@@ -376,6 +376,10 @@ export function SettingsPage() {
                       label="Entry Window"
                       value={`≥ ${stats.config.minEntryLeadHours}h before day`}
                     />
+                    <ConfigItem
+                      label="Partial TP"
+                      value={`Half at ${Math.round(stats.config.partialTakeProfitAt * 100)}% to target`}
+                    />
                     <ConfigItem label="Take Profit" value="Bid ≥ model prob" />
                     <ConfigItem label="Model Exit" value="New run prob < bid" />
                     <ConfigItem

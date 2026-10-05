@@ -9,7 +9,7 @@ Simulated trading engine for Polymarket "Highest temperature in {city} on {day}"
 - Every hourly WeatherNext 3 run (via Earth Engine) is sampled at the 51 airport stations the markets resolve on.
 - Each ladder gets a fair value per bucket: the mean forecast local-day max over the runs published in the last 3 hours + per-city bias (learned online from resolutions), with lead-dependent uncertainty. Runs older than an hour (restart backlog) only fill that window and never trade.
 - Enter a $5 simulated taker order when the model beats the live ask by ≥ 20¢ after fees on a book with ≤ 3¢ spread, only while the market day is still ≥ 12 h away (closer in, the market already sees the previous afternoon's high, live observations and short-range models). YES side only: NO entries were break-even at best (see research/weathernext3/findings.md, live review).
-- Exit on take-profit (bid reaches the model price), a model exit (a newer run values the bucket below the bid), a confirmed stop-loss (`STOP_LOSS_DELTA`), or resolution.
+- Sell half the position once the bid is halfway from entry to the model price, then exit the rest on take-profit (bid reaches the model price), a model exit (a newer run values the bucket below the bid), a confirmed stop-loss (`STOP_LOSS_DELTA`), or resolution.
 
 Research, backtests and data-access notes live in [`research/weathernext3`](research/weathernext3/README.md).
 

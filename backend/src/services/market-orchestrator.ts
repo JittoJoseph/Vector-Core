@@ -49,6 +49,7 @@ export const STRATEGY = {
   maxPrice: 0.97,
   tradeBudget: 5,
   minEntryLeadHours: 12,
+  partialTakeProfitAt: 0.5,
 } as const;
 const STOP_CONFIRM_MS = 5_000;
 const AVERAGING_MS = 3 * 3_600_000;
@@ -91,6 +92,7 @@ interface Position {
   cost: number;
   realized: number;
   target: number;
+  partialTaken: boolean;
   minPrice: number | null;
   bid: number | null;
   ask: number | null;
@@ -221,6 +223,7 @@ export class MarketOrchestrator extends EventEmitter {
         cost: parseFloat(t.actualCost),
         realized: parseFloat(t.realizedPnl ?? "0"),
         target: parseFloat(t.target),
+        partialTaken: t.realizedPnl !== null,
         minPrice: t.minPriceDuringPosition
           ? parseFloat(t.minPriceDuringPosition)
           : null,
@@ -568,6 +571,7 @@ export class MarketOrchestrator extends EventEmitter {
       cost: fill.netCost,
       realized: 0,
       target,
+      partialTaken: false,
       minPrice: null,
       bid: top.bestBid,
       ask: top.bestAsk,
@@ -602,6 +606,15 @@ export class MarketOrchestrator extends EventEmitter {
         this.exit(pos, "TAKE_PROFIT");
         continue;
       }
+      if (
+        !pos.partialTaken &&
+        bid >=
+          pos.entryPrice +
+            STRATEGY.partialTakeProfitAt * (pos.target - pos.entryPrice)
+      ) {
+        this.exit(pos, "TAKE_PROFIT", 0.5);
+        continue;
+      }
       const delta = getConfig().strategy.stopLossDelta;
       if (delta <= 0) continue;
       if (ask > round4(pos.entryPrice - delta)) {
@@ -617,9 +630,9 @@ export class MarketOrchestrator extends EventEmitter {
     }
   }
 
-  private exit(pos: Position, reason: ExitReason): void {
+  private exit(pos: Position, reason: ExitReason, fraction = 1): void {
     pos.exiting = true;
-    this.sell(pos, reason)
+    this.sell(pos, reason, fraction)
       .catch((err) =>
         logger.error({ err, tradeId: pos.tradeId }, "Exit failed"),
       )
@@ -631,16 +644,30 @@ export class MarketOrchestrator extends EventEmitter {
   private async sell(
     pos: Position,
     reason: ExitReason,
+    fraction: number,
   ): Promise<void> {
     const book = await this.client.getOrderbook(pos.tokenId);
     if (!this.positions.has(pos.tradeId)) return;
-    const sale = simulateTakerSell(book, pos.shares, this.feeRateOf(pos));
+    const sale = simulateTakerSell(
+      book,
+      pos.shares * fraction,
+      this.feeRateOf(pos),
+    );
     if (sale.totalShares <= 0) return;
     const soldCost = pos.cost * (sale.totalShares / pos.shares);
     const pnl = sale.netCost - soldCost;
-    if (!sale.isPartialFill) {
+    if (fraction >= 1 && !sale.isPartialFill) {
       await this.closePosition(pos, sale.averagePrice, pnl, reason);
       return;
+    }
+    if (fraction < 1) {
+      pos.partialTaken = true;
+      await logAudit(
+        "info",
+        "PARTIAL_TAKE_PROFIT",
+        `Sold ${sale.totalShares.toFixed(2)} shares @${(sale.averagePrice * 100).toFixed(1)}¢ (${pnl >= 0 ? "+" : ""}${pnl.toFixed(4)})`,
+        { tradeId: pos.tradeId, pnl },
+      );
     }
     const keep = 1 - sale.totalShares / pos.shares;
     this.realizedPnl += pnl;

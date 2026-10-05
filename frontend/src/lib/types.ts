@@ -141,6 +141,7 @@ export interface SystemStats {
     tradeBudget: number;
     minEdge: number;
     minEntryLeadHours: number;
+    partialTakeProfitAt: number;
     maxSpread: number;
     minPrice: number;
     maxPrice: number;
