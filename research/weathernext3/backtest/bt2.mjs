@@ -1391,3 +1391,139 @@ if (which === "confirm") {
     console.log(name.padEnd(42), [["Aug27-Sep25", (t) => t.day < 269], ["Sep26-Oct2", (t) => t.day >= 269]].map(([p, f]) => { const a = o.filter(f); const r = a.reduce((x, t) => x + t.ret * t.w, 0) / a.reduce((x, t) => x + t.w, 0); const d = {}; for (const t of a) (d[t.day] ??= []).push(t.ret); const dm = Object.values(d).map(mean); return `${p} n ${String(a.length).padStart(3)} ret/$ ${(100 * r).toFixed(0).padStart(4)}% lose ${dm.filter((x) => x < 0).length}/${dm.length}`; }).join(" | "));
   }
 }
+
+if (which === "persist") {
+  build({ bias: "prod" });
+  const OLD2 = JSON.parse(fs.readFileSync(`${OLD}/stations.json`, "utf8"));
+  const byKey = {};
+  for (const s of samples) (byKey[s.city + "|" + s.day] ??= []).push(s);
+  const res = {};
+  for (const [k, g] of Object.entries(byKey)) {
+    g.sort((a, b) => a.t - b.t);
+    const s0 = g[0];
+    if (s0.actual == null || s0.day < 239) continue;
+    const pre = g.filter((x) => x.leadH >= 12 && x.leadH <= 24);
+    if (!pre.length) continue;
+    const s = pre.at(-1);
+    const lag = g.filter((x) => x.t <= s.t && x.t >= s.t - 3 * 3600e3);
+    const mu = toUnit(s, mean(lag.map((x) => x.fmaxC))) + (PROD_BIAS[s.city] ?? PROD_BIAS.g) * scale(s);
+    (res[s0.city] ??= {})[s0.day] = { r: (s0.actual - mu) / scale(s0), mk: (s0.actual - expect(s, s.market)) / scale(s0), closeT: s0.closeT, dayStart: s0.dayStart };
+  }
+  const corr = (xs, ys) => { const mx = mean(xs), my = mean(ys); return mean(xs.map((x, i) => (x - mx) * (ys[i] - my))) / Math.sqrt(mean(xs.map((x) => (x - mx) ** 2)) * mean(ys.map((y) => (y - my) ** 2))); };
+  for (const lagD of [1, 2, 3]) {
+    const xs = [], ys = [], xm = [], ym = [];
+    for (const [c, d] of Object.entries(res)) for (const [day, v] of Object.entries(d)) { const w = d[+day + lagD]; if (w) { xs.push(v.r); ys.push(w.r); xm.push(Math.abs(v.mk) - Math.abs(v.r)); ym.push(Math.abs(w.mk) - Math.abs(w.r)); } }
+    console.log(`WN3 error autocorrelation, same city, lag ${lagD} day(s): ${corr(xs, ys).toFixed(2)} (n ${xs.length});  WN3 skill (|mkt err|-|wn3 err|) autocorr: ${corr(xm, ym).toFixed(2)}`);
+  }
+  const region = (c) => { const lon = OLD2[c]?.lon ?? 0; return lon > 60 ? "Asia/Oceania" : lon > -30 ? "Europe/Africa/MidEast" : "Americas"; };
+  const days = [...new Set(Object.values(res).flatMap((d) => Object.keys(d).map(Number)))].sort();
+  const reg = {};
+  for (const d of days) { const by = {}; for (const [c, dd] of Object.entries(res)) if (dd[d]) (by[region(c)] ??= []).push(dd[d].r); for (const [r, a] of Object.entries(by)) (reg[r] ??= {})[d] = mean(a); }
+  const R = Object.keys(reg);
+  for (let i = 0; i < R.length; i++) for (let j = i + 1; j < R.length; j++) { const ds = days.filter((d) => reg[R[i]][d] != null && reg[R[j]][d] != null); console.log(`same-day mean WN3 error corr ${R[i]} vs ${R[j]}: ${corr(ds.map((d) => reg[R[i]][d]), ds.map((d) => reg[R[j]][d])).toFixed(2)} (days ${ds.length})`); }
+}
+
+if (which === "activity") {
+  build({ bias: "prod" });
+  const byKey = {};
+  for (const s of samples) (byKey[s.city + "|" + s.day] ??= []).push(s);
+  for (const g of Object.values(byKey)) { g.sort((a, b) => a.t - b.t); for (const s of g) { const lag = g.filter((x) => x.t <= s.t && x.t >= s.t - 3 * 3600e3); s.pX = probs(s, toUnit(s, mean(lag.map((x) => x.fmaxC))) + (PROD_BIAS[s.city] ?? PROD_BIAS.g) * scale(s), Math.max(0.6, PROD_SIGMA[band(s.leadH)]) * scale(s)); } }
+  const out = [], seen = new Set();
+  for (const s of [...samples].sort((a, b) => a.t - b.t)) {
+    if (s.leadH < 12 || s.day < 239) continue;
+    const g = byKey[s.city + "|" + s.day];
+    s.buckets.forEach((b, i) => {
+      const key = s.city + "|" + s.day + "|" + i;
+      if (seen.has(key)) return;
+      const pm = s.market[i], pw = s.pX[i];
+      if (pm < 0.03 || pm > 0.97) return;
+      const yes = pm + 0.01;
+      if (pw - yes - fee(yes) < 0.2) return;
+      seen.add(key);
+      const win6 = b.h.filter((x) => x.t * 1000 <= s.t && x.t * 1000 > s.t - 6 * 3600e3);
+      let changes = 0; for (let k = 1; k < win6.length; k++) if (Math.abs(win6[k].p - win6[k - 1].p) > 0.0049) changes++;
+      const ladderAct = s.buckets.reduce((a, bb) => { const w = bb.h.filter((x) => x.t * 1000 <= s.t && x.t * 1000 > s.t - 6 * 3600e3); let c = 0; for (let k = 1; k < w.length; k++) if (Math.abs(w[k].p - w[k - 1].p) > 0.0049) c++; return a + c; }, 0);
+      let exit = null, q = pw, j = g.indexOf(s) + 1, half = 0;
+      for (const x of b.h) {
+        const tt = x.t * 1000;
+        if (tt <= s.t) continue;
+        if (tt >= Math.min(s.closeT, s.dayStart + 86400e3)) break;
+        let fresh = false;
+        while (j < g.length && g[j].t <= tt) { q = g[j++].pX[i]; fresh = true; }
+        const bid = x.p - 0.01;
+        if (!half && bid >= yes + 0.5 * (pw - yes)) half = bid - fee(bid);
+        if (bid >= pw) { exit = bid - fee(bid); break; }
+        if (x.p + 0.01 <= yes - 0.2) { exit = Math.max(0, bid - 0.08); break; }
+        if (fresh && q < bid) { exit = Math.max(0, bid - fee(bid)); break; }
+      }
+      const fin = exit ?? (b.win ? 1 : 0);
+      const val = half ? 0.5 * half + 0.5 * fin : fin;
+      out.push({ day: s.day, changes, ladderAct, ret: val / (yes + fee(yes)) - 1 });
+    });
+  }
+  const q4 = (f, name) => { const a = [...out].sort((x, y) => f(x) - f(y)); console.log(name); for (let k = 0; k < 4; k++) { const g = a.slice((k * a.length) / 4, ((k + 1) * a.length) / 4); console.log(`  q${k + 1} [${f(g[0])}..${f(g.at(-1))}] n ${g.length} ret ${(100 * mean(g.map((t) => t.ret))).toFixed(0)}% | Aug27-Sep25 ${(100 * mean(g.filter((t) => t.day < 269).map((t) => t.ret))).toFixed(0)}% | Sep26+ ${(100 * mean(g.filter((t) => t.day >= 269).map((t) => t.ret))).toFixed(0)}% (${g.filter((t) => t.day >= 269).length})`); } };
+  q4((t) => t.changes, "bucket price changes in prior 6h");
+  q4((t) => t.ladderAct, "ladder-wide price changes in prior 6h");
+}
+
+if (which === "calib") {
+  build({ bias: "prod" });
+  const byKey = {};
+  for (const s of samples) (byKey[s.city + "|" + s.day] ??= []).push(s);
+  for (const g of Object.values(byKey)) { g.sort((a, b) => a.t - b.t); for (const s of g) { const lag = g.filter((x) => x.t <= s.t && x.t >= s.t - 3 * 3600e3); s.muX = toUnit(s, mean(lag.map((x) => x.fmaxC))) + (PROD_BIAS[s.city] ?? PROD_BIAS.g) * scale(s); s.pX = probs(s, s.muX, Math.max(0.6, PROD_SIGMA[band(s.leadH)]) * scale(s)); } }
+  const rt = samples.filter((s) => s.day >= 239 && s.leadH >= 12 && s.leadH <= 30);
+  const bins = [0, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.7, 1.01];
+  console.log("reliability (real-time, lead 12-30h): predicted bin -> actual frequency");
+  for (const [name, f] of [["WN3", (s, i) => s.pX[i]], ["market", (s, i) => s.market[i]]]) {
+    const cells = [];
+    for (let k = 0; k < bins.length - 1; k++) { let n = 0, w = 0, ps = 0; for (const s of rt) s.buckets.forEach((b, i) => { const p = f(s, i); if (p >= bins[k] && p < bins[k + 1]) { n++; ps += p; if (i === s.winIdx) w++; } }); cells.push(`${(100 * ps / n).toFixed(0)}->${(100 * w / n).toFixed(0)}%`); }
+    console.log(" ", name.padEnd(7), cells.join("  "));
+  }
+  const rs = rt.filter((s) => s.actual != null).map((s) => (s.actual - s.muX) / scale(s));
+  const m = mean(rs);
+  console.log(`realized WN3 residual: mean ${m.toFixed(2)}C sd ${Math.sqrt(mean(rs.map((x) => (x - m) ** 2))).toFixed(2)}C vs model sigma ${PROD_SIGMA[1]}-${PROD_SIGMA[2]}`);
+  const out = [], seen = new Set();
+  for (const s of [...samples].sort((a, b) => a.t - b.t)) {
+    if (s.leadH < 12 || s.day < 239) continue;
+    const g = byKey[s.city + "|" + s.day];
+    s.buckets.forEach((b, i) => {
+      const key = s.city + "|" + s.day + "|" + i;
+      if (seen.has(key)) return;
+      const pm = s.market[i], pw = s.pX[i];
+      if (pm < 0.03 || pm > 0.97) return;
+      const yes = pm + 0.01;
+      if (pw - yes - fee(yes) < 0.2) return;
+      seen.add(key);
+      let exit = null, q = pw, j = g.indexOf(s) + 1, half = 0;
+      for (const x of b.h) {
+        const tt = x.t * 1000;
+        if (tt <= s.t) continue;
+        if (tt >= Math.min(s.closeT, s.dayStart + 86400e3)) break;
+        let fresh = false;
+        while (j < g.length && g[j].t <= tt) { q = g[j++].pX[i]; fresh = true; }
+        const bid = x.p - 0.01;
+        if (!half && bid >= yes + 0.5 * (pw - yes)) half = bid - fee(bid);
+        if (bid >= pw) { exit = bid - fee(bid); break; }
+        if (x.p + 0.01 <= yes - 0.2) { exit = Math.max(0, bid - 0.08); break; }
+        if (fresh && q < bid) { exit = Math.max(0, bid - fee(bid)); break; }
+      }
+      const fin = exit ?? (b.win ? 1 : 0);
+      out.push({ day: s.day, gap: Math.abs(s.muX - expect(s, s.market)) / scale(s), ret: (half ? 0.5 * half + 0.5 * fin : fin) / (yes + fee(yes)) - 1 });
+    });
+  }
+  console.log("\ncurrent rules (lead>=12, 3h mean, flip, half TP) by |WN3 centre - market centre|:");
+  for (const [lo, hi] of [[0, 0.5], [0.5, 1], [1, 1.5], [1.5, 99]]) {
+    const a = out.filter((t) => t.gap >= lo && t.gap < hi);
+    console.log(`  |gap| ${lo}-${hi}C`.padEnd(18), [["Aug27-Sep25", (t) => t.day < 269], ["Sep26-Oct2", (t) => t.day >= 269]].map(([p, f]) => { const x = a.filter(f); return `${p} n ${String(x.length).padStart(3)} ret ${(100 * mean(x.map((t) => t.ret))).toFixed(0).padStart(4)}%`; }).join(" | "));
+  }
+}
+
+if (which === "hi") {
+  build({ bias: "prod" });
+  const rt = samples.filter((s) => s.day >= 239 && s.leadH >= 12 && s.leadH <= 30);
+  const hits = [];
+  for (const s of rt) s.buckets.forEach((b, i) => { if (s.p[i] >= 0.7) hits.push({ city: s.city, day: s.day, title: b.title, range: b.range, pw: s.p[i], pm: s.market[i], win: i === s.winIdx, actual: s.actual, mu: toUnit(s, s.fmaxC), nb: s.buckets.length, titles: s.buckets.map((x) => x.title).join(",") }); });
+  console.log("samples with WN3 >= 70%:", hits.length, "distinct ladders", new Set(hits.map((h) => h.city + h.day)).size);
+  const seen = new Set();
+  for (const h of hits) { const k = h.city + h.day + h.title; if (seen.has(k)) continue; seen.add(k); console.log(h.city.padEnd(14), h.day, h.title.padEnd(14), JSON.stringify(h.range), "pw", h.pw.toFixed(2), "mkt", h.pm.toFixed(2), "win", h.win, "actual", h.actual, "mu", h.mu.toFixed(1), "buckets", h.nb); if (seen.size > 25) break; }
+}

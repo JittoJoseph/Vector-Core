@@ -403,8 +403,6 @@ Return per trade:
 
 **Honest bottom line:** no rule recovers the bad week much beyond +10–13%. The edge depends on WN3 out-forecasting the market on the disagreements, and for about 5 days it did not.
 
-**Future channel:** at 24–60 h, WN3's edge measured at the mid is strongest, but books are empty (44¢ spreads). Resting maker bids there is untested.
-
 ### Implemented 2026-10-03: entries only ≥ 12 h before the market day (commit f995894)
 
 The exits (TP, model exit, stop, resolution) still apply to every position.
@@ -482,3 +480,24 @@ Every protective exit trades a little mean return for much lower variance and a 
 
 - **Confirmation:** requiring the previous 1–2 runs to also show edge ≥ 0.15 gives −3 pts on Sep and −15 pts on the bad week. Fresh signals are the valuable ones.
 - **Scale-in** (a second unit after the ask dips 3–5¢ while the edge holds): +1–3 pts at twice the capital. Not worth it.
+
+### Implemented 2026-10-05: half take-profit (commit c53e759)
+
+- Sell half once the bid is ≥ entry + 0.5·(target − entry); the rest exits normally.
+- Restart-safe: an open trade with a non-null `realized_pnl` is treated as "partial already taken".
+- The DB was reset at deploy.
+
+### Lateral ideas tested 2026-10-05 (real-time Aug 27 – Oct 2, lead ≥ 12 h)
+
+None was adopted:
+
+| Idea | Result |
+|---|---|
+| WN3 error persistence, same city | Lag-1 autocorr 0.10, lag-2 0.08 |
+| WN3 *skill* persistence (\|mkt err\| − \|WN3 err\|) | Lag-1 0.07, lag-2 0.02. No per-city or short-term skill memory |
+| Cross-region same-day error (learn from cities that resolved earlier) | corr −0.05 to 0.02. WN3 errors are regional, not global |
+| Entry UTC hour | 8–11Z weakest on Aug 27 – Sep 25, but the bad week reorders everything. Noise |
+| Market activity (price changes in the 6 h before entry, bucket or ladder) | No monotonic or consistent effect |
+| Calibration (lead 12–30 h) | WN3 25 → 23%, 36 → 38%, 42 → 46%, 58 → 54%; market similarly calibrated; realized residual SD 0.94 °C vs model σ 0.90–0.95. Not overconfident. The ≥ 70% bin is a few tail buckets (5/9 won), not a bug |
+| Location-gap bets (\|WN3 centre − market centre\|) | ≥ 1.5 °C: +125% (real-time Sep) but +12% in the bad week; 0.5–1 °C: +42% vs +28%. Reverses, so not a filter |
+| Horse-race (multi-bucket Kelly) baskets | Adds the 10–20 pt edge buckets, which earned only +10–13%. Not worth it |
