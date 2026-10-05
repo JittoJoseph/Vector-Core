@@ -1276,3 +1276,118 @@ if (which === "median") {
     console.log(vn.padEnd(27), cells.join(" | "));
   }
 }
+
+if (which === "exits2") {
+  build({ bias: "prod" });
+  const byKey = {};
+  for (const s of samples) (byKey[s.city + "|" + s.day] ??= []).push(s);
+  for (const g of Object.values(byKey)) { g.sort((a, b) => a.t - b.t); for (const s of g) { const lag = g.filter((x) => x.t <= s.t && x.t >= s.t - 3 * 3600e3); s.pX = probs(s, toUnit(s, mean(lag.map((x) => x.fmaxC))) + (PROD_BIAS[s.city] ?? PROD_BIAS.g) * scale(s), Math.max(0.6, PROD_SIGMA[band(s.leadH)]) * scale(s)); } }
+  const entries = [], seen = new Set();
+  for (const s of [...samples].sort((a, b) => a.t - b.t)) {
+    if (s.leadH < 12 || s.day < 239) continue;
+    s.buckets.forEach((b, i) => {
+      const key = s.city + "|" + s.day + "|" + i;
+      if (seen.has(key)) return;
+      const pm = s.market[i], pw = s.pX[i];
+      if (pm < 0.03 || pm > 0.97) return;
+      const sp = spreadAt(s.leadH, pm);
+      if (sp > 0.03) return;
+      const yes = pm + sp / 2;
+      if (pw - yes - fee(yes) < 0.2) return;
+      seen.add(key);
+      entries.push({ s, b, i, pw, yes, g: byKey[s.city + "|" + s.day] });
+    });
+  }
+  const run = ({ s, b, i, pw, yes, g }, pol) => {
+    let j = g.indexOf(s) + 1, q = pw, peak = yes, armed = false, half = 0, stopLvl = yes - 0.2;
+    for (const x of b.h) {
+      const tt = x.t * 1000;
+      if (tt <= s.t) continue;
+      if (tt >= Math.min(s.closeT, s.dayStart + 86400e3)) break;
+      let fresh = false;
+      while (j < g.length && g[j].t <= tt) { q = g[j++].pX[i]; fresh = true; }
+      const hs = spreadAt((s.dayStart - tt) / 3600e3, x.p) / 2;
+      const bid = x.p - hs;
+      peak = Math.max(peak, bid);
+      const sell = (v, frac = 1) => ({ v: Math.max(0, v), frac });
+      if (pol.half && !half && bid >= yes + (pol.halfAt ?? 0.5) * (pw - yes)) half = bid;
+      if (bid >= pw) return { exits: [[half ? 0.5 : 1, bid], ...(half ? [[0.5, half]] : [])], how: "TP" };
+      if (pol.trail && bid >= yes + pol.trail.arm * (pw - yes)) armed = true;
+      if (armed && bid <= peak - pol.trail.give * (peak - yes)) return { exits: [[half ? 0.5 : 1, bid], ...(half ? [[0.5, half]] : [])], how: "TRAIL" };
+      if (pol.be && bid >= yes + pol.be * (pw - yes)) stopLvl = Math.max(stopLvl, yes + fee(yes) + 0.005);
+      if (x.p + hs <= stopLvl) { const v = stopLvl > yes - 0.2 ? Math.max(0, bid - 0.01) : Math.max(0, bid - 0.08); return { exits: [[half ? 0.5 : 1, v], ...(half ? [[0.5, half]] : [])], how: "SL" }; }
+      if (fresh && q < bid) return { exits: [[half ? 0.5 : 1, bid], ...(half ? [[0.5, half]] : [])], how: "FLIP" };
+      if (pol.timeH != null && tt >= s.dayStart + pol.timeH * 3600e3) return { exits: [[half ? 0.5 : 1, bid], ...(half ? [[0.5, half]] : [])], how: "TIME" };
+    }
+    const res = b.win ? 1 : 0;
+    return { exits: [[half ? 0.5 : 1, res, true], ...(half ? [[0.5, half]] : [])], how: "RES" };
+  };
+  const retOf = (e, r) => r.exits.reduce((a, [f, v, isRes]) => a + f * (v - (isRes ? 0 : fee(v))), 0) / (e.yes + fee(e.yes)) - 1;
+  const periods = [["Aug27-Sep25", (e) => e.s.day < 269], ["Sep26-Oct2", (e) => e.s.day >= 269]];
+  const base = entries.map((e) => ({ e, r: run(e, {}) }));
+  const losers = base.filter(({ e, r }) => retOf(e, r) < 0);
+  const mfe = losers.map(({ e }) => { let pk = e.yes; for (const x of e.b.h) { const tt = x.t * 1000; if (tt <= e.s.t || tt >= Math.min(e.s.closeT, e.s.dayStart + 86400e3)) continue; pk = Math.max(pk, x.p - spreadAt((e.s.dayStart - tt) / 3600e3, x.p) / 2); } return (pk - e.yes) / (e.pw - e.yes); });
+  const pct = (th) => (100 * mfe.filter((x) => x >= th).length / mfe.length).toFixed(0) + "%";
+  console.log(`entries ${entries.length}; losers ${losers.length}; losers whose bid got >=25% of the way to target ${pct(0.25)}, >=50% ${pct(0.5)}, >=75% ${pct(0.75)}`);
+  const POL = {
+    current: {},
+    "trail arm50% give50%": { trail: { arm: 0.5, give: 0.5 } },
+    "trail arm50% give33%": { trail: { arm: 0.5, give: 0.33 } },
+    "trail arm33% give50%": { trail: { arm: 0.33, give: 0.5 } },
+    "breakeven after 50%": { be: 0.5 },
+    "breakeven after 33%": { be: 0.33 },
+    "half at 50%, rest at TP": { half: true },
+    "half at 33%, rest at TP": { half: true, halfAt: 0.33 },
+    "half at 66%, rest at TP": { half: true, halfAt: 0.66 },
+    "half + trail arm50 give50": { half: true, trail: { arm: 0.5, give: 0.5 } },
+    "time exit at local 12:00": { timeH: 12 },
+    "time exit at local 06:00": { timeH: 6 },
+  };
+  for (const [n, pol] of Object.entries(POL)) {
+    console.log(n.padEnd(28), periods.map(([pn, f]) => { const a = entries.filter(f).map((e) => ({ e, r: run(e, pol) })); const rets = a.map(({ e, r }) => retOf(e, r)); const d = {}; a.forEach(({ e }, k) => (d[e.s.day] ??= []).push(rets[k])); const dm = Object.values(d).map(mean); const sd = Math.sqrt(mean(rets.map((x) => (x - mean(rets)) ** 2))); return `${pn} n ${a.length} ret ${(100 * mean(rets)).toFixed(0).padStart(4)}% sd ${(100 * sd).toFixed(0).padStart(4)}% $${(5 * rets.reduce((x, y) => x + y, 0)).toFixed(0).padStart(5)} winRate ${(100 * rets.filter((x) => x > 0).length / rets.length).toFixed(0)}% lose ${dm.filter((x) => x < 0).length}/${dm.length}`; }).join(" | "));
+  }
+}
+
+if (which === "confirm") {
+  build({ bias: "prod" });
+  const byKey = {};
+  for (const s of samples) (byKey[s.city + "|" + s.day] ??= []).push(s);
+  for (const g of Object.values(byKey)) { g.sort((a, b) => a.t - b.t); for (const s of g) { const lag = g.filter((x) => x.t <= s.t && x.t >= s.t - 3 * 3600e3); s.pX = probs(s, toUnit(s, mean(lag.map((x) => x.fmaxC))) + (PROD_BIAS[s.city] ?? PROD_BIAS.g) * scale(s), Math.max(0.6, PROD_SIGMA[band(s.leadH)]) * scale(s)); } }
+  const edgeAt = (s, i) => { const pm = s.market[i]; const sp = spreadAt(s.leadH, pm); const yes = pm + sp / 2; return { ok: pm >= 0.03 && pm <= 0.97 && sp <= 0.03, e: s.pX[i] - yes - fee(yes), yes }; };
+  const sim = (need, scale2) => {
+    const out = [], seen = new Set();
+    for (const s of [...samples].sort((a, b) => a.t - b.t)) {
+      if (s.leadH < 12 || s.day < 239) continue;
+      const g = byKey[s.city + "|" + s.day], k = g.indexOf(s);
+      s.buckets.forEach((b, i) => {
+        const key = s.city + "|" + s.day + "|" + i;
+        if (seen.has(key)) return;
+        const { ok, e, yes } = edgeAt(s, i);
+        if (!ok || e < 0.2) return;
+        if (need > 0) { const prev = g.slice(Math.max(0, k - need), k); if (prev.length < need || prev.some((p) => edgeAt(p, i).e < 0.15)) return; }
+        seen.add(key);
+        const pw = s.pX[i];
+        let j = k + 1, q = pw, exit = null, cost = yes + fee(yes), shares = 1, second = false;
+        for (const x of b.h) {
+          const tt = x.t * 1000;
+          if (tt <= s.t) continue;
+          if (tt >= Math.min(s.closeT, s.dayStart + 86400e3)) break;
+          let fresh = false;
+          while (j < g.length && g[j].t <= tt) { q = g[j++].pX[i]; fresh = true; }
+          const hs = spreadAt((s.dayStart - tt) / 3600e3, x.p) / 2, bid = x.p - hs, ask = x.p + hs;
+          if (scale2 && !second && ask <= yes - scale2 && q - ask - fee(ask) >= 0.2) { second = true; shares += 1; cost += ask + fee(ask); }
+          if (bid >= pw) { exit = bid - fee(bid); break; }
+          if (ask <= yes - 0.2) { exit = Math.max(0, bid - 0.08); break; }
+          if (fresh && q < bid) { exit = Math.max(0, bid - fee(bid)); break; }
+        }
+        const val = (exit ?? (b.win ? 1 : 0)) * shares;
+        out.push({ day: s.day, ret: val / cost - 1, w: cost });
+      });
+    }
+    return out;
+  };
+  for (const [name, need, sc] of [["current", 0, 0], ["confirm: previous run edge>=.15", 1, 0], ["confirm: previous 2 runs edge>=.15", 2, 0], ["scale-in: add 2nd unit if ask drops 3c", 0, 0.03], ["scale-in: add 2nd unit if ask drops 5c", 0, 0.05]]) {
+    const o = sim(need, sc);
+    console.log(name.padEnd(42), [["Aug27-Sep25", (t) => t.day < 269], ["Sep26-Oct2", (t) => t.day >= 269]].map(([p, f]) => { const a = o.filter(f); const r = a.reduce((x, t) => x + t.ret * t.w, 0) / a.reduce((x, t) => x + t.w, 0); const d = {}; for (const t of a) (d[t.day] ??= []).push(t.ret); const dm = Object.values(d).map(mean); return `${p} n ${String(a.length).padStart(3)} ret/$ ${(100 * r).toFixed(0).padStart(4)}% lose ${dm.filter((x) => x < 0).length}/${dm.length}`; }).join(" | "));
+  }
+}

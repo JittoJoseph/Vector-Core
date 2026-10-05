@@ -440,3 +440,45 @@ Out of sample (fit Aug 27 – Sep 12; lead ≥ 12 h; flat 2¢ spread):
 The extra bands give **consistently better-calibrated forecasts**, but **no consistent trading gain**. The edge lives in the disagreements, not in average calibration. Not adopted.
 
 Cheap next step if revisited: fetching all 12 bands costs about the same EECU as one, so the engine could log the IQR live and re-test once more live data exists.
+
+## Exit research 2026-10-05: losers often go our way first
+
+### Live (since the Oct 3 reset)
+
+24 trades; 6 closed for +$2.33 (3 TP +$17.33, 3 resolution losses −$15). The other 18 are open, marked at −$26.
+
+Several losers made a large favourable move before collapsing:
+
+| Trade | Entry | Peak | Target | Share of the way | Result |
+|---|---|---|---|---|---|
+| Buenos Aires 25°C | 16¢ | 36¢ | 38¢ | 92% | 0 |
+| São Paulo 27°C | 20¢ | 34¢ | 41¢ | 65% | 0 |
+| Chicago 70–71°F | 7.4¢ | 29¢ | 44¢ | 60% | 2.5¢ |
+| Denver 90–91°F | 17¢ | 31.5¢ | 42¢ | 59% | 10¢ |
+
+Others never moved at all.
+
+### Backtest
+
+Real-time Aug 27 – Oct 2, current rules (3 h mean, lead ≥ 12 h, flip exit, flat 2¢ spread), 553 entries:
+- Of the 284 losers, the bid reached ≥ 25% of the way to target in **52%**, ≥ 50% in **33%**, and ≥ 75% in **17%**.
+
+Exit variants (mean ret per trade / sd; profitable-trade rate; Sep 26 – Oct 2 mean / sd):
+
+| Exit | Aug 27 – Sep 25 | Profitable | Sep 26 – Oct 2 |
+|---|---|---|---|
+| Current (TP at model prob) | +77% / 226% | 50% | +10% / 167% |
+| **Sell half at 50% of the way, rest at TP** | **+70% / 179%** | **59%** | **+14% / 123%** |
+| Half at 33% | +60% / 158% | 59% | +14% / 114% |
+| Half at 66% | +73% / 197% | 57% | +14% / 135% |
+| Half + trailing (arm 50%, give back 50%) | +64% / 165% | 64% | +17% / 118% |
+| Trailing (arm 50%, give back 33%) | +64% / 180% | 62% | +21% / 146% |
+| Breakeven stop after 50% | +71% / 215% | 47% | +8% / 161% |
+| Time exit at local 12:00 on the market day | +51% / 149% | 55% | +19% / 125% |
+
+Every protective exit trades a little mean return for much lower variance and a better bad period. "Half at 50%" is the best balance: mean / sd improves from 0.34 to 0.39 (good period) and from 0.06 to 0.11 (bad period). The response is smooth across 33–66%.
+
+### Entry ideas rejected
+
+- **Confirmation:** requiring the previous 1–2 runs to also show edge ≥ 0.15 gives −3 pts on Sep and −15 pts on the bad week. Fresh signals are the valuable ones.
+- **Scale-in** (a second unit after the ask dips 3–5¢ while the edge holds): +1–3 pts at twice the capital. Not worth it.
