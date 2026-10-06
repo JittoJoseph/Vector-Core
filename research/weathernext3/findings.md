@@ -540,3 +540,23 @@ The recent scheme is robust across settings:
 - Correction = (Σ city residuals in the last 14 d + 3 · mean of all residuals in the last 7 d) / (n + 3), with a 0.66 °C prior when there is no history. Rows are pruned after 30 days.
 - The table survives DB resets. It was seeded with 818 backtest residuals (Sep 19 – Oct 6), mean +0.62 °C.
 - The `city_bias` table was removed.
+
+### Why per-city corrections (2026-10-06)
+
+Out of sample, Sep 26 – Oct 5; same rules:
+
+| Correction | ll | ret Sep 1–25 | ret Sep 26 – Oct 5 |
+|---|---|---|---|
+| None | 1.685 | +8% (11/24 losing days) | +7% |
+| Fixed global +0.66 °C | 1.575 | +31% | −4% (6/10 losing days) |
+| Rolling global only (7 d) | 1.572 | +32% | 0% |
+| **Rolling per city** | **1.443** | **+55%** | **+47%** |
+
+The station offsets are a persistent physical property, not noise:
+- City mean errors correlate **0.67** between Aug 27 – Sep 9 and Sep 10 – 23, and **0.74** between Sep 10 – 23 and Sep 24 – Oct 6.
+- The spread across cities is about 0.55 °C. Chongqing is −0.44 °C; Austin +1.96 and Taipei +1.94 °C.
+
+Likely causes:
+- the 5 km model cell vs one airport sensor (siting, elevation, coast or basin, urban heat);
+- how the official daily high is measured (peak of frequent readings vs an hourly model value);
+- rounding.
