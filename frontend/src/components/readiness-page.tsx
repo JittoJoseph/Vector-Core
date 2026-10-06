@@ -90,7 +90,7 @@ export function ReadinessPage() {
           <div className="text-xs text-muted-foreground">Loading…</div>
         ) : readiness ? (
           <>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
               <Stat
                 label="Last WeatherNext run"
                 value={
@@ -108,6 +108,21 @@ export function ReadinessPage() {
                 ok={readiness.correction.ready}
               />
               <Stat
+                label="History backfill"
+                value={
+                  readiness.backfill.state === "running"
+                    ? `running · ${readiness.backfill.recorded}/${readiness.backfill.missing} filled`
+                    : readiness.backfill.state === "done"
+                      ? `done · ${readiness.backfill.recorded} filled ${timeAgo(readiness.backfill.finishedAt)}`
+                      : readiness.backfill.state
+                }
+                ok={
+                  readiness.backfill.state === "running"
+                    ? undefined
+                    : readiness.backfill.state === "done"
+                }
+              />
+              <Stat
                 label="Cities ready / partial / blocked"
                 value={`${count("ready")} / ${count("partial")} / ${count("blocked")}`}
               />
@@ -117,6 +132,14 @@ export function ReadinessPage() {
                 ok={readiness.unpricedPositions === 0}
               />
             </div>
+
+            {readiness.backfill.error && (
+              <div className="p-3 text-xs rounded border border-red-500/20 bg-red-500/10 text-red-400">
+                History backfill failed: {readiness.backfill.error}. It
+                retries on the next restart; affected cities stay blocked
+                until their history is complete.
+              </div>
+            )}
 
             {readiness.feed.lastError && (
               <div className="p-3 text-xs rounded border border-red-500/20 bg-red-500/10 text-red-400">

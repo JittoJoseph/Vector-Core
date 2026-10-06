@@ -76,6 +76,13 @@ export class PolymarketClient {
     }
   }
 
+  async getEventBySlug(slug: string): Promise<GammaEvent | null> {
+    return this.retry(async () => {
+      const res = await this.gammaApi.get("/events", { params: { slug } });
+      return z.array(GammaEventSchema).parse(res.data)[0] ?? null;
+    });
+  }
+
   async getEvent(id: string): Promise<GammaEvent> {
     return this.retry(async () => {
       const res = await this.gammaApi.get(`/events/${encodeURIComponent(id)}`);

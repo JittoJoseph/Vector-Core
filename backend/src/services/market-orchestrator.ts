@@ -30,6 +30,7 @@ import {
   type QuoteEvent,
 } from "./market-ws-watcher.js";
 import { getWeatherNextFeed, type ForecastRun } from "./weathernext.js";
+import { ResidualBackfill } from "./residual-backfill.js";
 import { executionPolicy } from "./execution-policy.js";
 import { CityBias, CITY_MIN_RESIDUALS, GLOBAL_MIN_DAYS } from "./city-bias.js";
 import {
@@ -42,6 +43,7 @@ import {
   bucketRange,
   cityOf,
   isFahrenheit,
+  marketDayOf,
 } from "../utils/weather-logic.js";
 import type { GammaEvent } from "../types/index.js";
 
@@ -122,6 +124,11 @@ export class MarketOrchestrator extends EventEmitter {
   private ws = getMarketWebSocketWatcher();
   private feed = getWeatherNextFeed();
   private bias = new CityBias();
+  private backfill = new ResidualBackfill(this.feed, this.bias, {
+    leadMs: STRATEGY.minEntryLeadHours * 3_600_000,
+    windowMs: AVERAGING_MS,
+    minRuns: MIN_RUNS_IN_WINDOW,
+  });
 
   private campaigns = new Map<string, Campaign>();
   private positions = new Map<string, Position>();
@@ -150,6 +157,7 @@ export class MarketOrchestrator extends EventEmitter {
     if (this.running) return;
     this.running = true;
     await this.bias.load();
+    void this.backfill.run();
     await this.loadState();
     executionPolicy.start();
     await this.serial(() => this.discover());
@@ -396,10 +404,12 @@ export class MarketOrchestrator extends EventEmitter {
       ? winnerTempC(winner.range, campaign.fahrenheit)
       : null;
     const refFmaxC = campaign.forecast?.refFmaxC;
-    if (actualC !== null && refFmaxC !== undefined)
+    const marketDay = marketDayOf(campaign.slug);
+    if (actualC !== null && refFmaxC !== undefined && marketDay !== null)
       await this.bias.record({
         campaignId: campaign.id,
         city: campaign.city,
+        marketDay,
         closedAt: event.closedTime ? Date.parse(event.closedTime) : Date.now(),
         residualC: actualC - refFmaxC,
       });
@@ -812,6 +822,7 @@ export class MarketOrchestrator extends EventEmitter {
         meanC: global.meanC === null ? null : round4(global.meanC),
         ready: global.ready,
       },
+      backfill: this.backfill.getStatus(),
       unpricedPositions: [...this.positions.values()].filter(
         (p) => this.positionPnl(p).pnl === null,
       ).length,

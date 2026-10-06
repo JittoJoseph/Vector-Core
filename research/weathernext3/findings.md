@@ -574,3 +574,15 @@ Likely causes:
 | Unpriced position → 0 unrealized | Counted separately as unpriced |
 
 At deploy, Zhengzhou and Jinan had 0 resolved markets in the seeded 14-day history. Previously they would have traded on the all-city mean; now they are blocked until their own data exists.
+
+### Self-backfilled correction history (2026-10-06)
+
+The engine builds its own residual history (`services/residual-backfill.ts`):
+- On startup it checks every (city, market day) in the last 14 days and looks up only the missing ones on Gamma by slug.
+- Open-ended winners are skipped.
+- The reference forecast is recomputed from archived EE runs with the live rules: the latest run published ≤ 12 h before the day start that covers the day, plus the covering runs in the 3 h before it, needing ≥ 2. Otherwise the day is skipped.
+- Rows carry the real market ID and `market_day`.
+
+**Verified:** London Oct 4 → +0.812 °C (research pipeline +0.813), NYC Oct 5 → +0.465 °C (+0.464). The tiny differences come from exact EE ingestion times vs the modelled publish lag.
+
+The seeded backtest rows were dropped. Jinan and Zhengzhou were removed: no listings since about Sep 21–24, and $2–6k/day before that. All other cities trade every day at $17k–109k/day median volume, so none were removed for volume.

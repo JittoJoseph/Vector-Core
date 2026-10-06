@@ -214,6 +214,15 @@ export interface Readiness {
     meanC: number | null;
     ready: boolean;
   };
+  backfill: {
+    state: "idle" | "running" | "done" | "failed";
+    startedAt: string | null;
+    finishedAt: string | null;
+    missing: number;
+    recorded: number;
+    skipped: Record<string, number>;
+    error: string | null;
+  };
   unpricedPositions: number;
   cities: CityReadiness[];
 }

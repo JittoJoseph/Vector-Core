@@ -18,7 +18,6 @@ export const STATIONS: Record<string, readonly [number, number]> = {
   Houston: [29.64582, -95.28214],
   Istanbul: [41.262, 28.74],
   Jeddah: [21.685, 39.166],
-  Jinan: [36.856, 117.206],
   Karachi: [24.902, 67.139],
   "Kuala Lumpur": [2.747, 101.714],
   London: [51.505, 0.055],
@@ -49,10 +48,37 @@ export const STATIONS: Record<string, readonly [number, number]> = {
   Warsaw: [52.163, 20.961],
   Wellington: [-41.331, 174.806],
   Wuhan: [30.783, 114.205],
-  Zhengzhou: [34.52, 113.834],
 };
 
 export const WEATHER_TAG_ID = "84";
+
+const MONTHS = [
+  "january",
+  "february",
+  "march",
+  "april",
+  "may",
+  "june",
+  "july",
+  "august",
+  "september",
+  "october",
+  "november",
+  "december",
+];
+
+export function marketDayOf(slug: string | null | undefined): string | null {
+  const m = slug?.match(/-on-([a-z]+)-(\d{1,2})-(\d{4})$/);
+  const month = m ? MONTHS.indexOf(m[1]!) : -1;
+  if (!m || month < 0) return null;
+  return `${m[3]}-${String(month + 1).padStart(2, "0")}-${m[2]!.padStart(2, "0")}`;
+}
+
+export function eventSlug(city: string, marketDay: string): string {
+  const [year, month, day] = marketDay.split("-").map(Number);
+  const name = city.toLowerCase().replace(" (incheon)", "").replace(/ /g, "-");
+  return `highest-temperature-in-${name}-on-${MONTHS[month! - 1]}-${day}-${year}`;
+}
 
 const TITLE_REGEX = /^Highest temperature in (.+) on [A-Za-z]+ \d+\?$/;
 

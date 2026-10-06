@@ -142,34 +142,50 @@ export class WeatherNextFeed extends EventEmitter {
     }, delay);
   }
 
+  async listRuns(
+    fromInit: number,
+    toInit: number,
+  ): Promise<{ init: number; publishedAt: number }[]> {
+    const runs: { init: number; publishedAt: number }[] = [];
+    let pageToken = "";
+    do {
+      const listed = await this.request<{
+        assets?: {
+          startTime: string;
+          properties?: { ingestion_time_utc?: number };
+        }[];
+        nextPageToken?: string;
+      }>(
+        `${EE_API}/${COLLECTION}:listAssets?` +
+          new URLSearchParams({
+            pageSize: "500",
+            filter: `start_time > "${isoSeconds(fromInit)}" AND start_time <= "${isoSeconds(toInit)}" AND properties.forecast_hour = ${READY_LEAD_HOURS}`,
+            ...(pageToken ? { pageToken } : {}),
+          }),
+      );
+      for (const a of listed.assets ?? []) {
+        const publishedAt = (a.properties?.ingestion_time_utc ?? NaN) * 1000;
+        if (Number.isFinite(publishedAt))
+          runs.push({ init: Date.parse(a.startTime), publishedAt });
+      }
+      pageToken = listed.nextPageToken ?? "";
+    } while (pageToken);
+    return runs;
+  }
+
+  fetchSeries(init: number): Promise<Map<string, number[]>> {
+    return this.sample(isoSeconds(init), init);
+  }
+
   private async poll(): Promise<void> {
     const now = Date.now();
     this.stats.lastPollAt = new Date(now).toISOString();
-    const since = isoSeconds(now - LOOKBACK_MS);
-    const listed = await this.request<{
-      assets?: {
-        startTime: string;
-        properties?: { ingestion_time_utc?: number };
-      }[];
-    }>(
-      `${EE_API}/${COLLECTION}:listAssets?` +
-        new URLSearchParams({
-          pageSize: "50",
-          filter: `start_time > "${since}" AND properties.forecast_hour = ${READY_LEAD_HOURS}`,
-        }),
-    );
+    const listed = await this.listRuns(now - LOOKBACK_MS, now);
     for (const init of this.processed)
       if (init < now - LOOKBACK_MS) this.processed.delete(init);
-    const ready = (listed.assets ?? [])
-      .map((a) => ({
-        init: Date.parse(a.startTime),
-        publishedAt: (a.properties?.ingestion_time_utc ?? 0) * 1000,
-      }))
+    const ready = listed
       .filter(
-        (a) =>
-          a.publishedAt > 0 &&
-          a.publishedAt + SETTLE_MS <= now &&
-          !this.processed.has(a.init),
+        (a) => a.publishedAt + SETTLE_MS <= now && !this.processed.has(a.init),
       )
       .sort((a, b) => a.init - b.init);
 

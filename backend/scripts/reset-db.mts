@@ -14,6 +14,7 @@ await sql.begin(async (tx) => {
     CREATE TABLE IF NOT EXISTS forecast_residuals (
       campaign_id text PRIMARY KEY,
       city text NOT NULL,
+      market_day text NOT NULL,
       closed_at timestamp NOT NULL,
       residual_c real NOT NULL
     )`;

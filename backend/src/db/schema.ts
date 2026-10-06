@@ -49,6 +49,7 @@ export const forecastResiduals = pgTable(
   {
     campaignId: text("campaign_id").primaryKey(),
     city: text("city").notNull(),
+    marketDay: text("market_day").notNull(),
     closedAt: timestamp("closed_at").notNull(),
     residualC: real("residual_c").notNull(),
   },

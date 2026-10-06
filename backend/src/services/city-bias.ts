@@ -13,6 +13,7 @@ export const GLOBAL_MIN_DAYS = 4;
 interface Residual {
   campaignId: string;
   city: string;
+  marketDay: string;
   closedAt: number;
   residualC: number;
 }
@@ -44,9 +45,16 @@ export class CityBias {
     this.residuals = rows.map((r) => ({
       campaignId: r.campaignId,
       city: r.city,
+      marketDay: r.marketDay,
       closedAt: r.closedAt.getTime(),
       residualC: r.residualC,
     }));
+  }
+
+  has(city: string, marketDay: string): boolean {
+    return this.residuals.some(
+      (r) => r.city === city && r.marketDay === marketDay,
+    );
   }
 
   global(now = Date.now()): GlobalCorrectionStatus {
