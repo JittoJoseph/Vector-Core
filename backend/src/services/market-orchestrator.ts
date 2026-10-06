@@ -61,6 +61,7 @@ export const STRATEGY = {
 const STOP_CONFIRM_MS = 5_000;
 const AVERAGING_MS = 3 * 3_600_000;
 const MIN_RUNS_IN_WINDOW = 2;
+const SELL_RETRY_MS = 30_000;
 const FRESH_RUN_MS = 3_600_000;
 const DISCOVERY_MS = 30 * 60_000;
 const SETTLEMENT_MS = 20 * 60_000;
@@ -103,6 +104,8 @@ interface Position {
   realized: number;
   target: number;
   partialTaken: boolean;
+  holdToResolution: boolean;
+  retryAfter: number;
   minPrice: number | null;
   bid: number | null;
   ask: number | null;
@@ -250,6 +253,8 @@ export class MarketOrchestrator extends EventEmitter {
         realized: parseFloat(t.realizedPnl ?? "0"),
         target: parseFloat(t.target),
         partialTaken: parseFloat(t.sharesSold) > 0,
+        holdToResolution: false,
+        retryAfter: 0,
         minPrice: t.minPriceDuringPosition
           ? parseFloat(t.minPriceDuringPosition)
           : null,
@@ -505,7 +510,12 @@ export class MarketOrchestrator extends EventEmitter {
     let exits = 0;
     for (const { campaign, probs } of scored) {
       for (const pos of this.positions.values()) {
-        if (pos.campaignId !== campaign.id || pos.exiting) continue;
+        if (
+          pos.campaignId !== campaign.id ||
+          pos.exiting ||
+          pos.holdToResolution
+        )
+          continue;
         const i = campaign.buckets.findIndex((b) => b.id === pos.bucketId);
         const bucket = campaign.buckets[i];
         if (!bucket || bucket.feeRate === null) continue;
@@ -640,6 +650,8 @@ export class MarketOrchestrator extends EventEmitter {
       realized: 0,
       target,
       partialTaken: false,
+      holdToResolution: false,
+      retryAfter: 0,
       minPrice: null,
       bid: top.bestBid,
       ask: top.bestAsk,
@@ -663,7 +675,8 @@ export class MarketOrchestrator extends EventEmitter {
   private onQuote({ tokenId, bid, ask }: QuoteEvent): void {
     const now = Date.now();
     for (const pos of this.positions.values()) {
-      if (pos.tokenId !== tokenId || pos.exiting) continue;
+      if (pos.tokenId !== tokenId || pos.exiting || pos.holdToResolution)
+        continue;
       pos.bid = bid;
       pos.ask = ask;
       const campaign = this.campaigns.get(pos.campaignId);
@@ -673,6 +686,7 @@ export class MarketOrchestrator extends EventEmitter {
       )?.feeRate;
       if (feeRate === undefined || feeRate === null) continue;
       if (pos.minPrice === null || bid < pos.minPrice) pos.minPrice = bid;
+      if (now < pos.retryAfter) continue;
 
       if (bid >= pos.target) {
         this.exit(pos, "TAKE_PROFIT");
@@ -722,8 +736,39 @@ export class MarketOrchestrator extends EventEmitter {
     if (feeRate === null) return;
     const book = await this.client.getOrderbook(pos.tokenId);
     if (!this.positions.has(pos.tradeId)) return;
+    const minSize = parseFloat(book.min_order_size ?? "");
+    if (!Number.isFinite(minSize)) {
+      pos.retryAfter = Date.now() + SELL_RETRY_MS;
+      return;
+    }
+    if (pos.shares < minSize) {
+      pos.holdToResolution = true;
+      await logAudit(
+        "info",
+        "HOLD_TO_RESOLUTION",
+        `${pos.shares.toFixed(2)} shares is below the ${minSize}-share minimum order; holding to resolution`,
+        { tradeId: pos.tradeId },
+      );
+      return;
+    }
+    if (
+      fraction < 1 &&
+      (pos.shares * fraction < minSize || pos.shares * (1 - fraction) < minSize)
+    ) {
+      pos.partialTaken = true;
+      await logAudit(
+        "info",
+        "PARTIAL_TAKE_PROFIT_SKIPPED",
+        `${pos.shares.toFixed(2)} shares cannot be split into two orders of at least ${minSize} shares`,
+        { tradeId: pos.tradeId },
+      );
+      return;
+    }
     const sale = simulateTakerSell(book, pos.shares * fraction, feeRate);
-    if (sale.totalShares <= 0) return;
+    if (sale.totalShares <= 0 || sale.belowMinimumOrderSize) {
+      pos.retryAfter = Date.now() + SELL_RETRY_MS;
+      return;
+    }
     const soldCost = pos.cost * (sale.totalShares / pos.shares);
     const pnl = sale.netCost - soldCost;
     if (fraction >= 1 && !sale.isPartialFill) {

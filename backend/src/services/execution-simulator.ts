@@ -51,7 +51,7 @@ function settle(
 ): ExecutionResult {
   const totalShares = shares.toNumber();
   const fees = Math.round(feesDec.toNumber() * 10000) / 10000;
-  const minOrderSize = parseFloat(orderbook.min_order_size ?? "5") || 5;
+  const minOrderSize = parseFloat(orderbook.min_order_size ?? "");
   const averagePrice = shares.gt(0) ? gross.div(shares).toNumber() : 0;
 
   if (totalShares > 0) logger.debug({ averagePrice, totalShares, fees }, label);
@@ -62,7 +62,8 @@ function settle(
     fees,
     netCost: gross.toNumber() + feeSign * fees,
     isPartialFill: remaining.gt(0) && totalShares > 0,
-    belowMinimumOrderSize: totalShares > 0 && totalShares < minOrderSize,
+    belowMinimumOrderSize:
+      !Number.isFinite(minOrderSize) || totalShares < minOrderSize,
   };
 }
 

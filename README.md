@@ -20,6 +20,7 @@ If an input the strategy needs is missing, the affected scope does not trade. No
 - **A bucket** is skipped when it has no fee schedule or no two-sided quote.
 - **A correction residual** is only recorded against the forecast from the entry window (≥ 12 h before the day).
 - **An exit** waits until the ladder's fee schedule is loaded.
+- **Orders follow the book's published minimum order size** (no assumed default). Buys under the minimum are discarded. A half take-profit only happens when both halves meet it. A position smaller than the minimum is held to resolution. A rejected sell retries after 30 s.
 
 Price-based exits (take-profit, partial take-profit, stop, resolution) keep managing open positions, because they need no forecast. The dashboard's **Readiness** tab (`/api/readiness`) lists every city as ready, partial or blocked, with the reason.
 
