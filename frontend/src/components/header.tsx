@@ -18,6 +18,7 @@ export function Header() {
 
   const navItems = [
     { href: "/", label: "Dashboard" },
+    { href: "/readiness", label: "Readiness" },
     { href: "/settings", label: "Settings" },
   ];
 

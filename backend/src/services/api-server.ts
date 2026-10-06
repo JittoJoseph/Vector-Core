@@ -214,6 +214,11 @@ export class ApiServer {
     );
 
     app.get(
+      "/api/readiness",
+      route("Readiness", () => getMarketOrchestrator().getReadiness()),
+    );
+
+    app.get(
       "/api/positions",
       route("Positions", async () =>
         (

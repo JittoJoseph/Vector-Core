@@ -560,3 +560,17 @@ Likely causes:
 - the 5 km model cell vs one airport sensor (siting, elevation, coast or basin, urban heat);
 - how the official daily high is measured (peak of frequent readings vs an hourly model value);
 - rounding.
+
+### No-fallback audit (2026-10-06)
+
+| Fallback removed | Now |
+|---|---|
+| City correction with no recent city data → all-city mean | City blocked (needs ≥ 7 resolved in 14 d) |
+| No all-city history → constant +0.66 °C | All cities blocked (needs ≥ 4 of the last 7 days covered) |
+| 3 h mean computed from a single run | Ladder skipped for that run (needs ≥ 2 runs) |
+| Residual measured against a non-entry-window forecast | Residual not recorded |
+| Missing quote side → bid 0 / ask 1 | No quote |
+| Missing fee schedule → 0% fee | Bucket not traded; exits wait for the fee schedule |
+| Unpriced position → 0 unrealized | Counted separately as unpriced |
+
+At deploy, Zhengzhou and Jinan had 0 resolved markets in the seeded 14-day history. Previously they would have traded on the all-city mean; now they are blocked until their own data exists.

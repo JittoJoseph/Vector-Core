@@ -7,7 +7,8 @@ const CITY_WINDOW_MS = 14 * DAY_MS;
 const GLOBAL_WINDOW_MS = 7 * DAY_MS;
 const RETAIN_MS = 30 * DAY_MS;
 const SHRINK = 3;
-const PRIOR_C = 0.66;
+export const CITY_MIN_RESIDUALS = 7;
+export const GLOBAL_MIN_DAYS = 4;
 
 interface Residual {
   campaignId: string;
@@ -15,6 +16,17 @@ interface Residual {
   closedAt: number;
   residualC: number;
 }
+
+export interface GlobalCorrectionStatus {
+  residuals: number;
+  days: number;
+  meanC: number | null;
+  ready: boolean;
+}
+
+export type Correction =
+  | { ready: true; biasC: number; residuals: number }
+  | { ready: false; reason: string; residuals: number };
 
 export class CityBias {
   private residuals: Residual[] = [];
@@ -37,24 +49,51 @@ export class CityBias {
     }));
   }
 
-  get(city: string, now = Date.now()): number {
-    let globalSum = 0;
-    let globalCount = 0;
-    let citySum = 0;
-    let cityCount = 0;
+  global(now = Date.now()): GlobalCorrectionStatus {
+    let sum = 0;
+    let count = 0;
+    const days = new Set<number>();
     for (const r of this.residuals) {
-      if (r.closedAt > now) continue;
-      if (r.closedAt >= now - GLOBAL_WINDOW_MS) {
-        globalSum += r.residualC;
-        globalCount++;
-      }
-      if (r.city === city && r.closedAt >= now - CITY_WINDOW_MS) {
-        citySum += r.residualC;
-        cityCount++;
-      }
+      if (r.closedAt > now || r.closedAt < now - GLOBAL_WINDOW_MS) continue;
+      sum += r.residualC;
+      count++;
+      days.add(Math.floor(r.closedAt / DAY_MS));
     }
-    const prior = globalCount > 0 ? globalSum / globalCount : PRIOR_C;
-    return (citySum + SHRINK * prior) / (cityCount + SHRINK);
+    return {
+      residuals: count,
+      days: days.size,
+      meanC: count > 0 ? sum / count : null,
+      ready: days.size >= GLOBAL_MIN_DAYS,
+    };
+  }
+
+  correction(city: string, now = Date.now()): Correction {
+    let sum = 0;
+    let count = 0;
+    for (const r of this.residuals) {
+      if (r.city !== city || r.closedAt > now) continue;
+      if (r.closedAt < now - CITY_WINDOW_MS) continue;
+      sum += r.residualC;
+      count++;
+    }
+    const global = this.global(now);
+    if (!global.ready || global.meanC === null)
+      return {
+        ready: false,
+        reason: `all-city error history covers ${global.days}/${GLOBAL_MIN_DAYS} required days`,
+        residuals: count,
+      };
+    if (count < CITY_MIN_RESIDUALS)
+      return {
+        ready: false,
+        reason: `${count}/${CITY_MIN_RESIDUALS} resolved markets in the last 14 days`,
+        residuals: count,
+      };
+    return {
+      ready: true,
+      biasC: (sum + SHRINK * global.meanC) / (count + SHRINK),
+      residuals: count,
+    };
   }
 
   async record(residual: Residual): Promise<void> {

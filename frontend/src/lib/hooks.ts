@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { getApiClient, getWsClient } from "./api-client";
 import { formatPnl } from "./utils";
 import type {
+  Readiness,
   Trade,
   SystemStats,
   ActiveCampaign,
@@ -400,8 +401,7 @@ export function useActivityLog(enabled: boolean = true) {
 
     const unsubResolved = ws.on("tradeResolved", (msg: WsMessage) => {
       const d = msg.data as
-        | { trade?: Trade; isWin?: boolean; pnl?: number }
-        | undefined;
+        { trade?: Trade; isWin?: boolean; pnl?: number } | undefined;
       const trade = d?.trade;
       const isWin = d?.isWin;
       const pnl = typeof d?.pnl === "number" ? d.pnl : undefined;
@@ -428,4 +428,29 @@ export function useActivityLog(enabled: boolean = true) {
   }, []);
 
   return { activities, loading };
+}
+
+export function useReadiness() {
+  const [readiness, setReadiness] = useState<Readiness | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<Error | null>(null);
+
+  const fetchReadiness = useCallback(async () => {
+    try {
+      setReadiness(await getApiClient().getReadiness());
+      setError(null);
+    } catch (err) {
+      setError(err as Error);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchReadiness();
+    const timer = setInterval(fetchReadiness, 30_000);
+    return () => clearInterval(timer);
+  }, [fetchReadiness]);
+
+  return { readiness, loading, error };
 }

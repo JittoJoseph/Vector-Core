@@ -1,4 +1,5 @@
 import type {
+  Readiness,
   Trade,
   SystemStats,
   ActiveCampaign,
@@ -82,6 +83,10 @@ export class ApiClient {
 
   async getSystemStats(): Promise<SystemStats> {
     return fetchWithRetry(`${this.baseUrl}/api/stats`);
+  }
+
+  async getReadiness(): Promise<Readiness> {
+    return fetchWithRetry(`${this.baseUrl}/api/readiness`);
   }
 
   async getTradeHistory(params?: {

@@ -107,12 +107,10 @@ export class PolymarketClient {
         return res.data as Record<string, { BUY?: string; SELL?: string }>;
       });
       for (const [token, p] of Object.entries(data)) {
-        const bid = parseFloat(p.BUY ?? "0");
-        const ask = parseFloat(p.SELL ?? "1");
-        quotes.set(token, {
-          bid: Number.isFinite(bid) ? bid : 0,
-          ask: Number.isFinite(ask) ? ask : 1,
-        });
+        const bid = parseFloat(p.BUY ?? "");
+        const ask = parseFloat(p.SELL ?? "");
+        if (Number.isFinite(bid) && Number.isFinite(ask))
+          quotes.set(token, { bid, ask });
       }
     }
     return quotes;

@@ -31,13 +31,18 @@ import {
 } from "./market-ws-watcher.js";
 import { getWeatherNextFeed, type ForecastRun } from "./weathernext.js";
 import { executionPolicy } from "./execution-policy.js";
-import { CityBias } from "./city-bias.js";
+import { CityBias, CITY_MIN_RESIDUALS, GLOBAL_MIN_DAYS } from "./city-bias.js";
 import {
   fairValue,
   localDayMaxC,
   winnerTempC,
 } from "../utils/forecast-model.js";
-import { bucketRange, cityOf, isFahrenheit } from "../utils/weather-logic.js";
+import {
+  STATIONS,
+  bucketRange,
+  cityOf,
+  isFahrenheit,
+} from "../utils/weather-logic.js";
 import type { GammaEvent } from "../types/index.js";
 
 const logger = createModuleLogger("market-orchestrator");
@@ -53,6 +58,7 @@ export const STRATEGY = {
 } as const;
 const STOP_CONFIRM_MS = 5_000;
 const AVERAGING_MS = 3 * 3_600_000;
+const MIN_RUNS_IN_WINDOW = 2;
 const FRESH_RUN_MS = 3_600_000;
 const DISCOVERY_MS = 30 * 60_000;
 const SETTLEMENT_MS = 20 * 60_000;
@@ -64,7 +70,7 @@ interface Bucket {
   title: string;
   range: [number, number];
   yesToken: string;
-  feeRate: number;
+  feeRate: number | null;
 }
 
 interface Campaign {
@@ -123,6 +129,10 @@ export class MarketOrchestrator extends EventEmitter {
   private quotes = new Map<string, Quote>();
   private realizedPnl = 0;
   private lastDiscoveryStart = 0;
+  private blocked = new Map<
+    string,
+    { city: string; title: string; reason: string; since: number }
+  >();
   private lastEvaluation: {
     at: string;
     init: string;
@@ -277,7 +287,7 @@ export class MarketOrchestrator extends EventEmitter {
         title: m.groupItemTitle,
         range: bucketRange(m.groupItemTitle),
         yesToken: tokens[0],
-        feeRate: m.feeSchedule?.rate ?? 0,
+        feeRate: m.feeSchedule?.rate ?? null,
       });
     }
     buckets.sort((a, b) => a.range[0] - b.range[0]);
@@ -385,9 +395,8 @@ export class MarketOrchestrator extends EventEmitter {
     const actualC = winner
       ? winnerTempC(winner.range, campaign.fahrenheit)
       : null;
-    const refFmaxC =
-      campaign.forecast?.refFmaxC ?? campaign.forecast?.fmaxC ?? null;
-    if (actualC !== null && refFmaxC !== null)
+    const refFmaxC = campaign.forecast?.refFmaxC;
+    if (actualC !== null && refFmaxC !== undefined)
       await this.bias.record({
         campaignId: campaign.id,
         city: campaign.city,
@@ -402,6 +411,7 @@ export class MarketOrchestrator extends EventEmitter {
       })
       .where(eq(schema.campaigns.id, campaign.id));
     this.campaigns.delete(campaign.id);
+    this.blocked.delete(campaign.id);
     for (const b of campaign.buckets) this.tradedBuckets.delete(b.id);
     for (const b of campaign.buckets) this.quotes.delete(b.yesToken);
     logger.info(
@@ -414,9 +424,12 @@ export class MarketOrchestrator extends EventEmitter {
     const now = Date.now();
     const scored: { campaign: Campaign; probs: number[] }[] = [];
     for (const campaign of this.campaigns.values()) {
+      if (!campaign.buckets.length || campaign.endDate <= now) continue;
       const temps = run.series.get(campaign.city);
-      if (!temps || !campaign.buckets.length || campaign.endDate <= now)
+      if (!temps) {
+        this.block(campaign, "WeatherNext run has no series for this station");
         continue;
+      }
       const runMaxC = localDayMaxC(temps, run.init, campaign.dayStart);
       if (runMaxC === null) continue;
       campaign.recent = [
@@ -425,13 +438,26 @@ export class MarketOrchestrator extends EventEmitter {
         ),
         { publishedAt: run.publishedAt, fmaxC: runMaxC },
       ];
+      if (campaign.recent.length < MIN_RUNS_IN_WINDOW) {
+        this.block(
+          campaign,
+          `${campaign.recent.length}/${MIN_RUNS_IN_WINDOW} runs in the 3 h forecast window`,
+        );
+        continue;
+      }
+      const correction = this.bias.correction(campaign.city, run.publishedAt);
+      if (!correction.ready) {
+        this.block(campaign, `Station correction: ${correction.reason}`);
+        continue;
+      }
+      this.blocked.delete(campaign.id);
       const fv = fairValue({
         fmaxC:
           campaign.recent.reduce((sum, r) => sum + r.fmaxC, 0) /
           campaign.recent.length,
         dayStart: campaign.dayStart,
         now,
-        biasC: this.bias.get(campaign.city),
+        biasC: correction.biasC,
         fahrenheit: campaign.fahrenheit,
         ranges: campaign.buckets.map((b) => b.range),
       });
@@ -443,9 +469,7 @@ export class MarketOrchestrator extends EventEmitter {
         init: new Date(run.init).toISOString(),
         publishedAt: new Date(run.publishedAt).toISOString(),
         fmaxC: round4(fv.fmaxC),
-        refFmaxC: entryWindow
-          ? round4(fv.fmaxC)
-          : (campaign.forecast?.refFmaxC ?? round4(fv.fmaxC)),
+        refFmaxC: entryWindow ? round4(fv.fmaxC) : campaign.forecast?.refFmaxC,
         mu: round4(fv.mu),
         sigma: round4(fv.sigma),
       };
@@ -473,8 +497,10 @@ export class MarketOrchestrator extends EventEmitter {
       for (const pos of this.positions.values()) {
         if (pos.campaignId !== campaign.id || pos.exiting) continue;
         const i = campaign.buckets.findIndex((b) => b.id === pos.bucketId);
-        const bid = this.quotes.get(campaign.buckets[i]?.yesToken ?? "")?.bid;
-        if (i < 0 || bid === undefined || probs[i]! >= bid) continue;
+        const bucket = campaign.buckets[i];
+        if (!bucket || bucket.feeRate === null) continue;
+        const bid = this.quotes.get(bucket.yesToken)?.bid;
+        if (bid === undefined || probs[i]! >= bid) continue;
         this.exit(pos, "MODEL_EXIT");
         exits++;
       }
@@ -486,10 +512,19 @@ export class MarketOrchestrator extends EventEmitter {
         const leadMs = campaign.dayStart - Date.now();
         if (leadMs < STRATEGY.minEntryLeadHours * 3_600_000) continue;
         for (const [i, bucket] of campaign.buckets.entries()) {
-          if (this.tradedBuckets.has(bucket.id)) continue;
+          const { feeRate } = bucket;
+          if (this.tradedBuckets.has(bucket.id) || feeRate === null) continue;
           const q = this.quotes.get(bucket.yesToken);
-          if (!q || !this.hasEdge(probs[i]!, q, bucket.feeRate)) continue;
-          if (await this.enter(campaign, bucket, probs[i]!, run, q))
+          if (!q || !this.hasEdge(probs[i]!, q, feeRate)) continue;
+          if (
+            await this.enter(
+              campaign,
+              { ...bucket, feeRate },
+              probs[i]!,
+              run,
+              q,
+            )
+          )
             entries++;
         }
       }
@@ -520,7 +555,7 @@ export class MarketOrchestrator extends EventEmitter {
 
   private async enter(
     campaign: Campaign,
-    bucket: Bucket,
+    bucket: Bucket & { feeRate: number },
     target: number,
     run: ForecastRun,
     quote: Quote,
@@ -623,6 +658,10 @@ export class MarketOrchestrator extends EventEmitter {
       pos.ask = ask;
       const campaign = this.campaigns.get(pos.campaignId);
       if (!campaign || now >= campaign.endDate) continue;
+      const feeRate = campaign.buckets.find(
+        (b) => b.id === pos.bucketId,
+      )?.feeRate;
+      if (feeRate === undefined || feeRate === null) continue;
       if (pos.minPrice === null || bid < pos.minPrice) pos.minPrice = bid;
 
       if (bid >= pos.target) {
@@ -669,13 +708,11 @@ export class MarketOrchestrator extends EventEmitter {
     reason: ExitReason,
     fraction: number,
   ): Promise<void> {
+    const feeRate = this.feeRateOf(pos);
+    if (feeRate === null) return;
     const book = await this.client.getOrderbook(pos.tokenId);
     if (!this.positions.has(pos.tradeId)) return;
-    const sale = simulateTakerSell(
-      book,
-      pos.shares * fraction,
-      this.feeRateOf(pos),
-    );
+    const sale = simulateTakerSell(book, pos.shares * fraction, feeRate);
     if (sale.totalShares <= 0) return;
     const soldCost = pos.cost * (sale.totalShares / pos.shares);
     const pnl = sale.netCost - soldCost;
@@ -705,12 +742,81 @@ export class MarketOrchestrator extends EventEmitter {
     );
   }
 
-  private feeRateOf(pos: Position): number {
+  private feeRateOf(pos: Position): number | null {
     return (
       this.campaigns
         .get(pos.campaignId)
-        ?.buckets.find((b) => b.id === pos.bucketId)?.feeRate ?? 0
+        ?.buckets.find((b) => b.id === pos.bucketId)?.feeRate ?? null
     );
+  }
+
+  private block(campaign: Campaign, reason: string): void {
+    campaign.probs = null;
+    const prev = this.blocked.get(campaign.id);
+    this.blocked.set(campaign.id, {
+      city: campaign.city,
+      title: campaign.title,
+      reason,
+      since: prev?.reason === reason ? prev.since : Date.now(),
+    });
+  }
+
+  getReadiness() {
+    const now = Date.now();
+    const feed = this.feed.getStats();
+    const global = this.bias.global(now);
+    const cities = Object.keys(STATIONS).map((city) => {
+      const correction = this.bias.correction(city, now);
+      const ladders = [...this.campaigns.values()].filter(
+        (c) => c.city === city && c.endDate > now,
+      );
+      const blockedLadders = ladders
+        .map((c) => ({ c, b: this.blocked.get(c.id) }))
+        .filter((x) => x.b)
+        .map(({ c, b }) => ({
+          title: c.title,
+          reason: b!.reason,
+          since: new Date(b!.since).toISOString(),
+        }));
+      const bucketsWithoutFee = ladders.reduce(
+        (n, c) => n + c.buckets.filter((b) => b.feeRate === null).length,
+        0,
+      );
+      return {
+        city,
+        status: !correction.ready
+          ? "blocked"
+          : blockedLadders.length || bucketsWithoutFee
+            ? "partial"
+            : "ready",
+        correctionC: correction.ready ? round4(correction.biasC) : null,
+        correctionReason: correction.ready ? null : correction.reason,
+        residuals14d: correction.residuals,
+        minResiduals: CITY_MIN_RESIDUALS,
+        openLadders: ladders.length,
+        blockedLadders,
+        bucketsWithoutFee,
+      };
+    });
+    return {
+      checkedAt: new Date(now).toISOString(),
+      feed: {
+        lastInit: feed.lastInit,
+        lastPublishedAt: feed.lastPublishedAt,
+        lastError: feed.lastError,
+      },
+      correction: {
+        residuals7d: global.residuals,
+        days7d: global.days,
+        minDays: GLOBAL_MIN_DAYS,
+        meanC: global.meanC === null ? null : round4(global.meanC),
+        ready: global.ready,
+      },
+      unpricedPositions: [...this.positions.values()].filter(
+        (p) => this.positionPnl(p).pnl === null,
+      ).length,
+      cities,
+    };
   }
 
   private async closePosition(
@@ -776,15 +882,19 @@ export class MarketOrchestrator extends EventEmitter {
     const initialCapital = getConfig().portfolio.startingCapital;
     let openPositionsValue = 0;
     let unrealizedPnl = 0;
+    let unpriced = 0;
     for (const pos of this.positions.values()) {
       openPositionsValue += pos.cost;
-      unrealizedPnl += this.positionPnl(pos).pnl ?? 0;
+      const { pnl } = this.positionPnl(pos);
+      if (pnl === null) unpriced++;
+      else unrealizedPnl += pnl;
     }
     const netPnl = this.realizedPnl + unrealizedPnl;
     return {
       initialCapital,
       realizedPnl: this.realizedPnl,
       unrealizedPnl,
+      unpricedPositions: unpriced,
       netPnl,
       portfolioValue: initialCapital + netPnl,
       roi: (netPnl / initialCapital) * 100,

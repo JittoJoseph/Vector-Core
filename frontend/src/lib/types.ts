@@ -187,3 +187,33 @@ export interface WsMessage {
   type: "systemState" | "tradeOpened" | "tradeResolved" | "pong";
   data?: unknown;
 }
+
+export interface CityReadiness {
+  city: string;
+  status: "ready" | "partial" | "blocked";
+  correctionC: number | null;
+  correctionReason: string | null;
+  residuals14d: number;
+  minResiduals: number;
+  openLadders: number;
+  blockedLadders: { title: string; reason: string; since: string }[];
+  bucketsWithoutFee: number;
+}
+
+export interface Readiness {
+  checkedAt: string;
+  feed: {
+    lastInit: string | null;
+    lastPublishedAt: string | null;
+    lastError: string | null;
+  };
+  correction: {
+    residuals7d: number;
+    days7d: number;
+    minDays: number;
+    meanC: number | null;
+    ready: boolean;
+  };
+  unpricedPositions: number;
+  cities: CityReadiness[];
+}
