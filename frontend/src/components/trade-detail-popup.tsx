@@ -114,6 +114,14 @@ export function TradeDetailPopup({
                 value={`$${parseFloat(trade.entryFees || "0").toFixed(4)}`}
               />
               <Cell
+                label="PARTIAL TP SOLD"
+                value={
+                  parseFloat(trade.sharesSold) > 0
+                    ? `${parseFloat(trade.sharesSold).toFixed(2)} shares`
+                    : "—"
+                }
+              />
+              <Cell
                 label={isClosed ? "EXIT PRICE" : "TAKE PROFIT AT"}
                 value={
                   isClosed

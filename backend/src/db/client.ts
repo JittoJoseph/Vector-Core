@@ -88,19 +88,15 @@ export async function settleTrade(
   return row;
 }
 
-export async function shrinkTrade(
+export async function recordPartialSale(
   id: string,
-  shares: number,
-  cost: number,
-  fees: number,
+  sharesSold: number,
   realized: number,
 ) {
   await getDb()
     .update(schema.trades)
     .set({
-      entryShares: shares.toFixed(8),
-      actualCost: cost.toFixed(8),
-      entryFees: fees.toFixed(8),
+      sharesSold: sharesSold.toFixed(8),
       realizedPnl: realized.toFixed(8),
     })
     .where(eq(schema.trades.id, id));
@@ -126,4 +122,7 @@ export async function pruneHistory(): Promise<void> {
     .where(
       lt(schema.auditLogs.createdAt, new Date(Date.now() - 14 * 86_400_000)),
     );
+  await db
+    .delete(schema.forecastResiduals)
+    .where(lt(schema.forecastResiduals.closedAt, cutoff));
 }

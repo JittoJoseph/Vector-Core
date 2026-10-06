@@ -144,6 +144,7 @@ export function TradesTable({
                       </span>
                       <span className="text-[10px] text-muted-foreground tabular-nums">
                         {shares.toFixed(1)} shares
+                        {parseFloat(trade.sharesSold) > 0 && " · ½ sold"}
                       </span>
                     </div>
                   </td>

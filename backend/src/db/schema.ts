@@ -14,6 +14,7 @@ export interface ForecastSummary {
   init: string;
   publishedAt: string;
   fmaxC: number;
+  refFmaxC?: number;
   mu: number;
   sigma: number;
 }
@@ -43,11 +44,18 @@ export const campaigns = pgTable(
   }),
 );
 
-export const cityBias = pgTable("city_bias", {
-  city: text("city").primaryKey(),
-  weight: real("weight").notNull(),
-  sum: real("sum").notNull(),
-});
+export const forecastResiduals = pgTable(
+  "forecast_residuals",
+  {
+    campaignId: text("campaign_id").primaryKey(),
+    city: text("city").notNull(),
+    closedAt: timestamp("closed_at").notNull(),
+    residualC: real("residual_c").notNull(),
+  },
+  (table) => ({
+    closedAtIdx: index("fr_closed_at_idx").on(table.closedAt),
+  }),
+);
 
 export const trades = pgTable(
   "trades",
@@ -67,6 +75,9 @@ export const trades = pgTable(
     entryShares: decimal("entry_shares", { precision: 18, scale: 8 }).notNull(),
     actualCost: decimal("actual_cost", { precision: 18, scale: 8 }).notNull(),
     entryFees: decimal("entry_fees", { precision: 18, scale: 8 })
+      .default("0")
+      .notNull(),
+    sharesSold: decimal("shares_sold", { precision: 18, scale: 8 })
       .default("0")
       .notNull(),
     target: decimal("target", { precision: 18, scale: 8 }).notNull(),

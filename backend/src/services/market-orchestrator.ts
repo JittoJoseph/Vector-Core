@@ -7,7 +7,7 @@ import {
   logAudit,
   pruneHistory,
   settleTrade,
-  shrinkTrade,
+  recordPartialSale,
   sumRealizedPnl,
   wipeTrades,
   type ExitReason,
@@ -87,6 +87,8 @@ interface Position {
   bucketId: string;
   tokenId: string;
   entryPrice: number;
+  entryShares: number;
+  entryCost: number;
   shares: number;
   fees: number;
   cost: number;
@@ -218,12 +220,18 @@ export class MarketOrchestrator extends EventEmitter {
         bucketId: t.bucketId,
         tokenId: t.tokenId,
         entryPrice: parseFloat(t.entryPrice),
-        shares: parseFloat(t.entryShares),
-        fees: parseFloat(t.entryFees),
-        cost: parseFloat(t.actualCost),
+        entryShares: parseFloat(t.entryShares),
+        entryCost: parseFloat(t.actualCost),
+        shares: parseFloat(t.entryShares) - parseFloat(t.sharesSold),
+        fees:
+          parseFloat(t.entryFees) *
+          (1 - parseFloat(t.sharesSold) / parseFloat(t.entryShares)),
+        cost:
+          parseFloat(t.actualCost) *
+          (1 - parseFloat(t.sharesSold) / parseFloat(t.entryShares)),
         realized: parseFloat(t.realizedPnl ?? "0"),
         target: parseFloat(t.target),
-        partialTaken: t.realizedPnl !== null,
+        partialTaken: parseFloat(t.sharesSold) > 0,
         minPrice: t.minPriceDuringPosition
           ? parseFloat(t.minPriceDuringPosition)
           : null,
@@ -377,8 +385,15 @@ export class MarketOrchestrator extends EventEmitter {
     const actualC = winner
       ? winnerTempC(winner.range, campaign.fahrenheit)
       : null;
-    if (actualC !== null && campaign.forecast)
-      await this.bias.record(campaign.city, actualC - campaign.forecast.fmaxC);
+    const refFmaxC =
+      campaign.forecast?.refFmaxC ?? campaign.forecast?.fmaxC ?? null;
+    if (actualC !== null && refFmaxC !== null)
+      await this.bias.record({
+        campaignId: campaign.id,
+        city: campaign.city,
+        closedAt: event.closedTime ? Date.parse(event.closedTime) : Date.now(),
+        residualC: actualC - refFmaxC,
+      });
     await getDb()
       .update(schema.campaigns)
       .set({
@@ -421,10 +436,16 @@ export class MarketOrchestrator extends EventEmitter {
         ranges: campaign.buckets.map((b) => b.range),
       });
       campaign.probs = fv.probs;
+      const entryWindow =
+        campaign.dayStart - run.publishedAt >=
+        STRATEGY.minEntryLeadHours * 3_600_000;
       campaign.forecast = {
         init: new Date(run.init).toISOString(),
         publishedAt: new Date(run.publishedAt).toISOString(),
         fmaxC: round4(fv.fmaxC),
+        refFmaxC: entryWindow
+          ? round4(fv.fmaxC)
+          : (campaign.forecast?.refFmaxC ?? round4(fv.fmaxC)),
         mu: round4(fv.mu),
         sigma: round4(fv.sigma),
       };
@@ -566,6 +587,8 @@ export class MarketOrchestrator extends EventEmitter {
       bucketId: bucket.id,
       tokenId,
       entryPrice: fill.averagePrice,
+      entryShares: fill.totalShares,
+      entryCost: fill.netCost,
       shares: fill.totalShares,
       fees: fill.fees,
       cost: fill.netCost,
@@ -675,11 +698,9 @@ export class MarketOrchestrator extends EventEmitter {
     pos.shares -= sale.totalShares;
     pos.cost *= keep;
     pos.fees *= keep;
-    await shrinkTrade(
+    await recordPartialSale(
       pos.tradeId,
-      pos.shares,
-      pos.cost,
-      pos.fees,
+      pos.entryShares - pos.shares,
       pos.realized,
     );
   }
@@ -736,11 +757,15 @@ export class MarketOrchestrator extends EventEmitter {
   getOpenPositionsPnl(): Record<string, PositionPnl> {
     const out: Record<string, PositionPnl> = {};
     for (const pos of this.positions.values()) {
-      const { mid, pnl } = this.positionPnl(pos);
+      const { mid, pnl: open } = this.positionPnl(pos);
+      const pnl = open === null ? null : pos.realized + open;
       out[pos.tradeId] = {
         mid,
         pnl,
-        pnlPct: pnl !== null && pos.cost > 0 ? (pnl / pos.cost) * 100 : null,
+        pnlPct:
+          pnl !== null && pos.entryCost > 0
+            ? (pnl / pos.entryCost) * 100
+            : null,
         minPrice: pos.minPrice,
       };
     }

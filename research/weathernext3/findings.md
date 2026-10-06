@@ -501,3 +501,42 @@ None was adopted:
 | Calibration (lead 12–30 h) | WN3 25 → 23%, 36 → 38%, 42 → 46%, 58 → 54%; market similarly calibrated; realized residual SD 0.94 °C vs model σ 0.90–0.95. Not overconfident. The ≥ 70% bin is a few tail buckets (5/9 won), not a bug |
 | Location-gap bets (\|WN3 centre − market centre\|) | ≥ 1.5 °C: +125% (real-time Sep) but +12% in the bad week; 0.5–1 °C: +42% vs +28%. Reverses, so not a filter |
 | Horse-race (multi-bucket Kelly) baskets | Adds the 10–20 pt edge buckets, which earned only +10–13%. Not worth it |
+
+## Review 2026-10-06: partial-TP accounting and a self-updating station correction
+
+### Partial TP
+
+- **It fires correctly.** 4 half-sales, each logged, then the rest closed normally.
+- **Totals are right.** Realized totals and the dashboard performance aggregates use `realized_pnl` only.
+- **Per-trade figures were inflated.** `shrinkTrade` overwrote `entry_shares`, `actual_cost` and `entry_fees` with the remaining half, so per-trade return showed about 2×. Houston 90–91°F showed +522% instead of +261%. The same happened after thin-book partial exits.
+- **Fixed (2026-10-06).** Entry columns are never modified. A new `shares_sold` column tracks partial sales, the remaining position is derived from it on restart, and per-position P&L shown for open trades = realized + mark of the remainder, over the original cost.
+
+### Bad trades this run
+
+- Mostly cheap buckets (4–8¢) that never rose after entry: warm US buckets (Los Angeles ×4, Miami ×2, Chicago, Dallas, Atlanta).
+- **Station correction:** the live engine used summer-fitted per-city corrections with a slow learner (decay 0.98). Every DB reset reset it back to the summer seed.
+
+### Station-correction schemes compared causally
+
+Real-time, current rules; Sep 26 – Oct 5 is the honest out-of-sample period, because the static seed was fitted on Sep 2–25:
+
+| Scheme | ll Sep 26 – Oct 5 | ret Sep 26 – Oct 5 | Losing days | ret Sep 1–25 |
+|---|---|---|---|---|
+| Static summer seed | 1.453 | +25% | 2/10 | +70% (in-sample) |
+| Live slow learner | 1.472 | +27% | 4/10 | +60% |
+| **Recent: city 14 d mean, shrunk (k = 3) to the 7 d all-city mean** | **1.443** | **+47%** | **1/10** | +55%, 0/24 losing days |
+| Station offset + 7 d climate-zone drift | 1.456 | +20% | 2/10 | +64% |
+
+The recent scheme is robust across settings:
+
+| Setting | ll | ret Sep 26 – Oct 5 |
+|---|---|---|
+| City window 7 / 14 / 21 d | 1.453 / 1.443 / 1.451 | +38 / +47 / +34% |
+| Global window 4 / 10 d | 1.443 / 1.443 | +45 / +45% |
+| k = 1 / 6 | 1.445 / 1.446 | +48 / +38% |
+
+**Implemented (2026-10-06):**
+- `forecast_residuals` stores one row per resolved ladder (city, closed time, actual − forecast as of 12 h before day start, the trade-relevant forecast `refFmaxC`).
+- Correction = (Σ city residuals in the last 14 d + 3 · mean of all residuals in the last 7 d) / (n + 3), with a 0.66 °C prior when there is no history. Rows are pruned after 30 days.
+- The table survives DB resets. It was seeded with 818 backtest residuals (Sep 19 – Oct 6), mean +0.62 °C.
+- The `city_bias` table was removed.

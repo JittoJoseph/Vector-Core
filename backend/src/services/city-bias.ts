@@ -1,46 +1,73 @@
+import { gte } from "drizzle-orm";
 import { getDb } from "../db/client.js";
 import * as schema from "../db/schema.js";
 
-const DECAY = 0.98;
-const PRIOR_WEIGHT = 8;
-const DEFAULT_BIAS_C = 0.66;
+const DAY_MS = 86_400_000;
+const CITY_WINDOW_MS = 14 * DAY_MS;
+const GLOBAL_WINDOW_MS = 7 * DAY_MS;
+const RETAIN_MS = 30 * DAY_MS;
+const SHRINK = 3;
+const PRIOR_C = 0.66;
+
+interface Residual {
+  campaignId: string;
+  city: string;
+  closedAt: number;
+  residualC: number;
+}
 
 export class CityBias {
-  private rows = new Map<string, { weight: number; sum: number }>();
+  private residuals: Residual[] = [];
 
   async load(): Promise<void> {
-    const rows = await getDb().select().from(schema.cityBias);
-    this.rows = new Map(
-      rows.map((r) => [r.city, { weight: r.weight, sum: r.sum }]),
-    );
+    const rows = await getDb()
+      .select()
+      .from(schema.forecastResiduals)
+      .where(
+        gte(
+          schema.forecastResiduals.closedAt,
+          new Date(Date.now() - RETAIN_MS),
+        ),
+      );
+    this.residuals = rows.map((r) => ({
+      campaignId: r.campaignId,
+      city: r.city,
+      closedAt: r.closedAt.getTime(),
+      residualC: r.residualC,
+    }));
   }
 
-  private global(): number {
-    let weight = 0;
-    let sum = 0;
-    for (const r of this.rows.values()) {
-      weight += r.weight;
-      sum += r.sum;
+  get(city: string, now = Date.now()): number {
+    let globalSum = 0;
+    let globalCount = 0;
+    let citySum = 0;
+    let cityCount = 0;
+    for (const r of this.residuals) {
+      if (r.closedAt > now) continue;
+      if (r.closedAt >= now - GLOBAL_WINDOW_MS) {
+        globalSum += r.residualC;
+        globalCount++;
+      }
+      if (r.city === city && r.closedAt >= now - CITY_WINDOW_MS) {
+        citySum += r.residualC;
+        cityCount++;
+      }
     }
-    return weight > 0 ? sum / weight : DEFAULT_BIAS_C;
+    const prior = globalCount > 0 ? globalSum / globalCount : PRIOR_C;
+    return (citySum + SHRINK * prior) / (cityCount + SHRINK);
   }
 
-  get(city: string): number {
-    const g = this.global();
-    const r = this.rows.get(city);
-    return r ? (r.sum + PRIOR_WEIGHT * g) / (r.weight + PRIOR_WEIGHT) : g;
-  }
-
-  async record(city: string, residualC: number): Promise<void> {
-    const prev = this.rows.get(city) ?? { weight: 0, sum: 0 };
-    const next = {
-      weight: DECAY * prev.weight + 1,
-      sum: DECAY * prev.sum + residualC,
-    };
-    this.rows.set(city, next);
+  async record(residual: Residual): Promise<void> {
+    if (this.residuals.some((r) => r.campaignId === residual.campaignId))
+      return;
+    const cutoff = Date.now() - RETAIN_MS;
+    this.residuals = [
+      ...this.residuals.filter((r) => r.closedAt >= cutoff),
+      residual,
+    ];
     await getDb()
-      .insert(schema.cityBias)
-      .values({ city, ...next })
-      .onConflictDoUpdate({ target: schema.cityBias.city, set: next });
+      .insert(schema.forecastResiduals)
+      .values({ ...residual, closedAt: new Date(residual.closedAt) })
+      .onConflictDoNothing();
   }
 }

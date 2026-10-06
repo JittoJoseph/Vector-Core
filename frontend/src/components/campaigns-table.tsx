@@ -94,7 +94,7 @@ export function ActiveCampaignsTable({
                 <th className={`${TH} text-right`}>TIME LEFT</th>
                 <th
                   className={`${TH} text-right`}
-                  title="WeatherNext 3 forecast daily max (bias-corrected)"
+                  title="WeatherNext 3 forecast daily max (3 h mean, corrected by recent station error)"
                 >
                   WN3 MAX
                 </th>

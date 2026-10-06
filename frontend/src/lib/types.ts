@@ -75,6 +75,7 @@ export interface Trade {
   entryShares: string;
   actualCost: string;
   entryFees: string;
+  sharesSold: string;
   target: string;
   signal: TradeSignal;
   minPriceDuringPosition: string | null;
