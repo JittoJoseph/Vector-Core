@@ -99,7 +99,6 @@ interface Position {
   tokenId: string;
   entryPrice: number;
   entryShares: number;
-  entryCost: number;
   shares: number;
   fees: number;
   cost: number;
@@ -244,7 +243,6 @@ export class MarketOrchestrator extends EventEmitter {
         tokenId: t.tokenId,
         entryPrice: parseFloat(t.entryPrice),
         entryShares: parseFloat(t.entryShares),
-        entryCost: parseFloat(t.actualCost),
         shares: parseFloat(t.entryShares) - parseFloat(t.sharesSold),
         fees:
           parseFloat(t.entryFees) *
@@ -647,7 +645,6 @@ export class MarketOrchestrator extends EventEmitter {
       tokenId,
       entryPrice: fill.averagePrice,
       entryShares: fill.totalShares,
-      entryCost: fill.netCost,
       shares: fill.totalShares,
       fees: fill.fees,
       cost: fill.netCost,
@@ -934,15 +931,11 @@ export class MarketOrchestrator extends EventEmitter {
   getOpenPositionsPnl(): Record<string, PositionPnl> {
     const out: Record<string, PositionPnl> = {};
     for (const pos of this.positions.values()) {
-      const { mid, pnl: open } = this.positionPnl(pos);
-      const pnl = open === null ? null : pos.realized + open;
+      const { mid, pnl } = this.positionPnl(pos);
       out[pos.tradeId] = {
         mid,
         pnl,
-        pnlPct:
-          pnl !== null && pos.entryCost > 0
-            ? (pnl / pos.entryCost) * 100
-            : null,
+        pnlPct: pnl !== null && pos.cost > 0 ? (pnl / pos.cost) * 100 : null,
         minPrice: pos.minPrice,
       };
     }

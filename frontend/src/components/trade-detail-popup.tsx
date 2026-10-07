@@ -13,7 +13,7 @@ import {
 } from "@/lib/utils";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { ExternalLink, X } from "lucide-react";
-import { saleLabel } from "./trade-history-table";
+import { SaleBadge, formatSaleTime } from "./trade-history-table";
 import NumberFlow from "@number-flow/react";
 
 interface TradeDetailPopupProps {
@@ -35,6 +35,11 @@ export function TradeDetailPopup({
   const pnl = parseFloat(trade.realizedPnl || "0");
   const exitPrice = trade.exitPrice ? parseFloat(trade.exitPrice) : null;
   const actualCost = parseFloat(trade.actualCost);
+  const entryShares = parseFloat(trade.entryShares);
+  const heldShares = entryShares - parseFloat(trade.sharesSold);
+  const heldCost =
+    entryShares > 0 ? (actualCost * heldShares) / entryShares : 0;
+  const exits = trade.exits ?? [];
   const isWin = trade.exitOutcome === "WIN";
   const returnPct = actualCost > 0 ? (pnl / actualCost) * 100 : 0;
   const unrealizedPnl = !isClosed ? (positionPnl?.pnl ?? null) : null;
@@ -101,11 +106,8 @@ export function TradeDetailPopup({
         <div className="overflow-y-auto flex-1 overscroll-contain">
           <Section title="POSITION FINANCIALS">
             <Row2>
-              <Cell label="COST BASIS" value={`$${actualCost.toFixed(2)}`} />
-              <Cell
-                label="SHARES"
-                value={parseFloat(trade.entryShares).toFixed(2)}
-              />
+              <Cell label="ENTRY COST" value={`$${actualCost.toFixed(2)}`} />
+              <Cell label="ENTRY SHARES" value={entryShares.toFixed(2)} />
               <Cell
                 label="ENTRY PRICE"
                 value={cents(parseFloat(trade.entryPrice), 1)}
@@ -114,90 +116,144 @@ export function TradeDetailPopup({
                 label="ENTRY FEES"
                 value={`$${parseFloat(trade.entryFees || "0").toFixed(4)}`}
               />
-              <Cell
-                label="PARTIAL TP SOLD"
-                value={
-                  parseFloat(trade.sharesSold) > 0
-                    ? `${parseFloat(trade.sharesSold).toFixed(2)} shares`
-                    : "—"
-                }
-              />
-              <Cell
-                label={isClosed ? "EXIT PRICE" : "TAKE PROFIT AT"}
-                value={
-                  isClosed
-                    ? cents(exitPrice, 1)
-                    : cents(parseFloat(trade.target), 1)
-                }
-              />
-              <Cell
-                label={isClosed ? "REALIZED PNL" : "UNREALIZED PNL"}
-                value={
-                  isClosed ? (
-                    <span className={pnlColor(pnl)}>
-                      {formatPnl(pnl)} ({returnPct >= 0 ? "+" : ""}
-                      {returnPct.toFixed(1)}%)
-                    </span>
-                  ) : unrealizedPnl !== null ? (
-                    <div className="flex items-center gap-1.5">
-                      <span
-                        className={`font-bold tabular-nums tracking-tight ${pnlColor(unrealizedPnl)}`}
-                      >
-                        <NumberFlow
-                          value={unrealizedPnl}
-                          format={{
-                            style: "currency",
-                            currency: "USD",
-                            signDisplay: "always",
-                            minimumFractionDigits: 4,
-                            maximumFractionDigits: 4,
-                          }}
-                        />
+              {isClosed ? (
+                <>
+                  <Cell label="FINAL EXIT PRICE" value={cents(exitPrice, 1)} />
+                  <Cell
+                    label="TOTAL REALIZED PNL"
+                    value={
+                      <span className={pnlColor(pnl)}>
+                        {formatPnl(pnl)} ({returnPct >= 0 ? "+" : ""}
+                        {returnPct.toFixed(1)}%)
                       </span>
-                      {unrealizedPnlPct !== null && (
-                        <span
-                          className={`text-[10px] tracking-tight tabular-nums font-bold ${pnlColor(unrealizedPnlPct, true)}`}
-                        >
-                          ({unrealizedPnlPct >= 0 ? "+" : ""}
-                          {unrealizedPnlPct.toFixed(1)}%)
-                        </span>
-                      )}
-                    </div>
-                  ) : (
-                    "—"
-                  )
-                }
-              />
+                    }
+                  />
+                </>
+              ) : (
+                <>
+                  <Cell
+                    label="HELD NOW"
+                    value={`${heldShares.toFixed(2)} shares · $${heldCost.toFixed(2)}`}
+                  />
+                  <Cell
+                    label="TAKE PROFIT AT"
+                    value={cents(parseFloat(trade.target), 1)}
+                  />
+                  <Cell
+                    label="UNREALIZED (HELD SHARES)"
+                    value={
+                      unrealizedPnl !== null ? (
+                        <div className="flex items-center gap-1.5">
+                          <span
+                            className={`font-bold tabular-nums tracking-tight ${pnlColor(unrealizedPnl)}`}
+                          >
+                            <NumberFlow
+                              value={unrealizedPnl}
+                              format={{
+                                style: "currency",
+                                currency: "USD",
+                                signDisplay: "always",
+                                minimumFractionDigits: 4,
+                                maximumFractionDigits: 4,
+                              }}
+                            />
+                          </span>
+                          {unrealizedPnlPct !== null && (
+                            <span
+                              className={`text-[10px] tracking-tight tabular-nums font-bold ${pnlColor(unrealizedPnlPct, true)}`}
+                            >
+                              ({unrealizedPnlPct >= 0 ? "+" : ""}
+                              {unrealizedPnlPct.toFixed(1)}%)
+                            </span>
+                          )}
+                        </div>
+                      ) : (
+                        "—"
+                      )
+                    }
+                  />
+                  <Cell
+                    label="REALIZED FROM SALES"
+                    value={
+                      exits.length ? (
+                        <span className={pnlColor(pnl)}>{formatPnl(pnl)}</span>
+                      ) : (
+                        "—"
+                      )
+                    }
+                  />
+                </>
+              )}
               {minPrice !== null && (
                 <Cell label="MIN BID (DURING POS)" value={cents(minPrice, 1)} />
               )}
             </Row2>
           </Section>
 
-          {(trade.exits?.length ?? 0) > 0 && (
+          {exits.length > 0 && (
             <Section title="SALES">
-              <div className="flex flex-col gap-1.5">
-                {trade.exits!.map((e) => {
-                  const salePnl = parseFloat(e.pnl);
-                  return (
-                    <div
-                      key={e.id}
-                      className="flex items-center justify-between text-[11px] tabular-nums"
-                    >
-                      <span className="text-muted-foreground">
-                        {formatTs(e.ts)}
-                      </span>
-                      <span className="text-foreground/80">
-                        {saleLabel(e.reason, salePnl)} ·{" "}
-                        {parseFloat(e.shares).toFixed(1)} @{" "}
-                        {cents(parseFloat(e.price), 1)}
-                      </span>
-                      <span className={pnlColor(salePnl)}>
-                        {salePnl >= 0 ? "+" : ""}${salePnl.toFixed(4)}
-                      </span>
-                    </div>
-                  );
-                })}
+              <div className="px-4 pb-3 overflow-x-auto">
+                <table className="w-full text-[11px] font-mono tabular-nums">
+                  <thead>
+                    <tr className="text-[9px] tracking-[0.15em] text-muted-foreground/40 uppercase">
+                      <th className="text-left font-normal pb-2">Time</th>
+                      <th className="text-left font-normal pb-2">Type</th>
+                      <th className="text-right font-normal pb-2">Shares</th>
+                      <th className="text-right font-normal pb-2">Price</th>
+                      <th className="text-right font-normal pb-2">Proceeds</th>
+                      <th className="text-right font-normal pb-2">PnL</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {exits.map((e) => {
+                      const salePnl = parseFloat(e.pnl);
+                      return (
+                        <tr
+                          key={e.id}
+                          className="border-t border-border/[0.08]"
+                        >
+                          <td className="py-2 text-muted-foreground/70 whitespace-nowrap">
+                            {formatSaleTime(e.ts)}
+                          </td>
+                          <td className="py-2">
+                            <SaleBadge reason={e.reason} pnl={salePnl} />
+                          </td>
+                          <td className="py-2 text-right text-foreground/80">
+                            {parseFloat(e.shares).toFixed(2)}
+                          </td>
+                          <td className="py-2 text-right text-foreground/80">
+                            {cents(parseFloat(e.price), 1)}
+                          </td>
+                          <td className="py-2 text-right text-foreground/80">
+                            ${parseFloat(e.proceeds).toFixed(2)}
+                          </td>
+                          <td
+                            className={`py-2 text-right font-semibold ${pnlColor(salePnl)}`}
+                          >
+                            {formatPnl(salePnl)}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                  {exits.length > 1 && (
+                    <tfoot>
+                      <tr className="border-t border-border/20">
+                        <td
+                          colSpan={5}
+                          className="pt-2 text-[9px] tracking-[0.15em] text-muted-foreground/40 uppercase"
+                        >
+                          Total realized
+                        </td>
+                        <td
+                          className={`pt-2 text-right font-bold ${pnlColor(pnl)}`}
+                        >
+                          {formatPnl(pnl)}
+                        </td>
+                      </tr>
+                    </tfoot>
+                  )}
+                </table>
               </div>
             </Section>
           )}

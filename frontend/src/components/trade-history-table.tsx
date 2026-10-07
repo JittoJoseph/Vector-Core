@@ -1,6 +1,6 @@
 "use client";
 
-import type { TradeHistoryRow } from "@/lib/types";
+import type { Trade, TradeHistoryRow } from "@/lib/types";
 import {
   formatDuration,
   pnlColor,
@@ -9,7 +9,6 @@ import {
 } from "@/lib/utils";
 import NumberFlow from "@number-flow/react";
 import { ExternalLink } from "lucide-react";
-import type { Trade } from "@/lib/types";
 
 const SALE_LABEL: Record<string, string> = {
   PARTIAL_TAKE_PROFIT: "½ TP",
@@ -18,9 +17,34 @@ const SALE_LABEL: Record<string, string> = {
   STOP_LOSS: "STOP",
 };
 
-export function saleLabel(reason: string, pnl: number): string {
-  if (reason === "RESOLUTION") return pnl > 0 ? "WIN" : "LOSS";
-  return SALE_LABEL[reason] ?? reason;
+export function SaleBadge({ reason, pnl }: { reason: string; pnl: number }) {
+  const label =
+    reason === "RESOLUTION"
+      ? pnl > 0
+        ? "WIN"
+        : "LOSS"
+      : (SALE_LABEL[reason] ?? reason);
+  return (
+    <span
+      className={`inline-flex rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider border ${
+        pnl > 0
+          ? "bg-emerald-500/10 text-emerald-500 border-emerald-500/20"
+          : "bg-red-500/10 text-red-500 border-red-500/20"
+      }`}
+    >
+      {label}
+    </span>
+  );
+}
+
+export function formatSaleTime(iso: string): string {
+  return new Date(iso).toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
 }
 
 interface TradeHistoryTableProps {
@@ -31,6 +55,15 @@ interface TradeHistoryTableProps {
   hasMore?: boolean;
   loadingMore?: boolean;
 }
+
+const HEADERS = [
+  "MARKET",
+  "SALE",
+  "ENTRY → EXIT",
+  "PROCEEDS",
+  "PNL / ROI",
+  "SOLD",
+];
 
 export function TradeHistoryTable({
   rows,
@@ -64,22 +97,12 @@ export function TradeHistoryTable({
     );
   }
 
-  const headers = [
-    "MARKET",
-    "SOLD AT",
-    "HELD",
-    "SHARES",
-    "ENTRY → EXIT",
-    "EXIT",
-    "PNL",
-  ];
-
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-xs font-mono">
         <thead>
           <tr className="border-b border-border/30">
-            {headers.map((h, i) => (
+            {HEADERS.map((h, i) => (
               <th
                 key={h}
                 className={`py-2.5 px-3 font-medium text-muted-foreground tracking-wider text-[10px] ${i === 0 ? "text-left" : "text-right"}`}
@@ -94,10 +117,8 @@ export function TradeHistoryTable({
             const pnl = parseFloat(exit.pnl);
             const costBasis = parseFloat(exit.costBasis);
             const pnlPct = costBasis > 0 ? (pnl / costBasis) * 100 : 0;
-            const soldAt = new Date(exit.ts);
             const entryCents = Math.round(parseFloat(trade.entryPrice) * 100);
             const exitCents = Math.round(parseFloat(exit.price) * 100);
-            const label = saleLabel(exit.reason, pnl);
             return (
               <tr
                 key={exit.id}
@@ -134,36 +155,11 @@ export function TradeHistoryTable({
                 </td>
 
                 <td className="py-3 px-3 text-right">
-                  <div className="flex flex-col gap-0.5 items-end">
-                    <span className="text-foreground tabular-nums text-xs">
-                      {soldAt.toLocaleDateString("en-US", {
-                        month: "short",
-                        day: "numeric",
-                      })}
-                    </span>
-                    <span className="text-[10px] text-muted-foreground/60">
-                      {soldAt.toLocaleTimeString([], {
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      })}
-                    </span>
-                  </div>
-                </td>
-
-                <td className="py-3 px-3 text-right">
-                  <span className="text-foreground/90 tabular-nums font-medium">
-                    {formatDuration(trade.entryTs, exit.ts)}
-                  </span>
-                </td>
-
-                <td className="py-3 px-3 text-right">
-                  <div className="flex flex-col gap-0.5 items-end">
-                    <span className="text-foreground font-medium tabular-nums">
-                      {parseFloat(exit.shares).toFixed(1)}
-                    </span>
+                  <div className="flex flex-col gap-1 items-end">
+                    <SaleBadge reason={exit.reason} pnl={pnl} />
                     <span className="text-[10px] text-muted-foreground tabular-nums">
-                      of {parseFloat(trade.entryShares).toFixed(1)} · $
-                      {costBasis.toFixed(2)} cost
+                      {parseFloat(exit.shares).toFixed(1)} of{" "}
+                      {parseFloat(trade.entryShares).toFixed(1)} shares
                     </span>
                   </div>
                 </td>
@@ -181,19 +177,18 @@ export function TradeHistoryTable({
                 </td>
 
                 <td className="py-3 px-3 text-right">
-                  <span
-                    className={`inline-flex rounded px-1.5 py-0.5 text-[9px] font-bold uppercase ${
-                      pnl > 0
-                        ? "bg-emerald-500/10 text-emerald-500 border border-emerald-500/20"
-                        : "bg-red-500/10 text-red-500 border border-red-500/20"
-                    }`}
-                  >
-                    {label}
-                  </span>
+                  <div className="flex flex-col gap-0.5 items-end">
+                    <span className="text-foreground font-medium tabular-nums">
+                      ${parseFloat(exit.proceeds).toFixed(2)}
+                    </span>
+                    <span className="text-[10px] text-muted-foreground tabular-nums">
+                      cost ${costBasis.toFixed(2)}
+                    </span>
+                  </div>
                 </td>
 
                 <td className="py-3 px-3 text-right">
-                  <div className="flex flex-col items-end gap-0.5">
+                  <div className="flex items-center justify-end gap-1">
                     <span
                       className={`tabular-nums font-semibold ${pnlColor(pnl)}`}
                     >
@@ -213,6 +208,17 @@ export function TradeHistoryTable({
                     >
                       {pnlPct >= 0 ? "+" : ""}
                       {pnlPct.toFixed(1)}%
+                    </span>
+                  </div>
+                </td>
+
+                <td className="py-3 px-3 text-right">
+                  <div className="flex flex-col gap-0.5 items-end">
+                    <span className="text-foreground tabular-nums text-xs">
+                      {formatSaleTime(exit.ts)}
+                    </span>
+                    <span className="text-[10px] text-muted-foreground/60 tabular-nums">
+                      held {formatDuration(trade.entryTs, exit.ts)}
                     </span>
                   </div>
                 </td>

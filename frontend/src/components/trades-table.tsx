@@ -70,7 +70,10 @@ export function TradesTable({
           {trades.map((trade, idx) => {
             const entryCents = Math.round(parseFloat(trade.entryPrice) * 100);
             const shares = parseFloat(trade.entryShares);
-            const actualCost = parseFloat(trade.actualCost);
+            const sold = parseFloat(trade.sharesSold);
+            const held = shares - sold;
+            const heldCost =
+              shares > 0 ? (parseFloat(trade.actualCost) * held) / shares : 0;
             const polyUrl = polymarketMarketUrl({
               eventSlug: trade.campaignSlug,
               marketSlug: trade.bucketSlug,
@@ -120,11 +123,11 @@ export function TradesTable({
                 <td className="py-3 px-3 text-right">
                   <div className="flex flex-col gap-0.5 items-end">
                     <span className="text-foreground font-medium tabular-nums">
-                      ${actualCost.toFixed(2)}
+                      ${heldCost.toFixed(2)}
                     </span>
                     <span className="text-[10px] text-muted-foreground tabular-nums">
-                      {parseFloat(trade.sharesSold) > 0
-                        ? `${(shares - parseFloat(trade.sharesSold)).toFixed(1)} of ${shares.toFixed(1)} shares · ½ sold`
+                      {sold > 0
+                        ? `${held.toFixed(1)} left of ${shares.toFixed(1)} · ½ sold`
                         : `${shares.toFixed(1)} shares`}
                     </span>
                   </div>
