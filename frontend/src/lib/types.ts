@@ -85,6 +85,25 @@ export interface Trade {
   exitReason: string | null;
   realizedPnl: string | null;
   status: string;
+  exits?: TradeExit[];
+}
+
+export interface TradeExit {
+  id: string;
+  tradeId: string;
+  ts: string;
+  reason: string;
+  shares: string;
+  price: string;
+  fees: string;
+  proceeds: string;
+  costBasis: string;
+  pnl: string;
+}
+
+export interface TradeHistoryRow {
+  exit: TradeExit;
+  trade: Trade;
 }
 
 export interface PositionPnl {

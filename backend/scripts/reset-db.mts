@@ -9,7 +9,7 @@ const sql = postgres(process.env.SUPABASE_DATABASE_URL!, {
 });
 
 await sql.begin(async (tx) => {
-  await tx`DROP TABLE IF EXISTS buckets, trades, campaigns, audit_log, city_bias CASCADE`;
+  await tx`DROP TABLE IF EXISTS buckets, trades, trade_exits, campaigns, audit_log, city_bias CASCADE`;
   await tx`
     CREATE TABLE IF NOT EXISTS forecast_residuals (
       campaign_id text PRIMARY KEY,
@@ -61,6 +61,21 @@ await sql.begin(async (tx) => {
   await tx`CREATE INDEX t_status_idx ON trades (status)`;
   await tx`CREATE INDEX t_exit_ts_idx ON trades (exit_ts)`;
   await tx`CREATE UNIQUE INDEX uq_trade_bucket ON trades (bucket_id)`;
+  await tx`
+    CREATE TABLE trade_exits (
+      id text PRIMARY KEY,
+      trade_id text NOT NULL,
+      ts timestamp NOT NULL,
+      reason text NOT NULL,
+      shares numeric(18, 8) NOT NULL,
+      price numeric(18, 8) NOT NULL,
+      fees numeric(18, 8) NOT NULL,
+      proceeds numeric(18, 8) NOT NULL,
+      cost_basis numeric(18, 8) NOT NULL,
+      pnl numeric(18, 8) NOT NULL
+    )`;
+  await tx`CREATE INDEX te_trade_idx ON trade_exits (trade_id)`;
+  await tx`CREATE INDEX te_ts_idx ON trade_exits (ts)`;
   await tx`
     CREATE TABLE audit_log (
       id text PRIMARY KEY,

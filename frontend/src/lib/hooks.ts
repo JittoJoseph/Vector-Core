@@ -4,6 +4,8 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { getApiClient, getWsClient } from "./api-client";
 import { formatPnl } from "./utils";
 import type {
+  TradeExit,
+  TradeHistoryRow,
   Readiness,
   Trade,
   SystemStats,
@@ -86,11 +88,32 @@ export function usePositions() {
     }, []),
   );
 
+  useWsEvent<{ exit?: TradeExit; trade?: Trade }>(
+    "tradeExit",
+    useCallback((data) => {
+      const exit = data?.exit;
+      const trade = data?.trade;
+      if (!exit || !trade || trade.status !== "OPEN") return;
+      setPositions((prev) =>
+        prev.map((t) =>
+          t.id === trade.id
+            ? {
+                ...t,
+                ...trade,
+                campaignEndDate: t.campaignEndDate,
+                exits: [...(t.exits ?? []), exit],
+              }
+            : t,
+        ),
+      );
+    }, []),
+  );
+
   return { positions, loading, error, refetch: fetchPositions };
 }
 
 export function useTradeHistory(enabled: boolean = true) {
-  const [trades, setTrades] = useState<Trade[]>([]);
+  const [rows, setRows] = useState<TradeHistoryRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(false);
@@ -105,9 +128,12 @@ export function useTradeHistory(enabled: boolean = true) {
         limit: PAGE_SIZE,
         offset: 0,
       });
-      setTrades((prev) => {
-        const existingIds = new Set(prev.map((t) => t.id));
-        return [...prev, ...response.filter((t) => !existingIds.has(t.id))];
+      setRows((prev) => {
+        const existingIds = new Set(prev.map((r) => r.exit.id));
+        return [
+          ...prev,
+          ...response.filter((r) => !existingIds.has(r.exit.id)),
+        ];
       });
       dbFetchedRef.current = response.length;
       setHasMore(response.length === PAGE_SIZE);
@@ -128,9 +154,9 @@ export function useTradeHistory(enabled: boolean = true) {
         offset: dbFetchedRef.current,
       });
       dbFetchedRef.current += response.length;
-      setTrades((prev) => {
-        const ids = new Set(prev.map((t) => t.id));
-        return [...prev, ...response.filter((t) => !ids.has(t.id))];
+      setRows((prev) => {
+        const ids = new Set(prev.map((r) => r.exit.id));
+        return [...prev, ...response.filter((r) => !ids.has(r.exit.id))];
       });
       setHasMore(response.length === PAGE_SIZE);
     } catch {
@@ -141,19 +167,30 @@ export function useTradeHistory(enabled: boolean = true) {
 
   useFetchOnce(enabled, fetchTrades, [fetchTrades]);
 
-  useWsEvent<{ trade?: Trade }>(
-    "tradeResolved",
+  useWsEvent<{ exit?: TradeExit; trade?: Trade }>(
+    "tradeExit",
     useCallback((data) => {
+      const exit = data?.exit;
       const trade = data?.trade;
-      if (!trade) return;
-      setTrades((prev) =>
-        prev.some((t) => t.id === trade.id) ? prev : [trade, ...prev],
-      );
+      if (!exit || !trade) return;
+      setRows((prev) => {
+        if (prev.some((r) => r.exit.id === exit.id)) return prev;
+        const exits = [
+          ...prev.filter((r) => r.trade.id === trade.id).map((r) => r.exit),
+          exit,
+        ];
+        return [
+          { exit, trade: { ...trade, exits } },
+          ...prev.map((r) =>
+            r.trade.id === trade.id ? { ...r, trade: { ...trade, exits } } : r,
+          ),
+        ];
+      });
     }, []),
   );
 
   return {
-    trades,
+    rows,
     loading,
     loadingMore,
     hasMore,

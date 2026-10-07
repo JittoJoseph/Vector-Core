@@ -26,17 +26,20 @@ const PERIOD_MS: Record<Exclude<TimePeriod, "ALL">, number> = {
 export async function calculatePerformance(
   period: TimePeriod,
 ): Promise<PerformanceMetrics> {
+  const since =
+    period === "ALL" ? null : new Date(Date.now() - PERIOD_MS[period]);
   const conditions = [eq(schema.trades.status, "SETTLED")];
-  if (period !== "ALL") {
-    conditions.push(
-      gte(schema.trades.entryTs, new Date(Date.now() - PERIOD_MS[period])),
-    );
-  }
+  if (since) conditions.push(gte(schema.trades.exitTs, since));
+  const [realized] = await getDb()
+    .select({
+      total: sql<string>`COALESCE(SUM(${schema.tradeExits.pnl}), 0)`,
+    })
+    .from(schema.tradeExits)
+    .where(since ? gte(schema.tradeExits.ts, since) : undefined);
 
   const pnl = schema.trades.realizedPnl;
   const [row] = await getDb()
     .select({
-      totalPnl: sql<string>`COALESCE(SUM(${pnl}), 0)`,
       totalTrades: sql<number>`COUNT(*)`,
       wins: sql<number>`COUNT(*) FILTER (WHERE ${pnl} > 0)`,
       losses: sql<number>`COUNT(*) FILTER (WHERE ${pnl} <= 0)`,
@@ -54,7 +57,7 @@ export async function calculatePerformance(
 
   return {
     period,
-    totalPnl: parseFloat(row?.totalPnl ?? "0").toFixed(6),
+    totalPnl: parseFloat(realized?.total ?? "0").toFixed(6),
     totalTrades: Number(row?.totalTrades ?? 0),
     wins,
     losses,

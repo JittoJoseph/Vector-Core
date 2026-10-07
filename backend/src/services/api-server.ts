@@ -63,6 +63,9 @@ export class ApiServer {
     orchestrator.on("tradeOpened", (data) =>
       this.broadcast({ type: "tradeOpened", data }),
     );
+    orchestrator.on("tradeExit", (data) =>
+      this.broadcast({ type: "tradeExit", data }),
+    );
     orchestrator.on("tradeResolved", (data) =>
       this.broadcast({ type: "tradeResolved", data }),
     );
@@ -130,6 +133,19 @@ export class ApiServer {
       return;
     }
     next();
+  }
+
+  private async exitsFor(tradeIds: string[]) {
+    const out = new Map<string, (typeof schema.tradeExits.$inferSelect)[]>();
+    if (!tradeIds.length) return out;
+    const rows = await getDb()
+      .select()
+      .from(schema.tradeExits)
+      .where(inArray(schema.tradeExits.tradeId, [...new Set(tradeIds)]))
+      .orderBy(asc(schema.tradeExits.ts));
+    for (const r of rows)
+      out.set(r.tradeId, [...(out.get(r.tradeId) ?? []), r]);
+    return out;
   }
 
   private tradesWithDeadline(status: string) {
@@ -220,28 +236,50 @@ export class ApiServer {
 
     app.get(
       "/api/positions",
-      route("Positions", async () =>
-        (
-          await this.tradesWithDeadline("OPEN").orderBy(
-            asc(schema.campaigns.endDate),
-          )
-        ).map((r) => ({
+      route("Positions", async () => {
+        const rows = await this.tradesWithDeadline("OPEN").orderBy(
+          asc(schema.campaigns.endDate),
+        );
+        const exits = await this.exitsFor(rows.map((r) => r.trade.id));
+        return rows.map((r) => ({
           ...r.trade,
           campaignEndDate: r.campaignEndDate,
-        })),
-      ),
+          exits: exits.get(r.trade.id) ?? [],
+        }));
+      }),
     );
 
     app.get(
       "/api/trades/history",
-      route("Trade history", async (req) =>
-        (
-          await this.tradesWithDeadline("SETTLED")
-            .orderBy(desc(schema.trades.exitTs))
-            .limit(intParam(req.query.limit, 25, 200))
-            .offset(intParam(req.query.offset, 0, 1_000_000))
-        ).map((r) => ({ ...r.trade, campaignEndDate: r.campaignEndDate })),
-      ),
+      route("Trade history", async (req) => {
+        const rows = await getDb()
+          .select({
+            exit: schema.tradeExits,
+            trade: schema.trades,
+            campaignEndDate: schema.campaigns.endDate,
+          })
+          .from(schema.tradeExits)
+          .innerJoin(
+            schema.trades,
+            eq(schema.tradeExits.tradeId, schema.trades.id),
+          )
+          .leftJoin(
+            schema.campaigns,
+            eq(schema.trades.campaignId, schema.campaigns.id),
+          )
+          .orderBy(desc(schema.tradeExits.ts))
+          .limit(intParam(req.query.limit, 25, 200))
+          .offset(intParam(req.query.offset, 0, 1_000_000));
+        const exits = await this.exitsFor(rows.map((r) => r.trade.id));
+        return rows.map((r) => ({
+          exit: r.exit,
+          trade: {
+            ...r.trade,
+            campaignEndDate: r.campaignEndDate,
+            exits: exits.get(r.trade.id) ?? [],
+          },
+        }));
+      }),
     );
 
     app.get(

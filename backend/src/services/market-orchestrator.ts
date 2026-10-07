@@ -7,7 +7,9 @@ import {
   logAudit,
   pruneHistory,
   settleTrade,
+  recordExit,
   recordPartialSale,
+  type Sale,
   sumRealizedPnl,
   wipeTrades,
   type ExitReason,
@@ -395,12 +397,14 @@ export class MarketOrchestrator extends EventEmitter {
     if (!payouts.size || held.some((p) => !payouts.has(p.bucketId))) return;
     for (const pos of held) {
       const [payout] = payouts.get(pos.bucketId)!;
-      await this.closePosition(
-        pos,
-        payout,
-        payout * pos.shares - pos.cost,
-        "RESOLUTION",
-      );
+      await this.closePosition(pos, "RESOLUTION", {
+        shares: pos.shares,
+        price: payout,
+        fees: 0,
+        proceeds: payout * pos.shares,
+        costBasis: pos.cost,
+        pnl: payout * pos.shares - pos.cost,
+      });
     }
     const winner = campaign.buckets.find(
       (b) => (payouts.get(b.id)?.[0] ?? 0) >= 0.99,
@@ -770,31 +774,41 @@ export class MarketOrchestrator extends EventEmitter {
       return;
     }
     const soldCost = pos.cost * (sale.totalShares / pos.shares);
-    const pnl = sale.netCost - soldCost;
+    const sold: Sale = {
+      shares: sale.totalShares,
+      price: sale.averagePrice,
+      fees: sale.fees,
+      proceeds: sale.netCost,
+      costBasis: soldCost,
+      pnl: sale.netCost - soldCost,
+    };
     if (fraction >= 1 && !sale.isPartialFill) {
-      await this.closePosition(pos, sale.averagePrice, pnl, reason);
+      await this.closePosition(pos, reason, sold);
       return;
     }
-    if (fraction < 1) {
-      pos.partialTaken = true;
-      await logAudit(
-        "info",
-        "PARTIAL_TAKE_PROFIT",
-        `Sold ${sale.totalShares.toFixed(2)} shares @${(sale.averagePrice * 100).toFixed(1)}¢ (${pnl >= 0 ? "+" : ""}${pnl.toFixed(4)})`,
-        { tradeId: pos.tradeId, pnl },
-      );
-    }
+    if (fraction < 1) pos.partialTaken = true;
     const keep = 1 - sale.totalShares / pos.shares;
-    this.realizedPnl += pnl;
-    pos.realized += pnl;
+    this.realizedPnl += sold.pnl;
+    pos.realized += sold.pnl;
     pos.shares -= sale.totalShares;
     pos.cost *= keep;
     pos.fees *= keep;
-    await recordPartialSale(
+    const exitReason = fraction < 1 ? "PARTIAL_TAKE_PROFIT" : reason;
+    const exit = await recordExit(pos.tradeId, exitReason, sold);
+    const trade = await recordPartialSale(
       pos.tradeId,
       pos.entryShares - pos.shares,
       pos.realized,
     );
+    await logAudit(
+      "info",
+      exitReason === "PARTIAL_TAKE_PROFIT"
+        ? "PARTIAL_TAKE_PROFIT"
+        : "PARTIAL_EXIT",
+      `${exitReason} sold ${sold.shares.toFixed(2)} shares @${(sold.price * 100).toFixed(1)}¢ (${sold.pnl >= 0 ? "+" : ""}${sold.pnl.toFixed(4)})`,
+      { tradeId: pos.tradeId, pnl: sold.pnl },
+    );
+    this.emit("tradeExit", { exit, trade });
   }
 
   private feeRateOf(pos: Position): number | null {
@@ -877,21 +891,22 @@ export class MarketOrchestrator extends EventEmitter {
 
   private async closePosition(
     pos: Position,
-    exitPrice: number,
-    pnl: number,
     reason: ExitReason,
+    sold: Sale,
   ): Promise<void> {
     this.positions.delete(pos.tradeId);
     this.ws.unsubscribe([pos.tokenId]);
-    this.realizedPnl += pnl;
-    const total = pos.realized + pnl;
+    this.realizedPnl += sold.pnl;
+    const total = pos.realized + sold.pnl;
+    const exit = await recordExit(pos.tradeId, reason, sold);
     const trade = await settleTrade(pos.tradeId, {
       outcome: total > 0 ? "WIN" : "LOSS",
       realizedPnl: total,
-      exitPrice,
+      exitPrice: sold.price,
       exitReason: reason,
       minPrice: pos.minPrice,
     });
+    this.emit("tradeExit", { exit, trade });
     await logAudit(
       "info",
       "TRADE_CLOSED",

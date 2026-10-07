@@ -1,4 +1,5 @@
 import type {
+  TradeHistoryRow,
   Readiness,
   Trade,
   SystemStats,
@@ -92,7 +93,7 @@ export class ApiClient {
   async getTradeHistory(params?: {
     limit?: number;
     offset?: number;
-  }): Promise<Trade[]> {
+  }): Promise<TradeHistoryRow[]> {
     const searchParams = new URLSearchParams();
     if (params?.limit) searchParams.set("limit", String(params.limit));
     if (params?.offset) searchParams.set("offset", String(params.offset));

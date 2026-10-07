@@ -3,6 +3,7 @@
 import { useState, useCallback } from "react";
 import { Header } from "./header";
 import { TradesTable, MarketCountdown } from "./trades-table";
+import { TradeHistoryTable } from "./trade-history-table";
 import { TradeDetailPopup } from "./trade-detail-popup";
 import { ActivityPanel } from "./activity-panel";
 import { ActiveCampaignsTable, HistoryCampaignsTable } from "./campaigns-table";
@@ -67,7 +68,7 @@ export function DashboardPage() {
     refetch: refetchPositions,
   } = usePositions();
   const {
-    trades: settledTrades,
+    rows: historyRows,
     loading: tradesLoading,
     loadMore: loadMoreTrades,
     hasMore: hasMoreTrades,
@@ -411,14 +412,10 @@ export function DashboardPage() {
 
               <TabsContent value="positions" className="mt-0 flex-1 p-0">
                 <TradesTable
-                  type="OPEN"
                   trades={openTrades}
                   loading={positionsLoading}
                   positionsPnl={positionsPnl}
                   onTradeClick={setSelectedTrade}
-                  onLoadMore={loadMoreTrades}
-                  hasMore={hasMoreTrades}
-                  loadingMore={loadingMoreTrades}
                 />
               </TabsContent>
 
@@ -453,9 +450,8 @@ export function DashboardPage() {
                     })}
                   </div>
                 </div>
-                <TradesTable
-                  type="SETTLED"
-                  trades={settledTrades}
+                <TradeHistoryTable
+                  rows={historyRows}
                   loading={tradesLoading}
                   onTradeClick={setSelectedTrade}
                   onLoadMore={loadMoreTrades}

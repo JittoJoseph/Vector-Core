@@ -102,6 +102,28 @@ export const trades = pgTable(
   }),
 );
 
+export const tradeExits = pgTable(
+  "trade_exits",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    tradeId: text("trade_id").notNull(),
+    ts: timestamp("ts").notNull(),
+    reason: text("reason").notNull(),
+    shares: decimal("shares", { precision: 18, scale: 8 }).notNull(),
+    price: decimal("price", { precision: 18, scale: 8 }).notNull(),
+    fees: decimal("fees", { precision: 18, scale: 8 }).notNull(),
+    proceeds: decimal("proceeds", { precision: 18, scale: 8 }).notNull(),
+    costBasis: decimal("cost_basis", { precision: 18, scale: 8 }).notNull(),
+    pnl: decimal("pnl", { precision: 18, scale: 8 }).notNull(),
+  },
+  (table) => ({
+    tradeIdx: index("te_trade_idx").on(table.tradeId),
+    tsIdx: index("te_ts_idx").on(table.ts),
+  }),
+);
+
 export const auditLogs = pgTable(
   "audit_log",
   {

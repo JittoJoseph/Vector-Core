@@ -11,6 +11,8 @@ Simulated trading engine for Polymarket "Highest temperature in {city} on {day}"
 - Enter a $5 simulated taker order when the model beats the live ask by ≥ 20¢ after fees on a book with ≤ 3¢ spread, only while the market day is still ≥ 12 h away (closer in, the market already sees the previous afternoon's high, live observations and short-range models). YES side only: NO entries were break-even at best (see research/weathernext3/findings.md, live review).
 - Sell half the position once the bid is halfway from entry to the model price, then exit the rest on take-profit (bid reaches the model price), a model exit (a newer run values the bucket below the bid), a confirmed stop-loss (`STOP_LOSS_DELTA`), or resolution.
 
+Every sale (half take-profit, take-profit, model exit, stop, resolution payout) is recorded in `trade_exits` with its shares, price, fees, cost basis and P&L. The dashboard trade history lists sales, and realized P&L is the sum of all sales.
+
 ## No fallbacks
 
 If an input the strategy needs is missing, the affected scope does not trade. Nothing is substituted:

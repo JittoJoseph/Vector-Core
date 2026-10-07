@@ -53,14 +53,45 @@ export async function sumRealizedPnl(): Promise<number> {
 export async function wipeTrades(): Promise<void> {
   const db = getDb();
   await db.delete(schema.trades);
+  await db.delete(schema.tradeExits);
   await db.delete(schema.auditLogs);
 }
 
 export type ExitReason =
-  | "RESOLUTION"
-  | "TAKE_PROFIT"
-  | "STOP_LOSS"
-  | "MODEL_EXIT";
+  "RESOLUTION" | "TAKE_PROFIT" | "STOP_LOSS" | "MODEL_EXIT";
+
+export type SaleReason = ExitReason | "PARTIAL_TAKE_PROFIT";
+
+export interface Sale {
+  shares: number;
+  price: number;
+  fees: number;
+  proceeds: number;
+  costBasis: number;
+  pnl: number;
+}
+
+export async function recordExit(
+  tradeId: string,
+  reason: SaleReason,
+  sale: Sale,
+) {
+  const [row] = await getDb()
+    .insert(schema.tradeExits)
+    .values({
+      tradeId,
+      ts: new Date(),
+      reason,
+      shares: sale.shares.toFixed(8),
+      price: sale.price.toFixed(8),
+      fees: sale.fees.toFixed(8),
+      proceeds: sale.proceeds.toFixed(8),
+      costBasis: sale.costBasis.toFixed(8),
+      pnl: sale.pnl.toFixed(8),
+    })
+    .returning();
+  return row;
+}
 
 export async function settleTrade(
   id: string,
@@ -93,13 +124,15 @@ export async function recordPartialSale(
   sharesSold: number,
   realized: number,
 ) {
-  await getDb()
+  const [row] = await getDb()
     .update(schema.trades)
     .set({
       sharesSold: sharesSold.toFixed(8),
       realizedPnl: realized.toFixed(8),
     })
-    .where(eq(schema.trades.id, id));
+    .where(eq(schema.trades.id, id))
+    .returning();
+  return row;
 }
 
 export async function pruneHistory(): Promise<void> {

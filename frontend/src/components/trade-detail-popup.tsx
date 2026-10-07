@@ -13,6 +13,7 @@ import {
 } from "@/lib/utils";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { ExternalLink, X } from "lucide-react";
+import { saleLabel } from "./trade-history-table";
 import NumberFlow from "@number-flow/react";
 
 interface TradeDetailPopupProps {
@@ -172,6 +173,34 @@ export function TradeDetailPopup({
               )}
             </Row2>
           </Section>
+
+          {(trade.exits?.length ?? 0) > 0 && (
+            <Section title="SALES">
+              <div className="flex flex-col gap-1.5">
+                {trade.exits!.map((e) => {
+                  const salePnl = parseFloat(e.pnl);
+                  return (
+                    <div
+                      key={e.id}
+                      className="flex items-center justify-between text-[11px] tabular-nums"
+                    >
+                      <span className="text-muted-foreground">
+                        {formatTs(e.ts)}
+                      </span>
+                      <span className="text-foreground/80">
+                        {saleLabel(e.reason, salePnl)} ·{" "}
+                        {parseFloat(e.shares).toFixed(1)} @{" "}
+                        {cents(parseFloat(e.price), 1)}
+                      </span>
+                      <span className={pnlColor(salePnl)}>
+                        {salePnl >= 0 ? "+" : ""}${salePnl.toFixed(4)}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </Section>
+          )}
 
           <Section title="WEATHERNEXT SIGNAL">
             <Row2>
