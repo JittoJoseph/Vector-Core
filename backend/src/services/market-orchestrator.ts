@@ -167,8 +167,12 @@ export class MarketOrchestrator extends EventEmitter {
     await this.serial(() => this.discover());
     await this.serial(() => this.settle());
     this.ws.on("quote", (q: QuoteEvent) => this.onQuote(q));
-    this.ws.subscribe([...this.positions.values()].map((p) => p.tokenId));
+    const held = [...this.positions.values()].map((p) => p.tokenId);
+    this.ws.subscribe(held);
     this.ws.start();
+    if (held.length)
+      for (const [tokenId, quote] of await this.client.getQuotes(held))
+        this.onQuote({ tokenId, ...quote });
     this.feed.on("run", (run: ForecastRun) =>
       this.serial(() => this.onRun(run)),
     );
