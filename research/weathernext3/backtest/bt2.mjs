@@ -1527,3 +1527,194 @@ if (which === "hi") {
   const seen = new Set();
   for (const h of hits) { const k = h.city + h.day + h.title; if (seen.has(k)) continue; seen.add(k); console.log(h.city.padEnd(14), h.day, h.title.padEnd(14), JSON.stringify(h.range), "pw", h.pw.toFixed(2), "mkt", h.pm.toFixed(2), "win", h.win, "actual", h.actual, "mu", h.mu.toFixed(1), "buckets", h.nb); if (seen.size > 25) break; }
 }
+
+if (which === "biasdrift") {
+  build({ bias: "prod" });
+  const SEEDB = JSON.parse(fs.readFileSync("prod-bias.json", "utf8"));
+  const seedDays = Object.fromEntries((process.env.SEEDDAYS ? JSON.parse(process.env.SEEDDAYS) : []));
+  const st = JSON.parse(fs.readFileSync(`${OLD}/stations.json`, "utf8"));
+  const zone = (c) => { const lat = st[c]?.lat ?? 0; return Math.abs(lat) < 23.5 ? "tropics" : lat > 0 ? "north" : "south"; };
+  const byKey = {};
+  for (const s of samples) (byKey[s.city + "|" + s.day] ??= []).push(s);
+  for (const g of Object.values(byKey)) { g.sort((a, b) => a.t - b.t); for (const s of g) s.fL = mean(g.filter((x) => x.t <= s.t && x.t >= s.t - 3 * 3600e3).map((x) => x.fmaxC)); }
+  const lad = [];
+  for (const g of Object.values(byKey)) {
+    const s0 = g[0]; if (s0.actual == null) continue;
+    const pre = g.filter((x) => x.leadH >= 12); if (!pre.length) continue;
+    lad.push({ city: s0.city, zone: zone(s0.city), closeT: s0.closeT, day: s0.day, r: (s0.actual - toUnit(s0, pre.at(-1).fL)) / scale(s0) });
+  }
+  lad.sort((a, b) => a.closeT - b.closeT);
+  const seedG = 0.66;
+  const seedCity = (c) => SEEDB.find((x) => x[0] === c)?.[1] ?? seedG;
+  const before = (t) => lad.filter((l) => l.closeT < t);
+  const mem = new Map();
+  const memo = (k, f) => { if (!mem.has(k)) mem.set(k, f()); return mem.get(k); };
+  const scheme = {
+    "0a no correction": () => 0,
+    "0b fixed global +0.66": () => 0.66,
+    "0c rolling global only (7d all cities)": (c, t) => memo("glob" + Math.floor(t / 3600e3), () => { const g7 = before(t).filter((l) => l.closeT >= t - 7 * 86400e3); return g7.length ? mean(g7.map((l) => l.r)) : 0.66; }),
+    "1 static summer seed": (c, t) => seedCity(c),
+    "2 live slow learner (decay .98)": (c, t) => memo("live" + c + Math.floor(t / 3600e3), () => {
+      let w = 24, sum = seedCity(c) * (24 + 8) - 8 * seedG;
+      const rows = {}; for (const cc of new Set(lad.map((l) => l.city))) rows[cc] = { w: 24, s: seedCity(cc) * 32 - 8 * seedG };
+      for (const l of before(t)) { const r = rows[l.city]; r.w = 0.98 * r.w + 1; r.s = 0.98 * r.s + l.r; }
+      const W = Object.values(rows).reduce((a, r) => a + r.w, 0), Sm = Object.values(rows).reduce((a, r) => a + r.s, 0), g = Sm / W;
+      const r = rows[c]; if (!r) return seedCity(c); return (r.s + 8 * g) / (r.w + 8);
+    }),
+    "3 recent: city 14d shrunk to global 7d": (c, t) => memo("rec" + c + Math.floor(t / 3600e3), () => {
+      const b = before(t); const GW = +(process.env.GW ?? 7), CW = +(process.env.CW ?? 14), KK = +(process.env.KK ?? 3); const g7 = b.filter((l) => l.closeT >= t - GW * 86400e3); const G = g7.length ? mean(g7.map((l) => l.r)) : seedG;
+      const c14 = b.filter((l) => l.city === c && l.closeT >= t - CW * 86400e3); return (c14.reduce((a, l) => a + l.r, 0) + KK * G) / (c14.length + KK);
+    }),
+    "4 station offset + 7d zone drift": (c, t) => memo("zone" + c + Math.floor(t / 3600e3), () => {
+      const b = before(t).filter((l) => l.closeT >= t - 7 * 86400e3);
+      const z = zone(c);
+      const zr = b.filter((l) => l.zone === z).map((l) => l.r - (seedCity(l.city) - seedG));
+      const drift = zr.length >= 10 ? mean(zr) : seedG;
+      return seedCity(c) - seedG + drift;
+    }),
+  };
+  const wk = (d) => d < 251 ? "Aug27-Sep7" : d < 258 ? "Sep8-14" : d < 265 ? "Sep15-21" : d < 272 ? "Sep22-28" : "Sep29-Oct5";
+  for (const [name, f] of Object.entries(scheme).filter(([n]) => !process.env.ONLY || n.startsWith(process.env.ONLY))) {
+    for (const s of samples) if (s.day >= 239) s.pB = probs(s, toUnit(s, s.fL) + f(s.city, s.t) * scale(s), Math.max(0.6, PROD_SIGMA[band(s.leadH)]) * scale(s));
+    const cells = [];
+    const groups = {};
+    for (const l of lad.filter((l) => l.day >= 244)) { const ref = byKey[l.city + "|" + l.day].filter((x) => x.leadH >= 12).at(-1); (groups[wk(l.day)] ??= []).push(l.r - f(l.city, ref.t)); }
+    for (const [w, a] of Object.entries(groups)) cells.push(`${w} ${mean(a) >= 0 ? "+" : ""}${mean(a).toFixed(2)}/${mean(a.map(Math.abs)).toFixed(2)}`);
+    const out = [], seen = new Set();
+    for (const s of [...samples].sort((a, b) => a.t - b.t)) {
+      if (s.leadH < 12 || s.day < 244) continue;
+      const g = byKey[s.city + "|" + s.day];
+      s.buckets.forEach((b, i) => {
+        const key = s.city + "|" + s.day + "|" + i; if (seen.has(key)) return;
+        const pm = s.market[i], pw = s.pB[i]; if (pm < 0.03 || pm > 0.97) return;
+        const yes = pm + 0.01; if (pw - yes - fee(yes) < 0.2) return;
+        seen.add(key);
+        let exit = null, q = pw, j = g.indexOf(s) + 1, half = 0;
+        for (const x of b.h) {
+          const tt = x.t * 1000; if (tt <= s.t) continue; if (tt >= Math.min(s.closeT, s.dayStart + 86400e3)) break;
+          let fresh = false; while (j < g.length && g[j].t <= tt) { q = g[j++].pB[i]; fresh = true; }
+          const bid = x.p - 0.01;
+          if (!half && bid >= yes + 0.5 * (pw - yes)) half = bid - fee(bid);
+          if (bid >= pw) { exit = bid - fee(bid); break; }
+          if (x.p + 0.01 <= yes - 0.2) { exit = Math.max(0, bid - 0.08); break; }
+          if (fresh && q < bid) { exit = Math.max(0, bid - fee(bid)); break; }
+        }
+        const fin = exit ?? (b.win ? 1 : 0);
+        out.push({ day: s.day, ret: (half ? 0.5 * half + 0.5 * fin : fin) / (yes + fee(yes)) - 1 });
+      });
+    }
+    const per = [["Sep1-25", (t) => t.day < 269], ["Sep26-Oct5", (t) => t.day >= 269]].map(([p, f2]) => { const a = out.filter(f2); const d = {}; for (const t of a) (d[t.day] ??= []).push(t.ret); const dm = Object.values(d).map(mean); return `${p} n ${a.length} ret ${(100 * mean(a.map((t) => t.ret))).toFixed(0)}% $${(5 * a.reduce((x, t) => x + t.ret, 0)).toFixed(0)} lose ${dm.filter((x) => x < 0).length}/${dm.length}`; });
+    const ll = mean(samples.filter((s) => s.day >= 269 && s.pB).map((s) => -Math.log(Math.max(1e-3, s.pB[s.winIdx]))));
+    console.log(`\n${name}\n  weekly resid mean/MAE C: ${cells.join(" | ")}\n  ll Sep26-Oct5 ${ll.toFixed(3)}  trading: ${per.join(" | ")}`);
+  }
+}
+
+if (which === "exportres") {
+  const byKey = {};
+  for (const s of samples) (byKey[s.city + "|" + s.day] ??= []).push(s);
+  const out = [];
+  for (const g of Object.values(byKey)) {
+    g.sort((a, b) => a.t - b.t);
+    const s0 = g[0];
+    if (s0.actual == null || s0.day < +(process.env.FROMDAY ?? 262)) continue;
+    const pre = g.filter((x) => x.leadH >= 12);
+    if (!pre.length) continue;
+    const ref = pre.at(-1);
+    const fL = mean(g.filter((x) => x.t <= ref.t && x.t >= ref.t - 3 * 3600e3).map((x) => x.fmaxC));
+    out.push({ campaignId: `backtest:${s0.city}:${s0.day}`, city: s0.city, closedAt: s0.closeT, residualC: Math.round(((s0.actual - toUnit(s0, fL)) / scale(s0)) * 1e4) / 1e4 });
+  }
+  fs.writeFileSync(process.env.OUT, JSON.stringify(out));
+  console.log("residuals", out.length, "mean", mean(out.map((r) => r.residualC)).toFixed(3), "from", new Date(Math.min(...out.map((r) => r.closedAt))).toISOString(), "to", new Date(Math.max(...out.map((r) => r.closedAt))).toISOString());
+}
+
+if (which === "sidecmp") {
+  build({ bias: "prod" });
+  const byKey = {};
+  for (const s of samples) (byKey[s.city + "|" + s.day] ??= []).push(s);
+  for (const g of Object.values(byKey)) { g.sort((a, b) => a.t - b.t); for (const s of g) s.fL = mean(g.filter((x) => x.t <= s.t && x.t >= s.t - 3 * 3600e3).map((x) => x.fmaxC)); }
+  const lad = [];
+  for (const g of Object.values(byKey)) {
+    const s0 = g[0]; if (s0.actual == null) continue;
+    const pre = g.filter((x) => x.leadH >= 12); if (!pre.length) continue;
+    lad.push({ city: s0.city, closeT: s0.closeT, r: (s0.actual - toUnit(s0, pre.at(-1).fL)) / scale(s0) });
+  }
+  lad.sort((a, b) => a.closeT - b.closeT);
+  const cache = new Map();
+  const corr = (city, t) => {
+    const k = city + "|" + Math.floor(t / 3600e3);
+    if (cache.has(k)) return cache.get(k);
+    let gs = 0, gn = 0, cs = 0, cn = 0; const days = new Set();
+    for (const l of lad) {
+      if (l.closeT >= t) break;
+      if (l.closeT >= t - 7 * 86400e3) { gs += l.r; gn++; days.add(Math.floor(l.closeT / 86400e3)); }
+      if (l.city === city && l.closeT >= t - 14 * 86400e3) { cs += l.r; cn++; }
+    }
+    const v = days.size >= 4 && cn >= 7 ? (cs + 3 * (gs / gn)) / (cn + 3) : null;
+    cache.set(k, v);
+    return v;
+  };
+  for (const s of samples) {
+    const b = corr(s.city, s.t);
+    s.pX = b === null ? null : probs(s, toUnit(s, s.fL) + b * scale(s), Math.max(0.6, PROD_SIGMA[band(s.leadH)]) * scale(s));
+  }
+  const sim = (side, opt = {}) => {
+    const out = [], seen = new Set();
+    for (const s of [...samples].sort((a, b) => a.t - b.t)) {
+      if (!s.pX || s.leadH < 12 || s.day < 239) continue;
+      const g = byKey[s.city + "|" + s.day];
+      s.buckets.forEach((b, i) => {
+        const key = s.city + "|" + s.day + "|" + i;
+        if (seen.has(key)) return;
+        const pm = s.market[i];
+        if (pm < 0.03 || pm > 0.97) return;
+        const sp = spreadAt(s.leadH, pm);
+        if (sp > 0.03) return;
+        const pYes = s.pX[i];
+        const fair = side === "YES" ? pYes : 1 - pYes;
+        const entry = side === "YES" ? pm + sp / 2 : 1 - pm + sp / 2;
+        if (fair - entry - fee(entry) < (opt.edge ?? 0.2)) return;
+        if (opt.minEntry && entry < opt.minEntry) return;
+        seen.add(key);
+        let exit = null, q = fair, j = g.indexOf(s) + 1, half = 0, how = "RES";
+        for (const x of b.h) {
+          const tt = x.t * 1000;
+          if (tt <= s.t) continue;
+          if (tt >= Math.min(s.closeT, s.dayStart + 86400e3)) break;
+          let fresh = false;
+          while (j < g.length && g[j].t <= tt) { const nx = g[j++].pX; if (nx) { q = side === "YES" ? nx[i] : 1 - nx[i]; fresh = true; } }
+          const hs = spreadAt((s.dayStart - tt) / 3600e3, x.p) / 2;
+          const v = side === "YES" ? x.p : 1 - x.p;
+          const bid = v - hs, ask = v + hs;
+          if (!opt.noHalf && !half && bid >= entry + 0.5 * (fair - entry)) half = bid - fee(bid);
+          if (bid >= fair) { exit = bid - fee(bid); how = "TP"; break; }
+          if (!opt.noStop && ask <= entry - 0.2) { exit = Math.max(0, bid - 0.08); how = "SL"; break; }
+          if (!opt.noModel && fresh && q < bid) { exit = Math.max(0, bid - fee(bid)); how = "MODEL"; break; }
+          if (opt.holdOnly) continue;
+        }
+        const won = side === "YES" ? b.win : !b.win;
+        const fin = exit ?? (won ? 1 : 0);
+        const val = half ? 0.5 * half + 0.5 * fin : fin;
+        out.push({ day: s.day, city: s.city, side, entry, fair, edge: fair - entry - fee(entry), how, half: !!half, won: won ? 1 : 0, ret: val / (entry + fee(entry)) - 1 });
+      });
+    }
+    return out;
+  };
+  const P = [["Aug27-Sep25", (t) => t.day < 269], ["Sep26-Oct6", (t) => t.day >= 269], ["all realtime", () => true]];
+  const rep = (name, tr) => console.log(name.padEnd(20), P.map(([p, f]) => {
+    const a = tr.filter(f); if (!a.length) return `${p} n 0`;
+    const d = {}; for (const t of a) (d[t.day] ??= []).push(t.ret);
+    const dm = Object.values(d).map(mean);
+    const sd = Math.sqrt(mean(a.map((t) => (t.ret - mean(a.map((x) => x.ret))) ** 2)));
+    return `${p} n ${String(a.length).padStart(4)} ret ${(100 * mean(a.map((t) => t.ret))).toFixed(0).padStart(4)}% sd ${(100 * sd).toFixed(0).padStart(3)}% $${(5 * a.reduce((x, t) => x + t.ret, 0)).toFixed(0).padStart(5)} profitable ${(100 * a.filter((t) => t.ret > 0).length / a.length).toFixed(0)}% loseDays ${dm.filter((x) => x < 0).length}/${dm.length} worst ${(100 * Math.min(...dm)).toFixed(0)}%`;
+  }).join(" | "));
+  if (process.env.VARIANTS) {
+    const V = [["NO current", {}], ["NO no stop", { noStop: true }], ["NO no half TP", { noHalf: true }], ["NO no stop, no half", { noStop: true, noHalf: true }], ["NO hold to resolution", { noStop: true, noHalf: true, noModel: true, holdOnly: true }], ["NO only >=60c", { minEntry: 0.6 }], ["NO >=60c no stop", { minEntry: 0.6, noStop: true }], ["NO edge>=.30", { edge: 0.3 }], ["NO edge>=.30 no stop", { edge: 0.3, noStop: true }], ["YES current", {}, "YES"], ["YES no stop", { noStop: true }, "YES"]];
+    for (const [n, o, sd] of V) rep(n, sim(sd ?? "NO", o));
+    process.exit(0);
+  }
+  const yes = sim("YES"), no = sim("NO", process.env.NOOPT ? JSON.parse(process.env.NOOPT) : {});
+  fs.writeFileSync("sidecmp.json", JSON.stringify({ yes, no }));
+  rep("YES (live logic)", yes);
+  rep("NO (mirror)", no);
+  rep("YES + NO", [...yes, ...no]);
+}

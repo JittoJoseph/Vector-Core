@@ -586,3 +586,43 @@ The engine builds its own residual history (`services/residual-backfill.ts`):
 **Verified:** London Oct 4 → +0.812 °C (research pipeline +0.813), NYC Oct 5 → +0.465 °C (+0.464). The tiny differences come from exact EE ingestion times vs the modelled publish lag.
 
 The seeded backtest rows were dropped. Jinan and Zhengzhou were removed: no listings since about Sep 21–24, and $2–6k/day before that. All other cities trade every day at $17k–109k/day median volume, so none were removed for volume.
+
+## NO side under the current logic (2026-10-07)
+
+Backtest `bt2.mjs sidecmp`, using the live rules:
+- 3 h run mean;
+- rolling station correction (14 d city / 7 d all-city, k = 3, no-fallback minimums);
+- entries ≥ 12 h before the day, edge ≥ 0.20, spread ≤ 3¢ (flat 2¢ model);
+- exits: half TP at halfway, TP at fair value, model exit, 20¢ stop with 8¢ slippage.
+
+NO mirrors YES: buy at 1 − YES bid, fair value 1 − p.
+
+Real-time Aug 27 – Oct 6:
+
+| Side / variant | n | ret / trade | total $ | Losing days |
+|---|---|---|---|---|
+| YES (live) | 619 | **+50%** | **+$1,538** | 2/40 |
+| NO mirror | 702 | −3% | −$91 | 20/40 |
+| NO, no stop | 702 | +4% | +$130 | 17/40 |
+| NO, hold to resolution | 702 | +6% | +$207 | 14/40 |
+| NO ≥ 60¢, no stop (best) | 289 | +10% | +$146 | 12/40 (worst day −56%) |
+| NO, edge ≥ 0.30, no stop | 162 | +16% | +$132 | 12/38 (worst day −100%) |
+
+**Why NO fails:** WN3 is good at finding under-priced outcomes near its forecast, but overconfident when it says an outcome away from its forecast won't happen.
+
+| Trade | Bucket YES price | WN3 says the bucket wins | Actually won |
+|---|---|---|---|
+| YES longshots | ~11¢ | 35% | 17% → profit |
+| NO vs 40–60¢ favourites | ~50¢ | 23% | 48% (the market was right) |
+| NO at 60–80¢ | YES ~31¢ | 7% | 19% (small edge) |
+
+Real misses have fatter tails than the normal distribution:
+- YES survives that because its payoff is asymmetric; NO needs thin tails.
+- The 20¢ stop cost NO −$873 on 282 trades. YES almost never hits it.
+
+**Combining:**
+- NO (≥ 60¢, no stop) adds about +$3.6/day against YES's +$38/day.
+- Daily P&L correlation with YES is 0.11, so it is no hedge.
+- Mixed in, return per trade drops from +50% to +37%.
+
+**Not adopted:** YES only stays.
