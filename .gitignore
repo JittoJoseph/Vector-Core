@@ -49,3 +49,5 @@ Desktop.ini
 /dev-docs
 /reference-frontend
 /docs/example
+# Local docs
+docs/
