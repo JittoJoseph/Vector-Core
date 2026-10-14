@@ -2,28 +2,23 @@
 
 [![Live Demo](https://img.shields.io/badge/Live_Demo-vector.jittojoseph.xyz-007acc)](https://vector.jittojoseph.xyz)
 
-Simulated trading engine for Polymarket "Highest temperature in {city} on {day}" ladders, driven by Google DeepMind's WeatherNext 3 forecasts. Nothing trades with real money.
+A simulated trading engine for Polymarket's daily "Highest temperature" markets, with a live dashboard. It compares weather forecast data against market prices and paper-trades the outcomes it considers mispriced. Nothing trades with real money.
 
-## Strategy
+## How it works
 
-- Every hourly WeatherNext 3 run (via Earth Engine) is sampled at the 51 airport stations the markets resolve on.
-- Each ladder gets a fair value per bucket: the mean forecast local-day max over the runs published in the last 3 hours + per-city bias (learned online from resolutions), with lead-dependent uncertainty. Runs older than an hour (restart backlog) only fill that window and never trade.
-- Enter a $5 simulated taker order when the model beats the live ask by ≥ 20¢ after fees on a book with ≤ 3¢ spread, only while the market day is still ≥ 12 h away (closer in, the market already sees the previous afternoon's high, live observations and short-range models). YES side only: NO entries were break-even at best (see research/weathernext3/findings.md, live review).
-- Exit on take-profit (bid reaches the model price), a model exit (a newer run values the bucket below the bid), a confirmed stop-loss (`STOP_LOSS_DELTA`), or resolution.
-
-Research, backtests and data-access notes live in [`research/weathernext3`](research/weathernext3/README.md).
+- Forecast data is turned into a probability for each temperature bucket of a market.
+- Those probabilities are compared with the live order book, and simulated positions are opened where the engine disagrees with the market.
+- Open positions are managed with take-profit, stop-loss and forecast-driven exits until the market resolves.
 
 ## Layout
 
-- `backend/` — Node.js/TypeScript engine + REST/WebSocket API (Express, drizzle, Supabase Postgres), run by pm2 on the Oracle VM behind nginx at `vector-api.jittojoseph.xyz`
-- `frontend/` — Next.js dashboard (static export) on Vercel at `vector.jittojoseph.xyz`, pointed at the API with `NEXT_PUBLIC_API_BASE_URL`
-- `deploy.sh` + `.github/workflows/deploy.yml` — pushes to `main` touching the backend redeploy the VM over SSH (secrets `ORACLE_HOST`, `ORACLE_USER`, `ORACLE_SSH_KEY`)
-- `ecosystem.config.cjs` — pm2 process definition (`vector-core-api`, port from `backend/.env`)
+- `backend/`: Node.js/TypeScript engine and REST/WebSocket API (Express, drizzle, Postgres), run by pm2.
+- `frontend/`: Next.js dashboard (static export) on Vercel, pointed at the API with `NEXT_PUBLIC_API_BASE_URL`.
 
-## First-time setup
+## Setup
 
 ```bash
 cd backend && pnpm install && pnpm exec tsx scripts/reset-db.mts
 ```
 
-Backend environment: see `backend/.env.example`. Earth Engine access uses the WeatherNext-approved Google account's application-default credentials (`gcloud auth application-default login` on the VM).
+Environment variables are listed in `backend/.env.example`.
